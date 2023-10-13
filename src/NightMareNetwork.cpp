@@ -99,3 +99,27 @@ template class ServerVariable<String>;
 #ifdef  USE_BOOL_TEMPLATE
 template class ServerVariable<bool>;
 #endif
+
+formatString(const char *format, ...)
+{
+  // Create a buffer to store the formatted string
+  char buffer[256]; // You can adjust the size as needed
+
+  va_list args;
+  va_start(args, format);
+
+  // Format the string into the buffer
+  int len = vsnprintf(buffer, sizeof(buffer), format, args);
+
+  va_end(args);
+
+  if (len < 0) {
+    // Error occurred during formatting
+    return String();
+  }
+
+  // Convert the formatted buffer to a String
+  return String(buffer);
+}
+
+

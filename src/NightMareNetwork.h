@@ -49,4 +49,8 @@ private:
   void onValueChanged();
 };
 
+extern String formatString(const char *format, ...);
+
+
+
 #endif
