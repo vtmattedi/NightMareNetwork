@@ -103,7 +103,7 @@ template class ServerVariable<bool>;
 formatString(const char *format, ...)
 {
   // Create a buffer to store the formatted string
-  char buffer[256]; // You can adjust the size as needed
+  char buffer[FORMAT_BUFFER_SIZE]; // You can adjust the size as needed
 
   va_list args;
   va_start(args, format);

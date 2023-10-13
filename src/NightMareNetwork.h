@@ -16,7 +16,7 @@
 /*---------------------------------------*/
 
 #define ASSERT_DELAY 10000
-
+#define FORMAT_BUFFER_SIZE 1024 //max String length
 template <typename T>
 class ServerVariable
 {
