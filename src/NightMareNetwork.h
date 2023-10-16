@@ -1,5 +1,7 @@
 #include <Arduino.h>
 
+#include <TimeLib.h>
+
 #ifndef NIGHTMARENETWORK
 #define NIGHTMARENETWORK
 
@@ -50,6 +52,43 @@ private:
 };
 
 extern String formatString(const char *format, ...);
+
+
+#define MAX_TASKS 20
+
+struct TimerTask
+{
+  public:
+  String label = "unused";
+  bool enable = false;
+  bool use_millis = false;
+  uint16_t interval = 100;
+  uint32_t last_time = 0;
+  void (*callback)() = NULL;
+  void run();
+  void reset();
+};
+
+struct indexresult
+{
+  bool full = false;
+  bool found = false;
+  uint8_t index = 0;
+};
+
+
+Class TimersHandler
+{
+  public:
+  bool debug = false;
+  TimerTask _tasks[MAX_TASKS];
+  bool create(String label, uint16_t interval, void (*callback)(void), bool use_millis = false);
+  indexresult getIndex(String label);
+  void run();
+};
+
+extern TimersHandler Timers;
+
 
 
 
