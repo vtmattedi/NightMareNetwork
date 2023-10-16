@@ -77,7 +77,7 @@ struct indexresult
 };
 
 
-Class TimersHandler
+class TimersHandler
 {
   public:
   bool debug = false;

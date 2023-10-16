@@ -123,6 +123,8 @@ String formatString(const char *format, ...)
     return String(buffer);
 }
 
+TimersHandler Timers = TimersHandler();
+
 void TimerTask::run()
 {
     if (!enable)
@@ -152,7 +154,7 @@ void TimerTask::reset()
     callback = NULL;
 }
 
-bool TimersHandler::create(String label, uint16_t interval, void (*callback)(void), bool use_millis = false)
+bool TimersHandler::create(String label, uint16_t interval, void (*callback)(void), bool use_millis)
 {
     indexresult res = getIndex(label);
     if (res.full || res.found)
