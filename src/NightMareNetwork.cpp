@@ -17,14 +17,17 @@ void ServerVariable<T>::handleServer(T newServerValue)
     millis_last_server_recieved = millis();
     if (assert_handled)
     {
-        value = newServerValue;
-        onValueChanged();
+        if (value != newServerValue)
+        {
+            value = newServerValue;
+            onValueChanged();
+        }
     }
 }
 template <typename T>
 void ServerVariable<T>::sync()
 {
-    if (millis() - millis_last_server_recieved > millis_to_stale)
+    if (millis() - millis_last_server_recieved > millis_to_stale && !stale)
     {
         stale = true;
         onValueChanged();
@@ -58,7 +61,13 @@ void ServerVariable<T>::sync()
 template <typename T>
 void ServerVariable<T>::change(T newValue)
 {
-    value = newValue;
+    bool trigger = false;
+    if (value != newValue)
+    {
+        trigger = true;
+        value = newValue;
+    }
+
     if (send_delay)
     {
         millis_to_send = millis() + millis_to_delay;
@@ -68,7 +77,8 @@ void ServerVariable<T>::change(T newValue)
 
     millis_to_assert_server = millis() + ASSERT_DELAY;
     assert_handled = false;
-    onValueChanged();
+    if (trigger)
+        onValueChanged();
 }
 template <typename T>
 void ServerVariable<T>::onValueChanged()
@@ -88,7 +98,7 @@ template class ServerVariable<uint32_t>;
 template class ServerVariable<uint32_t>;
 #endif
 #ifdef USE_BYTE_TEMPLATE
-template class ServerVariable<Byte>;
+template class ServerVariable<uint8_t>;
 #endif
 #ifdef USE_DOUBLE_TEMPLATE
 template class ServerVariable<double>;

@@ -7,8 +7,8 @@
 
 /*-------Templates to be compiled---------*/
 
-//#define  USE_BYTE_TEMPLATE //Compile Byte Template
-#define  USE_INT_TEMPLATE //Compile int Template
+#define  USE_BYTE_TEMPLATE //Compile Byte Template
+//#define  USE_INT_TEMPLATE //Compile int Template
 //#define  USE_UINT16_TEMPLATE //Complie uin16_t template
 #define  USE_UINT32_TEMPLATE //Complie uin32_t template
 #define  USE_DOUBLE_TEMPLATE //Complie double template
