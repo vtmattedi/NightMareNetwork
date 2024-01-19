@@ -10,11 +10,21 @@ ServerVariable<T>::ServerVariable()
 {
 }
 template <typename T>
+ServerVariable<T>::ServerVariable(char* name)
+{
+    label = name;
+}
+template <typename T>
 void ServerVariable<T>::handleServer(T newServerValue)
 {
     serverValue = newServerValue;
     stale = false;
     millis_last_server_recieved = millis();
+    if (debug)
+    {
+        Serial.printf("[%s]...new Server value: [%s] client value is: [%s], assert is: %s...\n", label,String(newServerValue).c_str(), String(value).c_str(), assert_handled ? "Handled" : "Waiting");
+    }
+
     if (assert_handled)
     {
         if (value != newServerValue)
@@ -31,10 +41,14 @@ void ServerVariable<T>::sync()
     {
         stale = true;
         onValueChanged();
+        if (debug)
+            Serial.printf("[%s]...Variable Stale...\n",label);
     }
     if (millis() > millis_to_assert_server && !assert_handled)
     {
         bool equal = value == serverValue;
+        if (debug)
+            Serial.printf("[%s]...Server Variable asserted server is: [%s] client is :[%s]...\n", label, String(serverValue).c_str(), String(value).c_str());
         if (!equal)
         {
             value = serverValue;
@@ -53,7 +67,8 @@ void ServerVariable<T>::sync()
         if (on_send)
         {
             (*on_send)(value);
-            Serial.printf("[%d] delay ended\n", millis());
+            if (debug)
+                Serial.printf("[%s][%d] delay ended\n", label, millis());
         }
         send_handled = true;
     }
@@ -62,6 +77,8 @@ template <typename T>
 void ServerVariable<T>::change(T newValue)
 {
     bool trigger = false;
+    // if (debug)
+    //     Serial.printf("[%s], [%s], [%d]\n", String(value).c_str(), String(newValue).c_str(), newValue != value);
     if (value != newValue)
     {
         trigger = true;
@@ -72,11 +89,14 @@ void ServerVariable<T>::change(T newValue)
     {
         millis_to_send = millis() + millis_to_delay;
         send_handled = false;
-        Serial.printf("[%d] delay Started\n", millis());
+        Serial.printf("[%s] [%d] delay Started\n", label, millis());
     }
 
     millis_to_assert_server = millis() + ASSERT_DELAY;
     assert_handled = false;
+    if (debug)
+        Serial.printf("[%s]...new Client value: [%s] time to assert:[%d], trigger is: %s...\n", label, String(value).c_str(), millis_to_assert_server, assert_handled ? "True" : "False");
+
     if (trigger)
         onValueChanged();
 }

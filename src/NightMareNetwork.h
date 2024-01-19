@@ -31,18 +31,21 @@ public:
   void (*on_send)(T) = NULL;
   void (*on_value_changed)() = NULL;
   bool stale = true;
+  bool debug = false;
+  char* label = "ServerVariable";
 
 private:
   T serverValue;
   bool assert_handled = true;
   bool send_handled = true;
-  uint32_t millis_to_assert_server = 0;
+  uint32_t millis_to_assert_server = ASSERT_DELAY;
   uint32_t millis_to_send = 0;
   uint32_t millis_last_server_recieved = 0;
 
 public:
   ServerVariable(T initialValue);
   ServerVariable();
+  ServerVariable(char* name);
   void handleServer(T newServerValue);
   void sync();
   void change(T newValue);
