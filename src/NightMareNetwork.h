@@ -32,7 +32,7 @@ public:
   void (*on_value_changed)() = NULL;
   bool stale = true;
   bool debug = false;
-  char* label = "ServerVariable";
+  char* label = "no label";
 
 private:
   T serverValue;
