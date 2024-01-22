@@ -37,8 +37,8 @@ struct LightController
         HexColor.sync();
         Brightness.sync();
     }
-    LightController(): LightState ("Light State"), AutomationRestore("Light Automation Restore"), 
-    HexColor("Light Hex Code"),Brightness("Light Brightness")
+    LightController(): LightState ((char*)"Light State"), AutomationRestore((char*)"Light Automation Restore"), 
+    HexColor((char*)"Light Hex Code"),Brightness((char*)"Light Brightness")
     {
 
     }
