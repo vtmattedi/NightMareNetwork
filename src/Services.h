@@ -15,11 +15,16 @@ struct AcController
         Ssleep.sync();
         SetTemp.sync();
     }
-    AcController() : Temperature("Ac Temp"), Hsleep("Ac Hw Sleep"), Ssleep("Ac Sw Sleep"), SetTemp("Ac Set Temp")
+    AcController() : Temperature((char *)"Ac Temp"), Hsleep((char *)"Ac Hw Sleep"), Ssleep((char *)"Ac Sw Sleep"), SetTemp((char *)"Ac Set Temp")
     {
-
     }
-
+    void on_any_value_changed(void (*new_on_value_changed)())
+    {
+        Temperature.on_value_changed = new_on_value_changed;
+        Hsleep.on_value_changed = new_on_value_changed;
+        Ssleep.on_value_changed = new_on_value_changed;
+        SetTemp.on_value_changed = new_on_value_changed;
+    }
 };
 AcController Ac;
 extern AcController Ac;
@@ -37,10 +42,9 @@ struct LightController
         HexColor.sync();
         Brightness.sync();
     }
-    LightController(): LightState ((char*)"Light State"), AutomationRestore((char*)"Light Automation Restore"), 
-    HexColor((char*)"Light Hex Code"),Brightness((char*)"Light Brightness")
+    LightController() : LightState((char *)"Light State"), AutomationRestore((char *)"Light Automation Restore"),
+                        HexColor((char *)"Light Hex Code"), Brightness((char *)"Light Brightness")
     {
-
     }
 };
 LightController BedLights;

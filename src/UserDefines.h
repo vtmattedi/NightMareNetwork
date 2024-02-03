@@ -8,6 +8,7 @@ static unsigned char Identifier_0b0101 = 0x05;
 static unsigned char Identifier_0b0110 = 0x06;
 static unsigned char Identifier_0b0111 = 0x07;
 static unsigned char Identifier_0b1000 = 0x08;
+static unsigned char Identifier_0b1001 = 0x09;
 
 #define AC_BUTTON_POWER 0x01
 #define AC_BUTTON_SET 0x02
@@ -29,6 +30,7 @@ static unsigned char Identifier_0b1000 = 0x08;
 #define AC_BUTTON_CONFIG_VAR Identifier_0b0101
 #define AC_BUTTON_INFO_VAR Identifier_0b0110
 #define AC_CONFIG_SYNC_VAR Identifier_0b0111
+#define AC_BUTTON_SLEEP_VAR Identifier_0b1001
 
 #define COLOR_WHELL_VAR Identifier_0b0001
 #define COLOR_BUTTON_ON_VAR Identifier_0b0010
@@ -38,6 +40,8 @@ static unsigned char Identifier_0b1000 = 0x08;
 #define COLOR_CONFIG_SPEED_VAR Identifier_0b0110
 #define COLOR_CONFIG_BRIGHTNESS_VAR Identifier_0b0111
 #define COLOR_CONFIG_MODE_ROLLER_VAR Identifier_0b1000
+#define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR 
+//#define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR 
 
 #define CONFIG_SAVE_VAR Identifier_0b0001
 #define CONFIG_BACK_VAR Identifier_0b0010
@@ -46,6 +50,15 @@ static unsigned char Identifier_0b1000 = 0x08;
 #define CONFIG_BRIGHTNESS_VAR Identifier_0b0101
 #define CONFIG_RESTART_VAR Identifier_0b0110
 #define CONFIG_TOPIC_MONITOR_VAR Identifier_0b0111
+#define CONFIG_IGNORE_DOOR_VAR Identifier_0b1000
+
+#define MOVE_SAVE_VAR Identifier_0b0001
+#define MOVE_BACK_VAR Identifier_0b0010
+#define MOVE_LAST_VAR Identifier_0b0011
+#define MOVE_NEXT_VAR Identifier_0b0100
+#define MOVE_WAKEUP_VAR Identifier_0b0101
+
+
 
 
 #define ROTATION_PORTRAIT 0
