@@ -26,8 +26,8 @@ struct AcController
         SetTemp.on_value_changed = new_on_value_changed;
     }
 };
-AcController Ac;
-extern AcController Ac;
+AcController AcControl;
+extern AcController AcControl;
 
 struct LightController
 {

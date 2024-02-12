@@ -27,10 +27,12 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define AC_BUTTON_SET_VAR Identifier_0b0010
 #define AC_BUTTON_PLUS_VAR Identifier_0b0011
 #define AC_BUTTON_MINUS_VAR Identifier_0b0100
-#define AC_BUTTON_CONFIG_VAR Identifier_0b0101
+#define AC_BUTTON_SLEEP_IN_VAR Identifier_0b0101
 #define AC_BUTTON_INFO_VAR Identifier_0b0110
 #define AC_CONFIG_SYNC_VAR Identifier_0b0111
 #define AC_BUTTON_SLEEP_VAR Identifier_0b1001
+
+
 
 #define COLOR_WHELL_VAR Identifier_0b0001
 #define COLOR_BUTTON_ON_VAR Identifier_0b0010
@@ -40,25 +42,43 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define COLOR_CONFIG_SPEED_VAR Identifier_0b0110
 #define COLOR_CONFIG_BRIGHTNESS_VAR Identifier_0b0111
 #define COLOR_CONFIG_MODE_ROLLER_VAR Identifier_0b1000
-#define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR 
-//#define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR 
+#define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR
+// #define COLOR_MULTIPLE_VAR AC_BUTTON_INFO_VAR
 
-#define CONFIG_SAVE_VAR Identifier_0b0001
-#define CONFIG_BACK_VAR Identifier_0b0010
+// #define CONFIG_SAVE_VAR Identifier_0b0001
+// #define CONFIG_BACK_VAR Identifier_0b0010
 #define CONFIG_LED_ENABLE_VAR Identifier_0b0011
 #define CONFIG_SAVESCREEN_VAR Identifier_0b0100
 #define CONFIG_BRIGHTNESS_VAR Identifier_0b0101
 #define CONFIG_RESTART_VAR Identifier_0b0110
 #define CONFIG_TOPIC_MONITOR_VAR Identifier_0b0111
 #define CONFIG_IGNORE_DOOR_VAR Identifier_0b1000
+#define CONFIG_FACTORY_RESET_VAR Identifier_0b0001
 
 #define MOVE_SAVE_VAR Identifier_0b0001
 #define MOVE_BACK_VAR Identifier_0b0010
 #define MOVE_LAST_VAR Identifier_0b0011
 #define MOVE_NEXT_VAR Identifier_0b0100
 #define MOVE_WAKEUP_VAR Identifier_0b0101
+#define POPUP_OK_VAR Identifier_0b0110
+#define POPUP_BACK_VAR Identifier_0b0111
+#define POPUP_DEFOCUSED_VAR Identifier_0b1000
 
+#define WC_CONNECT_VAR Identifier_0b0001
+#define WC_REFRESH_VAR Identifier_0b0010
+#define WC_PWRD_TA_FOCUSED_VAR Identifier_0b0011
+#define WC_PWRD_TA_DEFOCUSED_VAR Identifier_0b0100
 
+#define KB_DOOR_TIMER_VAR Identifier_0b0001
+#define KB_AC_SHUTDOWN_HOUR_VAR Identifier_0b0010
+#define KB_AC_SHUTDOWN_MIN_VAR Identifier_0b0011
+
+#define MENU_AC_VAR Identifier_0b0001
+#define MENU_BEDLIGHTS_VAR Identifier_0b0010
+#define MENU_AUTO_VAR Identifier_0b0011
+#define MENU_SHUTDOWNALL_VAR Identifier_0b0100
+#define MENU_SETTINGS_VAR Identifier_0b0101
+#define MENU_UTILITIES_VAR Identifier_0b0110
 
 
 #define ROTATION_PORTRAIT 0
@@ -77,6 +97,6 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define COLOR_WHITE 0xFFFFFF
 #define COLOR_GREY 0x808080
 #define COLOR_DARK_YELLOW 0x8B8000
-
+#define COLOR_DARK_GREEN 0x008B00
 
 /*---------------------------------------------*/
