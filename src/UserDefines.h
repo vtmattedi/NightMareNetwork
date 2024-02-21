@@ -79,6 +79,8 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define MENU_SHUTDOWNALL_VAR Identifier_0b0100
 #define MENU_SETTINGS_VAR Identifier_0b0101
 #define MENU_UTILITIES_VAR Identifier_0b0110
+#define MENU_LIGHT_VAR Identifier_0b0111
+
 
 
 #define ROTATION_PORTRAIT 0
