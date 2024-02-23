@@ -52,6 +52,7 @@ public:
     void Sync();
     void ToggleAcTarget();
     void ToggleAcPower();
+    void SendRawCommand(String);
 
 private:
 };

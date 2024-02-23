@@ -226,3 +226,12 @@ void AcController::SetSleepIn(bool sleep)
 {
     sleepIn.change(sleep);
 }
+
+/// @brief Sends an raw IR code.
+/// @param command The IR code's name.
+void AcController::SendRawCommand(String command)
+{
+    String sendstr = "SENDIR ";
+    sendstr += command;
+    FormatSend("/console/in",sendstr,MQTTHostName)
+}
