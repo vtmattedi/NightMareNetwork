@@ -233,5 +233,5 @@ void AcController::SendRawCommand(String command)
 {
     String sendstr = "SENDIR ";
     sendstr += command;
-    FormatSend("/console/in",sendstr,MQTTHostName)
+    FormatSend("/console/in",sendstr,MQTTHostName);
 }
