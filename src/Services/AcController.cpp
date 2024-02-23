@@ -178,6 +178,7 @@ void AcController::SetAcTarget(double target)
 void AcController::SetAcTargetDelta(double delta)
 {
     double newTarget = _abs(CurrentTarget()) + delta;
+    Serial.printf("nt = %f\n",newTarget);
     AcTarget.change(newTarget);
 }
 

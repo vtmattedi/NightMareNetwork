@@ -75,8 +75,7 @@ void ServerVariable<T>::sync()
         }
         assert_handled = true;
     }
-    if (!send_handled)
-        return;
+
     if (millis() > millis_to_send && !send_handled)
     {
         sendChanges();

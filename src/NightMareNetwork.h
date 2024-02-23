@@ -16,7 +16,7 @@
 #endif
 
 #ifndef MINUTE
-#define MINUTE 3600
+#define MINUTE 60
 #endif
 
 #include <Core/Misc.h>

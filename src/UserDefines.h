@@ -1,5 +1,9 @@
+#ifndef NIGHTMARE_USERDEFNIES
+#define NIGHTMARE_USERDEFNIES
+
 /*---------------------------------------------*/
 /*CALLBACK INDENTIFIERS FOR IMPROVED READBILITY*/
+
 static unsigned char Identifier_0b0001 = 0x01;
 static unsigned char Identifier_0b0010 = 0x02;
 static unsigned char Identifier_0b0011 = 0x03;
@@ -102,3 +106,5 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define COLOR_DARK_GREEN 0x008B00
 
 /*---------------------------------------------*/
+
+#endif

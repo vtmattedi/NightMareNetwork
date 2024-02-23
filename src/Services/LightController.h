@@ -14,10 +14,14 @@
 class LightController
 {
 private:
+/// @brief The HostName of the Mqtt Service
     const char *MQTTHostName = (char *)"";
 
 public:
+    /// @brief The state (on/off) of the light.
     ServerVariable<bool> LightState;
+    /// @brief The timestamp of when the automations will automatically be restored. 
+    //  0 if automations are enabled.  
     ServerVariable<uint32_t> AutomationRestore;
 
 public:

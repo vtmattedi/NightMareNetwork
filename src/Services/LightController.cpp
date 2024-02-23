@@ -59,7 +59,7 @@ void LightController::ToggleLight()
     SetLight(!LightState.value);
 }
 
-/// @brief Set the light on/off.
+/// @brief Sets the light on/off.
 /// @param state the desired state true = on.
 void LightController::SetLight(bool state)
 {
@@ -67,7 +67,7 @@ void LightController::SetLight(bool state)
     AutomationRestore.force(now() + HOUR);
 }
 
-/// @brief Whethear or not the server values are stale.
+/// @brief Whether or not the server values are stale.
 /// @return True if server values are stale
 bool LightController::IsStale()
 {
