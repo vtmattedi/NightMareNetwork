@@ -1,7 +1,7 @@
 /*----------------------------------------------------------*/
 ///
 ///@file LightController.h -
-/// Implements a class to control an Ac/room Temperature 
+/// Implements a class to control an Ac/room Temperature
 /// controller on the NightMare Network
 /// Author: Vitor Mattedi Carvalho
 /// Date: 21-02-2024
@@ -53,6 +53,7 @@ public:
     void ToggleAcTarget();
     void ToggleAcPower();
     void SendRawCommand(String);
+    uint32_t GetSleepTime();
 
 private:
 };

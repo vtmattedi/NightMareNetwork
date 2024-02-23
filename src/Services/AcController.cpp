@@ -235,3 +235,14 @@ void AcController::SendRawCommand(String command)
     sendstr += command;
     FormatSend("/console/in",sendstr,MQTTHostName);
 }
+
+/// @brief Gets the time when Ac will shutdown via user request (SW) or via the
+/// unit's own command (Hw)
+/// @return 0 if no sleep is set, Sw sleep if it is set or Hw sleep if it is set and Sw is not
+uint32_t AcController::GetSleepTime()
+{
+    if (SWSleep.value > 0)
+        return SWSleep.value;
+    else
+        return HwSleep.value;
+}
