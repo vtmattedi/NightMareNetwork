@@ -178,7 +178,7 @@ void AcController::SetAcTarget(double target)
 void AcController::SetAcTargetDelta(double delta)
 {
     double newTarget = _abs(CurrentTarget()) + delta;
-    Serial.printf("nt = %f\n",newTarget);
+    Serial.printf("nt = %f\n", newTarget);
     AcTarget.change(newTarget);
 }
 
@@ -233,7 +233,7 @@ void AcController::SendRawCommand(String command)
 {
     String sendstr = "SENDIR ";
     sendstr += command;
-    FormatSend("/console/in",sendstr,MQTTHostName);
+    FormatSend("/console/in", sendstr, MQTTHostName);
 }
 
 /// @brief Gets the time when Ac will shutdown via user request (SW) or via the
@@ -245,4 +245,13 @@ uint32_t AcController::GetSleepTime()
         return SWSleep.value;
     else
         return HwSleep.value;
+}
+
+/// @brief If AcTarget is set, stops; Toggle Ac State.
+void AcController::Toggle()
+{
+    if (AcTargetEnabled())
+        ToggleAcTarget();
+
+    ToggleAcPower();
 }

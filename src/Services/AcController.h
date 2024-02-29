@@ -53,6 +53,7 @@ public:
     void ToggleAcTarget();
     void ToggleAcPower();
     void SendRawCommand(String);
+    void Toggle();
     uint32_t GetSleepTime();
 
 private:
