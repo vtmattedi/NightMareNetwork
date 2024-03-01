@@ -14,5 +14,6 @@ extern void FormatSend(String topic, String payload, String hostname)
             topicWithOwner += "/";
         topicWithOwner += topic;
     }
+    Serial.printf("'%s' --> '%s' [%s]\n",topic.c_str(), topicWithOwner.c_str(),hostname.c_str());
     Send_to_MQTT(topicWithOwner, payload);
 }

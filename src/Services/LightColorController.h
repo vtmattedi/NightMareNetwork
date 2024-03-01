@@ -16,9 +16,6 @@
 
 class LightColorController : public LightController
 {
-private:
-/// @brief The HostName of the Mqtt Service
-    const char *MQTTHostName = (char *)"";
 
 public:
     /// @brief The color of the light or strip.
