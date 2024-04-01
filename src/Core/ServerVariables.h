@@ -90,8 +90,8 @@ private:
   uint32_t millis_to_assert_server = ASSERT_DELAY;
   /// @brief Millis() timestamp to send the value
   uint32_t millis_to_send = 0;
-  /// @brief Millis() timestamp of last value recieved
-  uint32_t millis_last_server_recieved = 0;
+  /// @brief Millis() timestamp of last value received
+  uint32_t millis_last_server_received = 0;
   /// @brief calls the on send function if they are not NULL
   void sendChanges();
 

@@ -24,13 +24,13 @@ ServerVariable<T>::ServerVariable(const char *_label)
 }
 /// @brief Handles a value coming from the server with the value of this variable there
 /// @tparam T The type of the variable
-/// @param newServerValue Value recieved from the server
+/// @param newServerValue Value received from the server
 template <typename T>
 void ServerVariable<T>::handleServer(T newServerValue)
 {
     serverValue = newServerValue;
     stale = false;
-    millis_last_server_recieved = millis();
+    millis_last_server_received = millis();
     if (debug)
     {
         Serial.printf("[%s]...new Server value: [%s] client value is: [%s], assert is: %s...\n", label, String(newServerValue).c_str(), String(value).c_str(), assert_handled ? "Handled" : "Waiting");
@@ -52,7 +52,7 @@ void ServerVariable<T>::handleServer(T newServerValue)
 template <typename T>
 void ServerVariable<T>::sync()
 {
-    if (millis() - millis_last_server_recieved > millis_to_stale && !stale)
+    if (millis() - millis_last_server_received > millis_to_stale && !stale)
     {
         stale = true;
         onValueChanged();

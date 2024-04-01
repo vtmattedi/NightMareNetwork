@@ -18,6 +18,15 @@
 
 #define HOUR 3600
 #define MINUTE 60
+#define TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTime)
+#define TIME_STR(var) TIME(var).c_str()
+#define DATE(var) timestampToDateString(var,TimeStampFormat::OnlyDate)
+#define DATE_STR(var) TIME(var).c_str()
+#define TIME_SINCE(var) timestampToDateString(var,TimeStampFormat::TimeSinceStamp)
+#define TIME_SINCE_STR(var) TIME(var).c_str()
+#define COUNTDOWN(var) timestampToDateString(var,TimeStampFormat::CountdownFromTimestamp)
+#define COUNTDOWN_STR(var) TIME(var).c_str()
+
 
 #define FORMAT_BUFFER_SIZE 1024 // max String length
 

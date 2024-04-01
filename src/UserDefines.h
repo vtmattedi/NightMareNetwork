@@ -99,12 +99,14 @@ static unsigned char Identifier_0b1001 = 0x09;
 #define COLOR_DEFAULT_BLUE 0x2196F7
 #define COLOR_LIGHT_BLUE 0x00FFCC
 #define COLOR_DARK_RED 0x8B0000
+#define COLOR_RED 0xFF0000
 #define COLOR_LIGHT_GREEN 0x08A11A
 #define COLOR_WHITE 0xFFFFFF
 #define COLOR_BLACK 0x000000
 #define COLOR_GREY 0x808080
 #define COLOR_DARK_YELLOW 0x8B8000
 #define COLOR_DARK_GREEN 0x008B00
+#define COLOR_YELLOW 0xDDDD00
 
 /*---------------------------------------------*/
 
