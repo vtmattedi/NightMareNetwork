@@ -72,7 +72,7 @@ void LightController::ToggleForce()
 {
     LightState.force(!LightState.value);
     AutomationRestore.force(now() + 2 * HOUR);
-
+    FormatSend("/Lights", "toggle-force", MQTTHostName);
 }
 
 /// @brief Whether or not the server values are stale.
