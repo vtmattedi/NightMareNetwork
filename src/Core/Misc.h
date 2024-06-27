@@ -21,12 +21,13 @@
 #define TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTime)
 #define TIME_STR(var) TIME(var).c_str()
 #define DATE(var) timestampToDateString(var,TimeStampFormat::OnlyDate)
-#define DATE_STR(var) TIME(var).c_str()
+#define DATE_STR(var) DATE(var).c_str()
 #define TIME_SINCE(var) timestampToDateString(var,TimeStampFormat::TimeSinceStamp)
-#define TIME_SINCE_STR(var) TIME(var).c_str()
+#define TIME_SINCE_STR(var) TIME_SINCE(var).c_str()
 #define COUNTDOWN(var) timestampToDateString(var,TimeStampFormat::CountdownFromTimestamp)
-#define COUNTDOWN_STR(var) TIME(var).c_str()
-
+#define COUNTDOWN_STR(var) COUNTDOWN(var).c_str()
+#define LIVE_TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTimeLive)
+#define LIVE_TIME_STR(var) LIVE_TIME(var).c_str()
 
 #define FORMAT_BUFFER_SIZE 1024 // max String length
 
