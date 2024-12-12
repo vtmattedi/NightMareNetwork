@@ -64,7 +64,15 @@ void LightController::ToggleLight()
 void LightController::SetLight(bool state)
 {
     LightState.change(state);
-    AutomationRestore.force(now() + HOUR);
+
+}
+
+/// @brief Toggles the light to the opposite state and stops the automations.
+void LightController::ToggleForce()
+{
+    LightState.force(!LightState.value);
+    AutomationRestore.force(now() + 2 * HOUR);
+    FormatSend("/Lights", "toggle-force", MQTTHostName);
 }
 
 /// @brief Whether or not the server values are stale.

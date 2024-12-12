@@ -12,12 +12,27 @@
 #include <Arduino.h>
 #include <TimeLib.h>
 
-#ifdef LVGL_H
+//comment this line if you don't want to compile LVGL assist functions
+//or the project does not contain LVGL
+#define COMPILE_LVGL_ASSIST true
+#ifdef COMPILE_LVGL_ASSIST
 #include <lvgl.h>
 #endif
 
 #define HOUR 3600
 #define MINUTE 60
+#define TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTime)
+#define TIME_STR(var) TIME(var).c_str()
+#define DATE(var) timestampToDateString(var,TimeStampFormat::OnlyDate)
+#define DATE_STR(var) DATE(var).c_str()
+#define TIME_SINCE(var) timestampToDateString(var,TimeStampFormat::TimeSinceStamp)
+#define TIME_SINCE_STR(var) TIME_SINCE(var).c_str()
+#define COUNTDOWN(var) timestampToDateString(var,TimeStampFormat::CountdownFromTimestamp)
+#define COUNTDOWN_STR(var) COUNTDOWN(var).c_str()
+#define LIVE_TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTimeLive)
+#define LIVE_TIME_STR(var) LIVE_TIME(var).c_str()
+#define DOW_DATE(var) timestampToDateString(var,TimeStampFormat::DowDate)
+#define DOW_DATE_STR(var) DOW_DATE(var).c_str()
 
 #define FORMAT_BUFFER_SIZE 1024 // max String length
 
@@ -36,27 +51,14 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format =
 String formatString(const char *format, ...);
 const char *mqttStatusToString(int);
 
-#ifdef LVGL_H
-
-void set_lv_flag(lv_obj_t *obj, bool value, lv_obj_flag_t flag = LV_OBJ_FLAG_HIDDEN)
-{
-  if (value)
-    lv_obj_add_flag(obj, flag);
-  else
-    lv_obj_clear_flag(obj, flag);
-}
-
-void set_lv_state(lv_obj_t *obj, bool value, lv_state_t state = LV_STATE_CHECKED)
-{
-  if (value)
-    lv_obj_add_state(obj, state);
-  else
-    lv_obj_clear_state(obj, state);
-}
-
-void set_lv_visible(lv_obj_t *obj, bool value)
-{
-  set_lv_flag(obj, !value, LV_OBJ_FLAG_HIDDEN);
-}
-
+#ifdef COMPILE_LVGL_ASSIST
+#pragma region "LVGL Helper Functions"
+void set_lv_flag(lv_obj_t *obj, bool value, lv_obj_flag_t flag = LV_OBJ_FLAG_HIDDEN);
+void set_lv_state(lv_obj_t *obj, bool value, lv_state_t state = LV_STATE_CHECKED);
+void set_lv_visible(lv_obj_t *obj, bool value);
+void set_lv_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE_DEFAULT);
+void set_lv_label_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE_DEFAULT);
+String get_color_fixed_6_str(int hexcode);
+String insert_color(String text, int color);
+#pragma endregion
 #endif
