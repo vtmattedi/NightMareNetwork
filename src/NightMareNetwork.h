@@ -6,8 +6,8 @@
 /// the NightMare Network.
 /// Author: Vitor Mattedi Carvalho
 /// Date: 21-02-2024
-/// Version: 1.1
-///         Structure of the lib changed.
+/// Version: 1.2
+///         Added the time sync function.
 /*----------------------------------------------------------*/
 
 #pragma once
@@ -22,3 +22,4 @@
 #include <Core/Misc.h>
 #include <Core/Timers.h>
 #include <Core/ServerVariables.h>
+#include <Core/TimeSyncronization.h>
