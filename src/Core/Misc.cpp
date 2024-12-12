@@ -163,12 +163,12 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
     if (_format == DateAndTime || _format == DowDate)
         dateString += " ";
     // Adds Date
-    if (_format == OnlyDate || _format == DateAndTime || _format == DowDate)
+    if (_format == OnlyDate || _format == DateAndTime || _format == DowDate || _format == SmallDate)
     {
         dateString += String(_day, DEC).length() == 1 ? "0" + String(_day, DEC) : String(_day, DEC);
         dateString += "/";
         dateString += String(_month, DEC).length() == 1 ? "0" + String(_month, DEC) : String(_month, DEC);
-        if (_format != DowDate)
+        if (_format != DowDate && _format != SmallDate)
         {
             dateString += "/";
             dateString += String(_year, DEC);

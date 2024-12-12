@@ -32,9 +32,13 @@ public:
     ServerVariable<uint32_t> doorOpen;
     /// @brief Wheater or not the Sleep In will be triggered tonight.
     ServerVariable<bool> sleepIn;
+    /// @brief The state of the door.
+    ServerVariable<int> DoorState;
+    int8_t AcState = 0;
 
 public:
     AcController(const char *);
+    int8_t GetState();
     bool AcTargetEnabled();
     double CurrentTarget();
     bool IsStale();
@@ -54,6 +58,10 @@ public:
     void ToggleAcPower();
     void SendRawCommand(String);
     void Toggle();
+    void SetDoorPause(bool);
+    bool GetDoorPause();
+    bool GetDoorOpen();
+    bool GetAcPausedByDoorSensor();
     uint32_t GetSleepTime();
 
 private:

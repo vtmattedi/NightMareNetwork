@@ -97,6 +97,7 @@ void AcController::On_any_value_changed(void (*callback)(void))
     AcTarget.on_value_changed = callback;
     sleepIn.on_value_changed = callback;
     AcTarget.on_value_changed = callback;
+    DoorState.on_value_changed = callback;
 }
 
 /// @brief Gets the current target of the Ac Controller
@@ -189,6 +190,8 @@ void AcController::ParseServerState(String Json)
     DynamicJsonDocument DocJson(512);
     deserializeJson(DocJson, Json);
 
+    AcState = DocJson["AcState"];
+    DoorState.change(DocJson["DoorState"]);
     AcTemperature.handleServer(DocJson["Temp"]);
     HwSleep.handleServer(DocJson["Hsleep"]);
     SWSleep.handleServer(DocJson["Ssleep"]);
@@ -254,4 +257,32 @@ void AcController::Toggle()
         ToggleAcTarget();
 
     ToggleAcPower();
+}
+
+
+int8_t AcController::GetState()
+{
+    return AcState;
+}
+
+void AcController::SetDoorPause(bool pause)
+{
+    Send_to_MQTT(String(MQTTHostName) + "/console/in", "PAUSEDOORSENSOR " + String((int)pause));
+    DoorState.force(bitWrite(DoorState.value, 1, pause));
+}
+
+bool AcController::GetDoorPause()
+{
+    return bitRead(DoorState.value, 1);
+}
+
+bool AcController::GetDoorOpen()
+{
+    return bitRead(DoorState.value, 0);
+}
+
+bool AcController::GetAcPausedByDoorSensor()
+{
+     //Serial.printf("ACPD [%d] %d, %d, %d\n",DoorState.value, bitRead(doorOpen.value, 2), bitRead(doorOpen.value, 1), bitRead(doorOpen.value, 2) && !bitRead(doorOpen.value, 1));
+    return (bitRead(DoorState.value, 2) && !bitRead(DoorState.value, 1));
 }
