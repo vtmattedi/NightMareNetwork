@@ -33,6 +33,9 @@
 #define LIVE_TIME_STR(var) LIVE_TIME(var).c_str()
 #define DOW_DATE(var) timestampToDateString(var,TimeStampFormat::DowDate)
 #define DOW_DATE_STR(var) DOW_DATE(var).c_str()
+#define DATE_NO_YEAR_STR(var) timestampToDateString(var,TimeStampFormat::SmallDate).c_str()
+#define DATE_NO_YEAR(var) timestampToDateString(var,TimeStampFormat::SmallDate)
+
 
 #define FORMAT_BUFFER_SIZE 1024 // max String length
 
