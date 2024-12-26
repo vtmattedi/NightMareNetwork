@@ -64,5 +64,6 @@ void set_lv_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE
 void set_lv_label_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE_DEFAULT);
 String get_color_fixed_6_str(int hexcode);
 String insert_color(String text, int color);
+
 #pragma endregion
 #endif

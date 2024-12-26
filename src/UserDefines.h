@@ -20,6 +20,8 @@ static unsigned char Identifier_0b1101 = 0x0D;
 static unsigned char Identifier_0b1110 = 0x0E;
 static unsigned char Identifier_0b1111 = 0x0F;
 
+unsigned char get_var_by_num(unsigned char identifier);
+
 #define AC_BUTTON_POWER 0x01
 #define AC_BUTTON_SET 0x02
 #define AC_BUTTON_PLUS 0x03
