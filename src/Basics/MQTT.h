@@ -2,9 +2,10 @@
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <./vendor/pubsubclient-2.8/src/PubSubClient.h>
+#include "./vendor/pubsubclient-2.8/src/PubSubClient.h"
+#include "creds.h"
 #ifndef MQTT_CREDS_H
-#error "Please create a MQTT_Creds.h file with the necessary definitions."
+#error "Please create a creds.h file with the necessary definitions."
 #endif
 #ifndef DEVICE_NAME
 #define DEVICE_NAME "UnknownDevice"
