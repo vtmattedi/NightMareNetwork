@@ -13,6 +13,14 @@ static unsigned char Identifier_0b0110 = 0x06;
 static unsigned char Identifier_0b0111 = 0x07;
 static unsigned char Identifier_0b1000 = 0x08;
 static unsigned char Identifier_0b1001 = 0x09;
+static unsigned char Identifier_0b1010 = 0x0A;
+static unsigned char Identifier_0b1011 = 0x0B;
+static unsigned char Identifier_0b1100 = 0x0C;
+static unsigned char Identifier_0b1101 = 0x0D;
+static unsigned char Identifier_0b1110 = 0x0E;
+static unsigned char Identifier_0b1111 = 0x0F;
+
+unsigned char get_var_by_num(unsigned char identifier);
 
 #define AC_BUTTON_POWER 0x01
 #define AC_BUTTON_SET 0x02

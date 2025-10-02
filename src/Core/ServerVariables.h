@@ -76,7 +76,7 @@ public:
   const char *label = (char *)"no label";
   /// @brief user info to be passed by `on_send_with_info`;
   uint8_t userid = 0;
-    /// @brief user info to be passed by `on_send_with_info`;
+  /// @brief user info to be passed by `on_send_with_info`;
   const char* userinfo = "";
 
 private:
