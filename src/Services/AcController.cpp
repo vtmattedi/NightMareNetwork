@@ -286,3 +286,8 @@ bool AcController::GetAcPausedByDoorSensor()
      //Serial.printf("ACPD [%d] %d, %d, %d\n",DoorState.value, bitRead(doorOpen.value, 2), bitRead(doorOpen.value, 1), bitRead(doorOpen.value, 2) && !bitRead(doorOpen.value, 1));
     return (bitRead(DoorState.value, 2) && !bitRead(DoorState.value, 1));
 }
+
+void AcController::SoftwareReset()
+{
+    FormatSend("/console/in", "reset", MQTTHostName);
+}

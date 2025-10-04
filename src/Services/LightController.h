@@ -36,5 +36,6 @@ public:
     void Shutdown();
     void Sync();
     void ToggleLight();
-    void ToggleForce(); 
+    void ToggleForce();
+    void SoftwareReset(); 
 };

@@ -27,9 +27,9 @@ void MQTT_change_to(bool local)
 {
     if (local_initialized == local)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.printf("MQTT client already initialized as %s!\n", local ? "local" : "remote");
-        #endif
+#endif
         return;
     }
     MQTT_End();
@@ -37,9 +37,9 @@ void MQTT_change_to(bool local)
     bool res = MQTT_Safe_Connect();
     if (!res)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.printf("MQTT client failed to connect as %s!\n", local ? "local" : "remote");
-        #endif
+#endif
         MQTT_End();
         MQTT_Init(!local); // Reinitialize as the opposite type (old type)
         MQTT_Safe_Connect();
@@ -71,9 +71,9 @@ void MQTT_Init(bool local)
 {
     if (mqttClient || mqttWifiClient || mqttWifiClientSecure)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client already initialized!, explictly call MQTT_End() before re-initializing.");
-        #endif
+#endif
         return;
     }
     local_initialized = local;
@@ -83,9 +83,9 @@ void MQTT_Init(bool local)
         mqttClient = new PubSubClient(*mqttWifiClient);
         mqttClient->setServer(LOCAL_MQTT_HOST, LOCAL_MQTT_PORT);
 
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client initialized with WiFiClient.");
-        #endif
+#endif
         mqttClient->setCallback(processMqttMessage);
     }
     else
@@ -95,9 +95,9 @@ void MQTT_Init(bool local)
         mqttClient = new PubSubClient(*mqttWifiClientSecure);
         mqttClient->setServer(REMOTE_MQTT_URL, REMOTE_MQTT_PORT);
         mqttClient->setCallback(processMqttMessage);
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client initialized with WiFiClientSecure.");
-        #endif
+#endif
     }
 }
 
@@ -124,9 +124,9 @@ void MQTT_End()
         mqttWifiClient = nullptr;
     }
     local_initialized = false;
-    #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
     Serial.println("MQTT client ended.");
-    #endif
+#endif
 }
 
 const char *mqttErrorFromCode(int code)
@@ -162,18 +162,19 @@ bool MQTT_Safe_Connect()
 {
     if (!mqttClient)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client not initialized!");
-        #endif
+#endif
         return false;
     }
     if (mqttClient->connected())
         return false;
     mqttClient->setCallback(processMqttMessage);
     String clientId = String(DEVICE_NAME) + "-" + String(esp_random(), HEX);
-    bool connected = mqttClient->connect(clientId.c_str(), MQTT_USER, MQTT_PASSWD);
+    bool connected = mqttClient->connect(clientId.c_str(), MQTT_USER, MQTT_PASSWD, DEVICE_NAME "/status", 1, true, "offline", true);
     if (connected)
     {
+        mqttClient->publish(DEVICE_NAME "/status", "online", true);
 #ifdef COMPILE_SERIAL
         Serial.println("MQTT connected successfully!");
         // Subscribe to the all topics // Monitor Other Devices So we can display their status
@@ -192,7 +193,7 @@ bool MQTT_Safe_Connect()
     {
 #ifdef COMPILE_SERIAL
         Serial.printf("MQTT connection failed, rc=%d: <%s>\n", mqttClient->state(), mqttErrorFromCode(mqttClient->state()));
-    #endif
+#endif
     }
     return connected;
 }
@@ -201,9 +202,9 @@ void MQTT_Loop()
 {
     if (!mqttClient)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client not initialized!");
-        #endif
+#endif
         return;
     }
     mqttClient->loop();
@@ -247,24 +248,24 @@ void _internal_MQTT_Send(String topic, String message, bool retained)
 {
     if (!mqttClient)
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client not initialized!");
-        #endif
+#endif
         return;
     }
     if (!mqttClient->connected())
     {
-        #ifdef COMPILE_SERIAL
+#ifdef COMPILE_SERIAL
         Serial.println("MQTT client not connected.");
-        #endif
+#endif
         return;
     }
 
     bool result = mqttClient->publish(topic.c_str(), message.c_str(), retained);
 
-    #if defined(COMPILE_SERIAL) && defined(DEBUG_MQTT)
+#if defined(COMPILE_SERIAL) && defined(DEBUG_MQTT)
     Serial.printf(">>MQTT [res:%d][Sending: '%s' : '%s']\n", result, topic.c_str(), message.c_str());
-    #endif
+#endif
 }
 
 void MQTT_Send_Raw(String topic, String message)

@@ -112,3 +112,8 @@ bool LightController::CurrentState()
 {
     return LightState.value;
 }
+
+void LightController::SoftwareReset()
+{
+    FormatSend("/console/in", "reset", MQTTHostName);
+}

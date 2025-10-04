@@ -63,6 +63,7 @@ public:
     bool GetDoorOpen();
     bool GetAcPausedByDoorSensor();
     uint32_t GetSleepTime();
+    void SoftwareReset();
 
 private:
 };
