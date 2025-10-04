@@ -37,6 +37,7 @@ public:
     int8_t AcState = 0;
 
 public:
+    float sensorValue = 0.0;
     AcController(const char *);
     int8_t GetState();
     bool AcTargetEnabled();

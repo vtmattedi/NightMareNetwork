@@ -198,6 +198,7 @@ void AcController::ParseServerState(String Json)
     AcTarget.handleServer(DocJson["Settemp"]);
     sleepIn.handleServer(DocJson["SleepIn"]);
     doorOpen.handleServer(DocJson["Door"]);
+    sensorValue = DocJson["CurrTemp"].as<float>();
 }
 
 /// @brief Disables the room temperature control and shutdown the Ac
