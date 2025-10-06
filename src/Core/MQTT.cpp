@@ -94,7 +94,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         {
             printf("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
         }
-#endif
+
         break;
 
     default:
