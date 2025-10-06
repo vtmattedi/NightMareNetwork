@@ -8,12 +8,23 @@ void (*handleMqttDisconnected)(bool) = NULL;
 static bool mqtt_connected = false;
 /// @brief ESP-MQTT client handle
 esp_mqtt_client_handle_t mqttClient = NULL;
-static int8_t mqtt_state = -1; //  3 = connecting -1 = not initialized, 0 = disconnected, 1 = local connected, 2 = remote connected
+static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 0 = disconnected, 1 = local connected, 2 = remote connected
 static bool local_initialized = false; // True if initialized as local, false if remote
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
-    "\x1b[93;1mLocal\x1b[0m",
-    "\x1b[94;1mRemote\x1b[0m"};
+    "\x1b[93;1m[Local]\x1b[0m",
+    "\x1b[94;1m[Remote]\x1b[0m"};
+#endif
+
+#define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
+#define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
+
+#ifdef COMPILE_SERIAL
+#define printf(...) \
+    printc;         \
+    Serial.printf(__VA_ARGS__);
+#else
+#define printf(...)
 #endif
 /// @brief MQTT event handler.
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -25,16 +36,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
     {
         mqtt_state = local_initialized ? 1 : 2;
-        const char *client_str = local_initialized ? CLIENT[0] : CLIENT[1];
-#ifdef COMPILE_SERIAL
-        Serial.printf("%s MQTT connected successfully!\n", client_str);
-#endif
+        printf(" MQTT connected successfully!\n");
         // Subscribe to all topics
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
-#ifdef COMPILE_SERIAL
-        Serial.printf("Subscribing to #\n");
-        Serial.printf("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
-#endif
+        printf("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
         // Send initial messages
         MQTT_Send("/status", "online");
         if (handleMqttConnected)
@@ -46,9 +51,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
     {
         mqtt_state = 0;
-#ifdef COMPILE_SERIAL
-        Serial.println("MQTT disconnected!");
-#endif
+        printf("MQTT disconnected!");
         if (handleMqttDisconnected)
         {
             handleMqttDisconnected(local_initialized);
@@ -57,21 +60,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 
     case MQTT_EVENT_SUBSCRIBED:
-#ifdef COMPILE_SERIAL
-        Serial.printf("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
-#endif
+        printf("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
 
     case MQTT_EVENT_UNSUBSCRIBED:
-#ifdef COMPILE_SERIAL
-        Serial.printf("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
-#endif
+        printf("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
 
     case MQTT_EVENT_PUBLISHED:
-#ifdef COMPILE_SERIAL
-        Serial.printf("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
-#endif
+        printf("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
         break;
 
     case MQTT_EVENT_DATA:
@@ -85,26 +82,23 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     }
     case MQTT_EVENT_ERROR:
-#ifdef COMPILE_SERIAL
-        Serial.println("MQTT_EVENT_ERROR");
+ printf("MQTT_EVENT_ERROR\n");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
         {
-            Serial.printf("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
-            Serial.printf("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
-            Serial.printf("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
+            printf("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
+            printf("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
+            printf("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
                           strerror(event->error_handle->esp_transport_sock_errno));
         }
         else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED)
         {
-            Serial.printf("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
+            printf("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
         }
 #endif
         break;
 
     default:
-#ifdef COMPILE_SERIAL
-        Serial.printf("Other event id:%d\n", event->event_id);
-#endif
+        printf("Other event id:%d\n", event->event_id);
         break;
     }
 }
@@ -153,14 +147,14 @@ void MQTT_Init(bool local)
     mqtt_cfg.password = MQTT_PASSWD;
     mqtt_cfg.client_id = client_id_buffer;
     mqtt_cfg.lwt_topic = last_will_topic;
-    mqtt_cfg.lwt_msg= last_will_message;
+    mqtt_cfg.lwt_msg = last_will_message;
 
     if (local)
     {
         // Local connection (non-secure)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtt://%s:%d", LOCAL_MQTT_HOST, LOCAL_MQTT_PORT);
         mqtt_cfg.uri = uri_buffer;
-        Serial.println("MQTT client initialized for local connection.");
+        printf("MQTT client initialized for local connection.\n");
     }
     else
     {
@@ -168,9 +162,9 @@ void MQTT_Init(bool local)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtts://%s:%d", REMOTE_MQTT_URL, REMOTE_MQTT_PORT);
         mqtt_cfg.uri = uri_buffer;
         mqtt_cfg.cert_pem = root_ca; // Set to NULL to disable server cert verification
-        Serial.println("MQTT client initialized for remote connection.");
+        printf("MQTT client initialized for remote connection.\n");
     }
-    
+
     mqttClient = esp_mqtt_client_init(&mqtt_cfg);
     if (mqttClient)
     {
@@ -180,9 +174,7 @@ void MQTT_Init(bool local)
     }
     else
     {
-#ifdef COMPILE_SERIAL
-        Serial.println("Failed to initialize MQTT client!");
-#endif
+        printf("Failed to initialize MQTT client!\n");
     }
 }
 /// @brief Ends the MQTT client connection and cleans up resources.
@@ -193,9 +185,7 @@ void MQTT_End()
         esp_mqtt_client_stop(mqttClient);
         esp_mqtt_client_destroy(mqttClient);
         mqttClient = NULL;
-#ifdef COMPILE_SERIAL
-        Serial.println("MQTT client disconnected and destroyed.");
-#endif
+        printf("MQTT client disconnected and resources cleaned up.\n");
     }
     mqtt_state = -1; // Not initialized
 }
@@ -215,9 +205,7 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 {
     if (!mqttClient)
     {
-#ifdef COMPILE_SERIAL
-        Serial.println("MQTT client not initialized.");
-#endif
+        printf("MQTT client not initialized. Cannot send message.\n");
         return;
     }
 
@@ -226,7 +214,7 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 
     int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
                                          message.length(), 0, retained ? 1 : 0);
-    Serial.printf(">>MQTT [msg_id:%d][Sending: '%s' : '%s']\n", msg_id, topic.c_str(), message.c_str());
+    printf(">>MQTT [msg_id:%d][Sending: '%s' : '%s']\n", msg_id, topic.c_str(), message.c_str());
 }
 /// @brief Sends a raw MQTT message without any modifications on topic name.
 /// @param topic The topic to publish the message to.
@@ -242,9 +230,7 @@ void MQTT_change_to(bool local)
 {
     if (local_initialized == local)
     {
-#ifdef COMPILE_SERIAL
-        Serial.printf("MQTT client already initialized as %s!\n", local ? "local" : "remote");
-#endif
+        printf("MQTT client already initialized as %s. No changes made.\n", local ? "local" : "remote");
         return;
     }
     MQTT_End();

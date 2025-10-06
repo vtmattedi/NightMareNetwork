@@ -13,7 +13,7 @@
 #ifndef DEVICE_NAME
 #define DEVICE_NAME "NightMare Device"
 #endif
-//#define COMPILE_SERIAL
+// #define COMPILE_SERIAL
 #define LOCAL_MQTT true
 #define REMOTE_MQTT false
 
