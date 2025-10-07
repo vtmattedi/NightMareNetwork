@@ -73,11 +73,13 @@ NightMareResults handleNightMareCommand(const String &message)
         result.response = "Rebooting...";
     }
 #ifdef SCHEDULER_AWARE
-    /// Format SCHEDULE <command> <timestamp> [interval]
-    /// Schedules a command to be run at a specific timestamp (in seconds since epoch).
+    /// Format SCHEDULE <command> <delta seconds> [interval]
+    /// Schedules a command to be run after a specific delay (in seconds).
     else if (parsedMsg.command == "SCHEDULE")
     {
-        int id = scheduler.add(parsedMsg.args[0], now() + parsedMsg.args[1].toInt());
+        unsigned long timestamp = now();
+        timestamp += strtoul(parsedMsg.args[1].c_str(), NULL, 10);
+        int id = scheduler.add(parsedMsg.args[0], timestamp);
         if (id != -1)
         {
             if (parsedMsg.args[2].toInt() > 0) {
