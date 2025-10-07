@@ -23,3 +23,6 @@
 #include <Core/Timers.h>
 #include <Core/ServerVariables.h>
 #include <Core/TimeSyncronization.h>
+#include <Core/MQTT.h>
+#include <Xtra/Scheduler.h>
+#include <Xtra/NightMareCommand.h>
