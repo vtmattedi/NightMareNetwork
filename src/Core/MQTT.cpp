@@ -73,10 +73,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_DATA:
     {
-        if (handleMqttMessage)
+        if (handleMqttMessage && event->data_len > 0 && event->topic_len > 0)
         {
             String topicStr = String(event->topic, event->topic_len);
             String payloadStr = String(event->data, event->data_len);
+            printf(">>[%d][%s]:%s\n", event->msg_id, topicStr.c_str(), payloadStr.c_str());
             handleMqttMessage(topicStr, payloadStr);
         }
         break;
@@ -214,7 +215,7 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 
     int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
                                          message.length(), 0, retained ? 1 : 0);
-    printf(">>MQTT [msg_id:%d][Sending: '%s' : '%s']\n", msg_id, topic.c_str(), message.c_str());
+    printf("<<[%d][%s]:%s\n", msg_id, topic.c_str(), message.c_str());
 }
 /// @brief Sends a raw MQTT message without any modifications on topic name.
 /// @param topic The topic to publish the message to.
