@@ -253,3 +253,11 @@ bool MQTT_isLocal()
 {
     return local_initialized;
 }
+/// @deprecated Use MQTT_Send; this is only for backward compatibility.
+/// @brief Sends a message to MQTT with the device name prepended to the topic.
+/// @param topic The topic to publish the message to.
+/// @param message The message payload to send.
+void Send_to_MQTT(String topic, String message)
+{
+    MQTT_Send(topic, message, true, false);
+}
