@@ -18,7 +18,12 @@
 // #define COMPILE_SERIAL //Uncomment this line to enable serial debug output (Global)
 #pragma region "Core Modules"
 //Core Modules 
-#define COMPILE_MQTT
+#define COMPILE_MQTT //Compiles MQTT module
+/*--- MQTT configs */
+#define DEVICE_NAME "NightMare Device" //Default device name, used in MQTT and other places
+#define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
+#define MQTT_PREPROCESS //Enable MQTT command preprocessing (Requires Command Resolver) (using <DEVICE_NAME>/console/in topic)
+/*---------------------*/
 #define COMPILE_LVGL //Compiles LVGL helpers code
 #define COMPILE_SERVERVARIABLES // Compile the ServerVariables template class
 /*------- ServerVariables Templates to be compiled---------*/
@@ -47,11 +52,16 @@
 #pragma region "Xtra Modules"
 //Xtra Modules
 #define COMPILE_SCHEDULER // Compile the scheduler module
+/*--- Scheduler configs */
+#define USE_NIGHTMARE_COMMAND // Use the NightMare Command resolver on the scheduler commands
+#define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
+/*---------------------*/
 #define COMPILE_COMMAND_RESOLVER // Compile the command resolver module
 #ifdef COMPILE_COMMAND_RESOLVER
 /*--- Command Resolver configs */
 #define ENABLE_PREPROCESSING // Enable command pre processing
 #define SCHEDULER_AWARE // Compile the command resolver module with scheduler support on the PREPROCESSING
+/*---------------------*/
 #endif
 #pragma endregion
 
