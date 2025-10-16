@@ -16,6 +16,7 @@ The structure of this Lib is as follows:
     + Classes that encapsulates a controller for another device on the network
   + Xtra Folder
     + Some extra components that are not really core nor a service but is still common code across multiple devices on the network
+
 ## Current Services
 
 1. Ac Controller
@@ -25,11 +26,14 @@ The structure of this Lib is as follows:
 ## Core Functionalities
 
 1. Timers.
-2. Server Variables.
-3. Misc. Functions
+2. MQTT Client using esp mqtt.
+3. Server Variables.
+4. Misc. Functions
    + Convert Timestamp to human readable String
-   + Convert MQTT error code to String
    + If LVGL is detected also compiles functions to easily hide/show objects and set/clear flags (specialy the Checked)
+5. TimeSynchronization function.
 
 ## Xtra Functions
-1. Scheduler ()
+
+1. Scheduler
+2. Command Resolver

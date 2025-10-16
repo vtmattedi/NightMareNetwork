@@ -75,21 +75,31 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
         if (handleMqttMessage && event->data_len > 0 && event->topic_len > 0)
         {
+
             String topicStr = String(event->topic, event->topic_len);
             String payloadStr = String(event->data, event->data_len);
             printf(">>[%d][%s]:%s\n", event->msg_id, topicStr.c_str(), payloadStr.c_str());
+#ifdef MQTT_PREPROCESS
+            if (topicStr == String(DEVICE_NAME) + "/console/in")
+            {
+                // Handle command internally
+                NightMareResults res = handleNightMareCommand(payloadStr);
+                MQTT_Send(String(DEVICE_NAME) + "/console/out", res.response);
+                return; // Do not pass to external handler
+            }
+#endif
             handleMqttMessage(topicStr, payloadStr);
         }
         break;
     }
     case MQTT_EVENT_ERROR:
- printf("MQTT_EVENT_ERROR\n");
+        printf("MQTT_EVENT_ERROR\n");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
         {
             printf("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
             printf("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
             printf("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
-                          strerror(event->error_handle->esp_transport_sock_errno));
+                   strerror(event->error_handle->esp_transport_sock_errno));
         }
         else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED)
         {
