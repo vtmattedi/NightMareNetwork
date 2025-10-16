@@ -290,6 +290,6 @@ bool AcController::GetAcPausedByDoorSensor()
 
 void AcController::SoftwareReset()
 {
-    FormatSend("/console/in", "reset", MQTTHostName);
+    FormatSend("/console/in", "reboot", MQTTHostName);
 }
 #endif

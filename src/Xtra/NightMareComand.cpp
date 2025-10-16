@@ -45,7 +45,9 @@ NightMareResults handleNightMareCommand(const String &message)
     result.result = true;
     NightMareMessage parsedMsg;
     String current_string = "";
-
+#ifdef COMPILE_SERIAL
+    Serial.printf("\x1b[96;1m[Command]\x1b[0m Received: '%s'\n", message.c_str());
+#endif
     int index = 0;
     // gets command and args using the delimiters
     bool in_quotes = false;

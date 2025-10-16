@@ -110,7 +110,7 @@ bool LightController::CurrentState()
 
 void LightController::SoftwareReset()
 {
-    FormatSend("/console/in", "reset", MQTTHostName);
+    FormatSend("/console/in", "reboot", MQTTHostName);
 }
 
 #endif

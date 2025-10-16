@@ -121,12 +121,15 @@ void Scheduler::run()
 #ifdef COMPILE_SERIAL
             Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m Executing task ID %d: '%s' scheduled for %u (now: %u)\n", tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime, nowTime);
 #endif
+#ifdef USE_NIGHTMARE_COMMAND
+                NightMareResults res = handleNightMareCommand(tasks[i].command);
+#ifdef COMPILE_SERIAL
+                Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m:[\x1b[%s\x1b[0m] %s\n", res.result ? "92;1mOK" : "91;1mERR", res.response.c_str());
+#endif
+#endif
             // Execute the command
             if (runCmd)
             {
-#ifdef USE_NIGHTMARE_COMMAND
-                handleNightMareCommand(tasks[i].command);
-#endif
                 runCmd(tasks[i].command);
             }
 
