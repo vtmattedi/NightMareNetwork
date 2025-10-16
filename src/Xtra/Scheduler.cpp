@@ -1,4 +1,5 @@
 #include "Scheduler.h"
+#ifdef COMPILE_SCHEDULER
 Scheduler scheduler;
 static uint16_t taskID = 0;
 
@@ -135,3 +136,4 @@ void Scheduler::clear()
     }
     currentTasks = 0;
 }
+#endif

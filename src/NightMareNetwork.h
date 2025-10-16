@@ -6,8 +6,10 @@
 /// the NightMare Network.
 /// Author: Vitor Mattedi Carvalho
 /// Date: 21-02-2024
-/// Version: 1.2
+/// Version: 1.3
 ///         Added the time sync function.
+///         Added the MQTT functions.
+///         Added the Scheduler & Command functions.
 /*----------------------------------------------------------*/
 
 #pragma once

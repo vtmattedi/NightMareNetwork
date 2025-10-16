@@ -9,6 +9,8 @@
 
 
 #pragma once
+#include <Modules.config.h>
+#ifdef COMPILE_TIMESYNC
 #include <Arduino.h>
 #include <TimeLib.h>
 #include <WiFi.h>
@@ -17,3 +19,4 @@
 #define API_URL "http://worldtimeapi.org/api/timezone/America/Bahia.txt"
 
 bool syncTime();
+#endif

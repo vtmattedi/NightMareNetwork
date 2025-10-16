@@ -11,6 +11,7 @@
 
 #pragma once
 #include <Services/ServicesCore.h>
+#ifdef COMPILE_LIGHTCOLORCONTROLLER
 #include <Services/LightController.h>
 #include <Core/ServerVariables.h>
 
@@ -31,3 +32,4 @@ public:
     void Sync();
     void On_any_value_changed(void (*callback)(void));
 };
+#endif

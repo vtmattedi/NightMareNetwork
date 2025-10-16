@@ -1,5 +1,5 @@
 #include <Services/LightColorController.h>
-
+#ifdef COMPILE_LIGHTCOLORCONTROLLER
 /// @brief Assigned to `ServerVariables<>` to be called and then formats and calls `FormatSend`
 /// @param id The `userid` of the `ServerVariables<>`
 /// @param value The `value` of the `ServerVariables<>`
@@ -17,15 +17,15 @@ void static LightColorSendById(uint8_t id, String value, String hostname)
     }
     else if (id == LIGHTSTATE_ID)
     {
-        senddata = "u";
+        // senddata = "u";
         senddata += value;
         FormatSend("/Lights", senddata, hostname);
     }
     else if (id == BRIGHTNESS_ID)
     {
-        senddata = "DOOR ";
+        senddata = "";
         senddata += value;
-        FormatSend("/console/in", senddata, hostname);
+        FormatSend("/Brightness", senddata, hostname);
     }
 }
 
@@ -120,3 +120,5 @@ void LightColorController::Sync()
     HexColor.sync();
     Brightness.sync();
 }
+
+#endif

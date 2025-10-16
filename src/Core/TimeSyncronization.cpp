@@ -1,17 +1,17 @@
 #include "TimeSyncronization.h"
-
+#ifdef COMPILE_TIMESYNC
 
 /// @brief Attempts to get the time synced using worldtimeapi.
 /// @return True if successful or false otherwise.
 bool syncTime()
 {
-      bool result = false;
+bool result = false;
 #ifdef COMPILE_SERIAL
   Serial.println("Syncing Time Online");
 #endif
   WiFiClient client;
   HTTPClient http;
-  http.begin(client, "http://worldtimeapi.org/api/timezone/America/Bahia.txt"); // HTTP
+  http.begin(client, API_URL); // HTTP
   int httpCode = http.GET();
   
   // httpCode will be negative on error
@@ -59,3 +59,4 @@ bool syncTime()
  
 }
 
+#endif

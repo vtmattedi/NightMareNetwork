@@ -11,6 +11,7 @@
 
 #pragma once
 #include <Services/ServicesCore.h>
+#ifdef COMPILE_ACCONTROLLER
 #include <core/ServerVariables.h>
 
 class AcController
@@ -68,3 +69,6 @@ public:
 
 private:
 };
+
+
+#endif

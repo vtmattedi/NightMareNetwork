@@ -1,6 +1,8 @@
 #ifndef NIGHTMARE_USERDEFNIES
 #define NIGHTMARE_USERDEFNIES
-
+#include <Modules.config.h>
+#endif
+#ifdef COMPILE_LVGL
 /*---------------------------------------------*/
 /*CALLBACK INDENTIFIERS FOR IMPROVED READBILITY*/
 
@@ -117,5 +119,5 @@ unsigned char *get_var_by_num(unsigned char identifier);
 #define COLOR_YELLOW 0xDDDD00
 
 /*---------------------------------------------*/
-
+#endif
 #endif

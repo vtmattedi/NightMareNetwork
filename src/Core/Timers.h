@@ -10,9 +10,10 @@
 /*----------------------------------------------------------*/
 
 #pragma once
+#include <Modules.config.h>
+#ifdef COMPILE_TIMERS
 #include <Arduino.h>
 #include <TimeLib.h>
-
 #define HOUR 3600
 #define MINUTE 60
 
@@ -66,3 +67,4 @@ public:
 };
 
 extern TimersHandler Timers;
+#endif

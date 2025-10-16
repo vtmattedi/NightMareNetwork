@@ -12,27 +12,17 @@
 
 #ifndef NIGHTMARE_SERVERVARIABLES
 #define NIGHTMARE_SERVERVARIABLES
-
+#include <Modules.config.h>
 #include <Arduino.h>
 #include <TimeLib.h>
 
-/*-------Templates to be compiled---------*/
 
-// #define  USE_BYTE_TEMPLATE //Compile Byte Template
-#define USE_INT_TEMPLATE // Compile int Template
-// #define  USE_UINT16_TEMPLATE //Complie uin16_t template
-#define USE_UINT32_TEMPLATE // Complie uin32_t template
-#define USE_DOUBLE_TEMPLATE // Complie double template
-#define USE_BOOL_TEMPLATE   // Complie bool template
-// #define  USE_STRING_TEMPLATE //Complie String template
 
-/*---------------------------------------*/
-
-#define MINS_MS 60 * 1000
+#define MIN_TO_MS 60 * 1000
 
 /// Default time (in ms) between asserts between client and server
 #define ASSERT_DELAY 10000
-#define MILLIS_TO_STALE 10 * MINS_MS
+#define MILLIS_TO_STALE 10 * MIN_TO_MS
 
 /// @brief class to store and sync a varible between one or more
 /// clients and a server. It works by periodically recieving info

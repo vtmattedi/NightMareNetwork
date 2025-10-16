@@ -41,7 +41,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
         printf("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
         // Send initial messages
-        MQTT_Send("/status", "online");
+        MQTT_Send("/status", "online", true, true);
         if (handleMqttConnected)
         {
             handleMqttConnected(); // Call the connected handler if set
@@ -149,6 +149,8 @@ void MQTT_Init(bool local)
     mqtt_cfg.client_id = client_id_buffer;
     mqtt_cfg.lwt_topic = last_will_topic;
     mqtt_cfg.lwt_msg = last_will_message;
+    mqtt_cfg.lwt_qos = 0;
+    mqtt_cfg.lwt_retain = 1;
 
     if (local)
     {

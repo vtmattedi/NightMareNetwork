@@ -1,5 +1,5 @@
 #include <Services/LightController.h>
-
+#ifdef COMPILE_LIGHTCONTROLLER
 /// @brief Assigned to `ServerVariables<>` to be called and then formats and calls `FormatSend`
 /// @param id The `userid` of the `ServerVariables<>`
 /// @param value The `value` of the `ServerVariables<>`
@@ -9,16 +9,11 @@ void static LightSendById(uint8_t id, String value, String hostname)
     String senddata = "";
     if (id == LIGHTSTATE_ID)
     {
-        senddata = "u";
+        // senddata = "u";
         senddata += value;
         FormatSend("/Lights", senddata, hostname);
     }
 };
-
-/// @brief Default constructor
-LightController::LightController()
-{
-}
 
 /// @brief Constructor that sets up the ServerVariables.
 /// @param Hostname The hostname of the host device.
@@ -50,7 +45,7 @@ void LightController::On_any_value_changed(void (*callback)(void))
 void LightController::Shutdown()
 {
     LightState.force(false);
-    FormatSend("/Lights", "u0", MQTTHostName);
+    // FormatSend("/Lights", "0", MQTTHostName);
 }
 
 /// @brief Toggles the current state of the light
@@ -117,3 +112,5 @@ void LightController::SoftwareReset()
 {
     FormatSend("/console/in", "reset", MQTTHostName);
 }
+
+#endif

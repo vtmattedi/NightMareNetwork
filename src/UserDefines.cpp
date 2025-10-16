@@ -1,4 +1,5 @@
 #include "UserDefines.h"
+#ifdef COMPILE_LVGL
 unsigned char *get_var_by_num(unsigned char num)
 {
     {
@@ -55,3 +56,4 @@ unsigned char *get_var_by_num(unsigned char num)
         }
     }
 }
+#endif

@@ -1,5 +1,5 @@
 #include <Core/Timers.h>
-
+#ifdef COMPILE_TIMERS
 /// @brief Creates the Timerhandler
 TimersHandler Timers = TimersHandler();
 
@@ -119,3 +119,4 @@ String TimersHandler::Timeleft(String label)
 
     return "There is no task with such label";
 }
+#endif

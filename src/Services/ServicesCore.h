@@ -6,15 +6,19 @@
 /// Date: 21-02-2024
 /// Version: 1.1
 ///         Created.
+///         Added support for multiple services
+/// This File should be included by all services
 /*----------------------------------------------------------*/
+#pragma once    
+//Since this ServicesCore.h is included by all services
+//we include the Modules.config.h here so we don't have to
+//include it in all services files
+#include <Modules.config.h>
 
-
+#ifdef COMPILE_SERVICES
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <core/ServerVariables.h>
-
-#ifndef NIGHTMARESERVICES
-#define NIGHTMARESERVICES
 
 #ifndef HOUR
 ///One Hour in Seconds xD

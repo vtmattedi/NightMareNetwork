@@ -1,5 +1,5 @@
 #include <Services/AcController.h>
-
+#ifdef COMPILE_ACCONTROLLER
 /// @brief Assigned to `ServerVariables<>` to be called and then formats and calls `FormatSend`
 /// @param id The `userid` of the `ServerVariables<>`
 /// @param value The `value` of the `ServerVariables<>`
@@ -292,3 +292,4 @@ void AcController::SoftwareReset()
 {
     FormatSend("/console/in", "reset", MQTTHostName);
 }
+#endif

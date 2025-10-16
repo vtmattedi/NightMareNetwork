@@ -10,7 +10,7 @@
 
 #pragma once
 #include <Services/ServicesCore.h>
-
+#ifdef COMPILE_LIGHTCONTROLLER
 class LightController
 {
 protected:
@@ -26,7 +26,6 @@ public:
 
 public:
     LightController(const char *);
-    LightController();
     bool CurrentState();
     bool IsStale();
     void On_any_value_changed(void (*)(void));
@@ -39,3 +38,4 @@ public:
     void ToggleForce();
     void SoftwareReset(); 
 };
+#endif

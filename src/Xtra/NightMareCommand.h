@@ -1,13 +1,15 @@
 #pragma once
+#include <Modules.config.h>
 #include <Arduino.h>
-#define ENABLE_PREPROCESSING
+
+#define DELIMITER (char)' '
 
 #ifdef ENABLE_PREPROCESSING
-#define SCHEDULER_AWARE
 #ifdef SCHEDULER_AWARE
 #include <Xtra/Scheduler.h>
 #endif
 #endif
+
 struct NightMareResults
 {
     bool result;

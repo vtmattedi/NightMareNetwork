@@ -9,13 +9,15 @@
 /*----------------------------------------------------------*/
 
 #pragma once
+#include <Modules.config.h>
+#ifdef COMPILE_MISC
 #include <Arduino.h>
 #include <TimeLib.h>
 
 //comment this line if you don't want to compile LVGL assist functions
 //or the project does not contain LVGL
-#define COMPILE_LVGL_ASSIST true
-#ifdef COMPILE_LVGL_ASSIST
+// #define COMPILE_LVGL
+#ifdef COMPILE_LVGL
 #include <lvgl.h>
 #endif
 
@@ -55,7 +57,7 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format =
 String formatString(const char *format, ...);
 const char *mqttStatusToString(int);
 
-#ifdef COMPILE_LVGL_ASSIST
+#ifdef COMPILE_LVGL
 #pragma region "LVGL Helper Functions"
 void set_lv_flag(lv_obj_t *obj, bool value, lv_obj_flag_t flag = LV_OBJ_FLAG_HIDDEN);
 void set_lv_state(lv_obj_t *obj, bool value, lv_state_t state = LV_STATE_CHECKED);
@@ -66,4 +68,6 @@ String get_color_fixed_6_str(int hexcode);
 String insert_color(String text, int color);
 
 #pragma endregion
+#endif /* COMPILE_LVGL */
+
 #endif

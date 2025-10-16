@@ -5,6 +5,7 @@ void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &mes
 {
     resolveCommand = resolver;
 }
+
 NightMareResults handleNightMareCommand(const String &message)
 {
     const char delimiter = ' ';
@@ -147,8 +148,8 @@ NightMareResults handleNightMareCommand(const String &message)
         result = resolveCommand(parsedMsg);
 #endif
 
- Serial.printf("\tmessage = <%s> | \n\tcommand = <%s> | \n\t -args[0] = <%s> | \n\t -args[1] = <%s> | \n\t -args[2] = <%s> |  \n\t -args[3] = <%s>  \n\t -args[4] = <%s> \n\t\n", message.c_str(), parsedMsg.command.c_str(), parsedMsg.args[0].c_str(), parsedMsg.args[1].c_str(), parsedMsg.args[2].c_str(), parsedMsg.args[3].c_str(), parsedMsg.args[4].c_str());
 #if defined(COMPILE_SERIAL) && defined(DEBUG)
+Serial.printf("\tmessage = <%s> | \n\tcommand = <%s> | \n\t -args[0] = <%s> | \n\t -args[1] = <%s> | \n\t -args[2] = <%s> |  \n\t -args[3] = <%s>  \n\t -args[4] = <%s> \n\t\n", message.c_str(), parsedMsg.command.c_str(), parsedMsg.args[0].c_str(), parsedMsg.args[1].c_str(), parsedMsg.args[2].c_str(), parsedMsg.args[3].c_str(), parsedMsg.args[4].c_str());
 #endif
     return result;
 }

@@ -1,5 +1,5 @@
 #include <Core/Misc.h>
-
+#ifdef COMPILE_MISC
 /// @brief Uses `printf` to format a String object. 
 /// @param format The string with the placeholders '%d', '%x' etc.
 /// @param args... The args to match the string passed.
@@ -20,49 +20,6 @@ String formatString(const char *format, ...)
     }
     // Convert the formatted buffer to a String
     return String(buffer);
-}
-
-
-/// @brief Converts a MQTT status code to its name.
-/// @param status The MQTT status.
-/// @return A string with the name of the MQTT status.
-const char *mqttStatusToString(int status)
-{
-#define MQTT_CONNECTION_TIMEOUT -4
-#define MQTT_CONNECTION_LOST -3
-#define MQTT_CONNECT_FAILED -2
-#define MQTT_DISCONNECTED -1
-#define MQTT_CONNECTED 0
-#define MQTT_CONNECT_BAD_PROTOCOL 1
-#define MQTT_CONNECT_BAD_CLIENT_ID 2
-#define MQTT_CONNECT_UNAVAILABLE 3
-#define MQTT_CONNECT_BAD_CREDENTIALS 4
-#define MQTT_CONNECT_UNAUTHORIZED 5
-    switch (status)
-    {
-    case MQTT_CONNECTION_TIMEOUT:
-        return "MQTT_CONNECTION_TIMEOUT";
-    case MQTT_CONNECTION_LOST:
-        return "MQTT_CONNECTION_LOST";
-    case MQTT_CONNECT_FAILED:
-        return "MQTT_CONNECT_FAILED";
-    case MQTT_DISCONNECTED:
-        return "MQTT_DISCONNECTED";
-    case MQTT_CONNECTED:
-        return "MQTT_CONNECTED";
-    case MQTT_CONNECT_BAD_PROTOCOL:
-        return "MQTT_CONNECT_BAD_PROTOCOL";
-    case MQTT_CONNECT_BAD_CLIENT_ID:
-        return "MQTT_CONNECT_BAD_CLIENT_ID";
-    case MQTT_CONNECT_UNAVAILABLE:
-        return "MQTT_CONNECT_UNAVAILABLE";
-    case MQTT_CONNECT_BAD_CREDENTIALS:
-        return "MQTT_CONNECT_BAD_CREDENTIALS";
-    case MQTT_CONNECT_UNAUTHORIZED:
-        return "MQTT_CONNECT_UNAUTHORIZED";
-    default:
-        return "UNKNOWN_STATUS";
-    }
 }
 
 /// @brief Converts a timestamp to a date and time String.
@@ -178,10 +135,8 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
 }
 
 
-#ifdef COMPILE_LVGL_ASSIST
-
+#ifdef COMPILE_LVGL
 #pragma region "LVGL Helper Functions"
-#include <lvgl.h>
 
 /// @brief Sets or clears a flag to a lvgl object.
 /// @param obj A pointer to the lvgl object.
@@ -261,4 +216,7 @@ String insert_color(String text, int color)
 }
 
 #pragma endregion
+#endif
+
+
 #endif
