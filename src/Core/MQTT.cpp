@@ -40,8 +40,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // Subscribe to all topics
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
         printf("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
+#ifdef MQTT_PREPROCESS
         // Send initial messages
         MQTT_Send("/status", "online", true, true);
+        static bool first_time = true;
+        if (first_time)
+        {
+            MQTT_Send("console/out", "Booted");
+            first_time = false;
+        }
+#endif
         if (handleMqttConnected)
         {
             handleMqttConnected(); // Call the connected handler if set
