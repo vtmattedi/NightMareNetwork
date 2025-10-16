@@ -31,7 +31,8 @@ void static LightColorSendById(uint8_t id, String value, String hostname)
 
 /// @brief Constructor that sets up the ServerVariables.
 /// @param Hostname he hostname of the host device.
-LightColorController::LightColorController(const char *Hostname) : LightController()
+LightColorController::LightColorController(const char *Hostname)
+    : LightController(Hostname) // Call the base constructor
 {
     // Sets the hostname.
     MQTTHostName = Hostname;

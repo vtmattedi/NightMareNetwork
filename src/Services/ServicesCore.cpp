@@ -1,9 +1,7 @@
 #include <Services/ServicesCore.h>
+#ifdef COMPILE_SERVICES
 
-
-extern void Send_to_MQTT(String, String);
-
-extern void FormatSend(String topic, String payload, String hostname)
+void FormatSend(String topic, String payload, String hostname)
 {
 
     String topicWithOwner = "";
@@ -17,3 +15,5 @@ extern void FormatSend(String topic, String payload, String hostname)
     Serial.printf("'%s' --> '%s' [%s]\n",topic.c_str(), topicWithOwner.c_str(),hostname.c_str());
     Send_to_MQTT(topicWithOwner, payload);
 }
+
+#endif
