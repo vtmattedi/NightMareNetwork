@@ -5,6 +5,10 @@
 #define DELIMITER (char)' '
 
 #ifdef ENABLE_PREPROCESSING
+#include <TimeLib.h>
+#include <ArduinoJson.h>
+const char *getBootReason(int reason);
+
 #ifdef SCHEDULER_AWARE
 #include <Xtra/Scheduler.h>
 #endif
