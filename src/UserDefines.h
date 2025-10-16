@@ -120,4 +120,3 @@ unsigned char *get_var_by_num(unsigned char identifier);
 
 /*---------------------------------------------*/
 #endif
-#endif
