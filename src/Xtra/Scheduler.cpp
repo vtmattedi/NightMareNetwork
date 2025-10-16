@@ -2,6 +2,11 @@
 #ifdef COMPILE_SCHEDULER
 Scheduler scheduler;
 static uint16_t taskID = 0;
+#ifdef USE_MILLIS
+#define GET_TIME () millis()
+#else
+#define GET_TIME () now()
+#endif
 
 /// @brief Constructor for the Scheduler class.
 Scheduler::Scheduler()
@@ -10,13 +15,19 @@ Scheduler::Scheduler()
     runCmd = nullptr;
 }
 
+#ifdef USE_NIGHTMARE_COMMAND
+// this has to be here because of the circular dependency
+extern NightMareResults handleNightMareCommand(const String &message);
+#endif
 /// @brief Sets the function to be called when a scheduled command is executed.
 void Scheduler::onCommand(void (*runCommand)(String cmd))
 {
+#ifdef USE_NIGHTMARE_COMMAND
+    handleNightMareCommand(cmd);
+#endif
     if (runCommand)
         runCmd = runCommand;
 }
-
 
 /// @brief Adds a new task to the scheduler.
 /// @param cmd The command to be executed.
@@ -37,7 +48,9 @@ uint32_t Scheduler::add(String cmd, uint32_t timestamp)
             tasks[i].repeat = false;
             tasks[i].interval = 0;
             currentTasks++;
+#ifdef COMPILE_SERIAL
             Serial.printf("\x1b[96;1m[Scheduler]\x1b[0m Added task ID %d: '%s' at %u\n", tasks[i].id, cmd.c_str(), timestamp);
+#endif
             return tasks[i].id;
         }
     }
@@ -46,7 +59,7 @@ uint32_t Scheduler::add(String cmd, uint32_t timestamp)
 /// @brief Retrieves a scheduled task by its ID.
 /// @param id The ID of the task to retrieve.
 /// @return A pointer to the scheduled task, or nullptr if not found.
-SchedulerTask* Scheduler::getByID(uint16_t id)
+SchedulerTask *Scheduler::getByID(uint16_t id)
 {
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
@@ -58,6 +71,8 @@ SchedulerTask* Scheduler::getByID(uint16_t id)
     return nullptr; // Indicate task not found
 }
 
+/// @brief Lists all scheduled tasks in JSON format.
+/// @return A String containing the JSON representation of all scheduled tasks.
 String Scheduler::listTasks()
 {
     DynamicJsonDocument doc(1024);
@@ -80,6 +95,9 @@ String Scheduler::listTasks()
     return output;
 }
 
+/// @brief Kills (removes) a scheduled task by its ID.
+/// @param id // The ID of the task to kill.
+/// @return // True if the task was found and killed, false otherwise.
 bool Scheduler::killByID(uint16_t id)
 {
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
@@ -95,26 +113,32 @@ bool Scheduler::killByID(uint16_t id)
     return false; // Indicate task not found
 }
 
+/// @brief Checks and runs any tasks that are due for execution.
+// This should be called regularly.
 void Scheduler::run()
 {
     if (currentTasks == 0)
         return;
 
-    uint32_t nowTime = now();
+    uint32_t nowTime = GET_TIME();
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
         if (tasks[i].armed && tasks[i].executionTime <= nowTime)
         {
+#ifdef COMPILE_SERIAL
             Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m Executing task ID %d: '%s' scheduled for %u (now: %u)\n", tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime, nowTime);
+#endif
             // Execute the command
             if (runCmd)
             {
                 runCmd(tasks[i].command);
             }
-            
+
             if (tasks[i].repeat && tasks[i].interval > 0)
             {
+#ifdef COMPILE_SERIAL
                 Serial.printf("\x1b[96;1m[Scheduler]\x1b[0m Rescheduling task ID %d: '%s' to %u\n", tasks[i].id, tasks[i].command.c_str(), nowTime + tasks[i].interval);
+#endif
                 // Reschedule the task
                 tasks[i].executionTime = nowTime + tasks[i].interval;
             }
@@ -128,6 +152,30 @@ void Scheduler::run()
     }
 }
 
+/// @brief This should be called when the system time is synchronized. I.E. time is set.
+/// This will adjust any scheduled tasks that were set in the past.
+/// @param oldTime The previous time before synchronization.
+/// If not available, will assume that the old system time was the seconds since boot.
+void Scheduler::onSync(unsigned int oldTime)
+{
+    unsigned int timeDiff = GET_TIME() - oldTime;
+    // When time is synced, we need to adjust old tasks execution times
+    for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
+    {
+        if (tasks[i].armed)
+        {
+            // if a task was scheduled we adjust it:
+            // new execution time = now() + (old execution time - oldTime)
+            // if we do not know
+            tasks[i].executionTime = GET_TIME() + (tasks[i].executionTime - oldTime);
+#ifdef COMPILE_SERIAL
+            Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m Disarming past task ID %d: '%s' scheduled for %u\n", tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime);
+#endif
+        }
+    }
+}
+
+/// @brief Clears all scheduled tasks.
 void Scheduler::clear()
 {
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)

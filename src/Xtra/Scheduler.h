@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #define MAX_SCHEDULER_TASKS 10
 
+// #define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
 
 struct SchedulerTask
 {
@@ -40,6 +41,7 @@ public:
     SchedulerTask* getByID(uint16_t id);
     bool killByID(uint16_t id);
     String listTasks();
+    void onSync();
 };
 
 extern Scheduler scheduler;

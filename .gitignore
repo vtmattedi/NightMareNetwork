@@ -1,2 +1,3 @@
 .vscode/*
 ./src/Core/creds.h
+src/Modules.config.h
