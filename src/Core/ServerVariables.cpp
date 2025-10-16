@@ -138,12 +138,13 @@ void ServerVariable<T>::change(T newValue)
 /// @tparam T The type of the variable
 /// @param newValue
 template <typename T>
-void ServerVariable<T>::force(T newValue)
+void ServerVariable<T>::force(T newValue, bool skip_send)
 {
     if (value != newValue)
     {
         value = newValue;
-        onValueChanged();
+        if (!skip_send)
+            onValueChanged();
     }
     if (debug)
         Serial.printf("[%d][%s]...[Forced]new value: [%s]...\n",millis(), label, String(value).c_str());

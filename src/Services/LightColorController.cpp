@@ -15,12 +15,6 @@ void static LightColorSendById(uint8_t id, String value, String hostname)
         senddata += value;
         FormatSend("/Color", senddata, hostname);
     }
-    else if (id == LIGHTSTATE_ID)
-    {
-        // senddata = "u";
-        senddata += value;
-        FormatSend("/Lights", senddata, hostname);
-    }
     else if (id == BRIGHTNESS_ID)
     {
         senddata = "";

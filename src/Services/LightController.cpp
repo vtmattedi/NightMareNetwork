@@ -11,7 +11,7 @@ void static LightSendById(uint8_t id, String value, String hostname)
     {
         // senddata = "u";
         senddata += value;
-        FormatSend("/Lights", senddata, hostname);
+        FormatSend("/Light", senddata, hostname);
     }
 };
 
@@ -31,6 +31,7 @@ LightController::LightController(const char *Hostname)
     // Assign the function to be called when we change some ServerVariable on the client side.
     LightState.on_send_with_info = LightSendById;
     AutomationRestore.on_send_with_info = LightSendById;
+
 }
 
 /// @brief Assign a function to all ServerVariables on_changed status.
@@ -59,15 +60,14 @@ void LightController::ToggleLight()
 void LightController::SetLight(bool state)
 {
     LightState.change(state);
-
 }
 
 /// @brief Toggles the light to the opposite state and stops the automations.
 void LightController::ToggleForce()
 {
-    LightState.force(!LightState.value);
-    AutomationRestore.force(now() + 2 * HOUR);
-    FormatSend("/Lights", "toggle-force", MQTTHostName);
+    LightState.force(!LightState.value, true);
+    AutomationRestore.force(now() + 2 * HOUR, true);
+    FormatSend("/Light", "toggle-force", MQTTHostName);
 }
 
 /// @brief Whether or not the server values are stale.
@@ -80,7 +80,7 @@ bool LightController::IsStale()
 /// @brief Restore the device to automatic mode.
 void LightController::RestoreAutomations()
 {
-    FormatSend("/Lights", "auto", MQTTHostName);
+    FormatSend("/Light", "auto", MQTTHostName);
     AutomationRestore.change(0);
 }
 
