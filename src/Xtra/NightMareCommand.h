@@ -1,6 +1,6 @@
 #pragma once
 #include <Modules.config.h>
-#include <Arduino.h>
+#include <Xtra/NightMareTypes.h>
 
 #define DELIMITER (char)' '
 
@@ -14,17 +14,7 @@ const char *getBootReason(int reason);
 #endif
 #endif
 
-struct NightMareResults
-{
-    bool result;
-    String response;
-};
 
-struct NightMareMessage
-{
-    String command;
-    String args[5] = {"", "", "", "", ""};
-};
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));
 NightMareResults handleNightMareCommand(const String &message);

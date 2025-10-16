@@ -6,6 +6,12 @@
 #include <ArduinoJson.h>
 #define MAX_SCHEDULER_TASKS 10
 
+#ifdef USE_NIGHTMARE_COMMAND
+#include <Xtra/NightMareTypes.h>
+// this has to be here because of the circular dependency
+extern NightMareResults handleNightMareCommand(const String &message);
+#endif
+
 // #define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
 
 struct SchedulerTask
@@ -27,21 +33,22 @@ struct SchedulerTask
 
 class Scheduler
 {
-    private:
+private:
     SchedulerTask tasks[MAX_SCHEDULER_TASKS];
     uint8_t currentTasks = 0;
     uint8_t nextTaskIndex = 0;
     void (*runCmd)(String cmd);
+
 public:
     Scheduler();
     void onCommand(void (*runCommand)(String cmd));
     uint32_t add(String cmd, uint32_t timestamp);
     void run();
     void clear();
-    SchedulerTask* getByID(uint16_t id);
+    SchedulerTask *getByID(uint16_t id);
     bool killByID(uint16_t id);
     String listTasks();
-    void onSync();
+    void onSync(unsigned int timestamp = 0);
 };
 
 extern Scheduler scheduler;

@@ -3,9 +3,9 @@
 Scheduler scheduler;
 static uint16_t taskID = 0;
 #ifdef USE_MILLIS
-#define GET_TIME () millis()
+#define GET_TIME() millis()
 #else
-#define GET_TIME () now()
+#define GET_TIME() now()
 #endif
 
 /// @brief Constructor for the Scheduler class.
@@ -15,16 +15,9 @@ Scheduler::Scheduler()
     runCmd = nullptr;
 }
 
-#ifdef USE_NIGHTMARE_COMMAND
-// this has to be here because of the circular dependency
-extern NightMareResults handleNightMareCommand(const String &message);
-#endif
 /// @brief Sets the function to be called when a scheduled command is executed.
 void Scheduler::onCommand(void (*runCommand)(String cmd))
 {
-#ifdef USE_NIGHTMARE_COMMAND
-    handleNightMareCommand(cmd);
-#endif
     if (runCommand)
         runCmd = runCommand;
 }
@@ -131,6 +124,9 @@ void Scheduler::run()
             // Execute the command
             if (runCmd)
             {
+#ifdef USE_NIGHTMARE_COMMAND
+                handleNightMareCommand(tasks[i].command);
+#endif
                 runCmd(tasks[i].command);
             }
 
