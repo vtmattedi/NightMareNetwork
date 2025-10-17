@@ -92,7 +92,7 @@ public:
   void handleServer(T newServerValue);
   void sync();
   void change(T newValue);
-  void force(T newValue, bool skip_send = false);
+  void force(T newValue);
 
 private:
   void onValueChanged();

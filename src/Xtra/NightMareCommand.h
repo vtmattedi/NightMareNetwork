@@ -14,6 +14,9 @@ const char *getBootReason(int reason);
 #endif
 #endif
 
+#ifdef COMPILE_MQTT
+#include <Core/MQTT.h>
+#endif
 
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));

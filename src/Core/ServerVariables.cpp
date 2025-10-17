@@ -122,29 +122,26 @@ void ServerVariable<T>::change(T newValue)
             millis_to_send = millis() + millis_to_delay_before_send;
             if (debug)
                 Serial.printf("[%d][%s] delay Started\n", millis(), label);
+            send_handled = false;
         }
         else
             sendChanges();
-        send_handled = false;
+        onValueChanged();
     }
 
     millis_to_assert_server = millis() + ASSERT_DELAY;
     assert_handled = false;
-    if (debug)
-    if (value_changed)
-        onValueChanged();
 }
 /// @brief Forces an state on the variable. Does not trigger `on_send`.
 /// @tparam T The type of the variable
 /// @param newValue
 template <typename T>
-void ServerVariable<T>::force(T newValue, bool skip_send)
+void ServerVariable<T>::force(T newValue)
 {
     if (value != newValue)
     {
         value = newValue;
-        if (!skip_send)
-            onValueChanged();
+        onValueChanged();
     }
     if (debug)
         Serial.printf("[%d][%s]...[Forced]new value: [%s]...\n",millis(), label, String(value).c_str());

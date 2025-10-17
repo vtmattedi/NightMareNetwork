@@ -118,6 +118,57 @@ NightMareResults handleNightMareCommand(const String &message)
         serializeJson(doc, res);
         result.response = res;
     }
+#ifdef COMPILE_MQTT
+    else if (parsedMsg.command == "MQTT")
+    {
+        String subcmd = parsedMsg.args[0];
+        subcmd.toUpperCase();
+        if (subcmd == "STATE")
+        {
+            int8_t state = MQTT_State();
+            switch (state)
+            {
+            case -2:
+                result.response = "MQTT Connecting";
+                break;
+            case -1:
+                result.response = "MQTT Not Initialized";
+                break;
+            case 0:
+                result.response = "MQTT Disconnected";
+                break;
+            case 1:
+                result.response = "MQTT Connected Local";
+                break;
+            case 2:
+                result.response = "MQTT Connected Remote";
+                break;
+            }
+        }
+        else if (subcmd == "CONNECT")
+        {
+            String dest = parsedMsg.args[1];
+            dest.toUpperCase();
+            if (dest == "LOCAL" || dest == "1")
+            {
+                MQTT_change_to(true);
+                result.response = "MQTT Connecting To Local...";
+            }
+            else if (dest == "REMOTE" || dest == "2")
+            {
+                MQTT_change_to(false);
+                result.response = "MQTT Connecting To Remote...";
+            }
+            result.result = true;
+        }
+        else
+        {
+            result.response = "Unknown MQTT subcommand available: [CONNECT <Local|Remote>, STATUS].";
+            result.result = false;
+        }
+    }
+#endif
+
 #ifdef SCHEDULER_AWARE
     /// Format SCHEDULE <command> <delta seconds> [interval]
     /// Schedules a command to be run after a specific delay (in seconds).

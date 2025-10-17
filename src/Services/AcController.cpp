@@ -220,8 +220,8 @@ void AcController::ManualSync(byte AcTemp, bool PowerOn)
     manualsync += PowerOn;
     manualsync += " ";
     manualsync += AcTemp;
-    FormatSend("/console/in", manualsync, MQTTHostName);
     AcTemperature.force(PowerOn ? AcTemp : -1 * (int)AcTemp);
+    FormatSend("/console/in", manualsync, MQTTHostName);
 }
 
 /// @brief Sets the SleepIn status for the night.
@@ -268,7 +268,7 @@ int8_t AcController::GetState()
 
 void AcController::SetDoorPause(bool pause)
 {
-    Send_to_MQTT(String(MQTTHostName) + "/console/in", "PAUSEDOORSENSOR " + String((int)pause));
+    FormatSend("/console/in", "PAUSEDOORSENSOR " + String((int)pause), MQTTHostName);
     DoorState.force(bitWrite(DoorState.value, 1, pause));
 }
 

@@ -6,6 +6,8 @@
 /// @param hostname The hostname stored in the `userinfo` of the `ServerVariables<>`
 void static LightSendById(uint8_t id, String value, String hostname)
 {
+    // Serial.printf("LightSendById called with id=%d, value=%s, hostname=%s\n", id, value.c_str(), hostname.c_str());
+
     String senddata = "";
     if (id == LIGHTSTATE_ID)
     {
@@ -31,7 +33,6 @@ LightController::LightController(const char *Hostname)
     // Assign the function to be called when we change some ServerVariable on the client side.
     LightState.on_send_with_info = LightSendById;
     AutomationRestore.on_send_with_info = LightSendById;
-
 }
 
 /// @brief Assign a function to all ServerVariables on_changed status.
@@ -45,7 +46,7 @@ void LightController::On_any_value_changed(void (*callback)(void))
 /// @brief Shutdown the lights.
 void LightController::Shutdown()
 {
-    LightState.force(false);
+    LightState.change(false);
     // FormatSend("/Lights", "0", MQTTHostName);
 }
 
@@ -65,8 +66,8 @@ void LightController::SetLight(bool state)
 /// @brief Toggles the light to the opposite state and stops the automations.
 void LightController::ToggleForce()
 {
-    LightState.force(!LightState.value, true);
-    AutomationRestore.force(now() + 2 * HOUR, true);
+    LightState.force(!LightState.value);
+    AutomationRestore.force(now() + 2 * HOUR);
     FormatSend("/Light", "toggle-force", MQTTHostName);
 }
 

@@ -2,7 +2,7 @@
 #define REMOTE_MQTT_URL "64000315ae8845b9b763275cb3d59b8c.s2.eu.hivemq.cloud"
 #define REMOTE_MQTT_PORT 8883
 #define REMOTE_MQTT_WEBSOCKET 8884
-#define LOCAL_MQTT_HOST "10.10.3.15"
+#define LOCAL_MQTT_HOST "10.10.3.11"
 #define LOCAL_MQTT_PORT 1883
 #define MQTT_USER "Turing"
 #define MQTT_PASSWD "5Ep3ub@u4LV9u6t"

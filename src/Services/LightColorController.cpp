@@ -6,6 +6,7 @@
 /// @param hostname The hostname stored in the `userinfo` of the `ServerVariables<>`
 void static LightColorSendById(uint8_t id, String value, String hostname)
 {
+    // Serial.printf("LightColorSendById called with id=%d, value=%s, hostname=%s\n", id, value.c_str(), hostname.c_str());
 
     String senddata = "";
 
@@ -25,30 +26,30 @@ void static LightColorSendById(uint8_t id, String value, String hostname)
 
 /// @brief Constructor that sets up the ServerVariables.
 /// @param Hostname he hostname of the host device.
-LightColorController::LightColorController(const char *Hostname)
-    : LightController(Hostname) // Call the base constructor
+LightColorController::LightColorController(const char *Hostname) 
+: LightController(Hostname)
 {
     // Sets the hostname.
     MQTTHostName = Hostname;
     Brightness.userinfo = Hostname;
-    LightState.userinfo = Hostname;
     HexColor.userinfo = Hostname;
-    AutomationRestore.userinfo = Hostname;
+    // LightState.userinfo = Hostname;
+    // AutomationRestore.userinfo = Hostname;
     // initialized the labels for debug if needed
     HexColor.label = (char *)"Light Hex Code";
     Brightness.label = (char *)"Light Brightness";
-    LightState.label = (char *)"Light State";
-    AutomationRestore.label = (char *)"Light Automation Restore";
+    // LightState.label = (char *)"Light State";
+    // AutomationRestore.label = (char *)"Light Automation Restore";
     // Set up the ID of each SeverVariable os we can identify which format to use when sending a value
     HexColor.userid = HEXCOLOR_ID;
     Brightness.userid = BRIGHTNESS_ID;
-    LightState.userid = LIGHTSTATE_ID;
-    AutomationRestore.userid = RESTORE_ID;
+    // LightState.userid = LIGHTSTATE_ID;
+    // AutomationRestore.userid = RESTORE_ID;
     // Assign the function to be called when we change some ServerVariable on the client side.
     Brightness.on_send_with_info = LightColorSendById;
-    LightState.on_send_with_info = LightColorSendById;
     HexColor.on_send_with_info = LightColorSendById;
-    AutomationRestore.on_send_with_info = LightColorSendById;
+    // LightState.on_send_with_info = LightColorSendById;
+    // AutomationRestore.on_send_with_info = LightColorSendById;
 }
 
 /// @brief Assign a function to all ServerVariables on_changed status.
