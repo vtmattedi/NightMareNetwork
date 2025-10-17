@@ -1,4 +1,6 @@
 #pragma Once
+#ifndef NIGHTMARE_CORE_MQTT_H
+#define NIGHTMARE_CORE_MQTT_H
 //* MQTT Wrapper for expressif ESP32 mqtt client
 // * Supports local and remote MQTT brokers with TLS
 // * Automatically prepends device name to topics
@@ -46,4 +48,5 @@ void MQTT_onDisconnected(void (*cb)(bool));
 int8_t MQTT_Connected();
 void Send_to_MQTT(String topic, String message);
 int8_t MQTT_State();
+#endif
 #endif
