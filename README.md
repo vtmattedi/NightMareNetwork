@@ -16,8 +16,10 @@ The structure of this Lib is as follows:
     + Classes that encapsulates a controller for another device on the network
   + Xtra Folder
     + Some extra components that are not really core nor a service but is still common code across multiple devices on the network
+  + Tcp Folder
+    + TCP client & server with integration to other modules & transmission modes.
 
-## Current Services
+## Current Services (Controllers)
 
 1. Ac Controller
 2. Light Controller
