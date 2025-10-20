@@ -64,9 +64,10 @@ void WiFi_Task(void *pvParameters)
 /// The callback function should have the signature: void callback(unsigned int elapsedTimeMs)
 void WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *waitCallback(unsigned int))
 {
-
-    WiFi.begin(ssid, password);
     WIFI_LOGF("<Sync> Connecting to WiFi SSID: %s", ssid);
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(DEVICE_NAME);
+    WiFi.begin(ssid, password);
     unsigned int start = millis();
     while (WiFi.status() != WL_CONNECTED)
     {
@@ -93,6 +94,8 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
 {
 
     WIFI_LOGF("<Async> Connecting to WiFi SSID: %s", ssid);
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(DEVICE_NAME);
     WiFi.begin(ssid, password);
 
     if (WiFiTaskHandle)

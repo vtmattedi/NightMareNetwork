@@ -14,13 +14,13 @@
 #ifndef NIGHTMARE_MODULES_CONFIG_H
 #define NIGHTMARE_MODULES_CONFIG_H
 
-// #define DEVICE_NAME "NightMare Device" //Default device name, used in MQTT and other places
 // #define COMPILE_SERIAL //Uncomment this line to enable serial debug output (Global)
 #pragma region "Core Modules"
-//Core Modules 
+//Core Modules
+#define COMPILE_WIFI_MODULE // Compile the WiFi module 
 #define COMPILE_MQTT //Compiles MQTT module
 /*--- MQTT configs */
-#define DEVICE_NAME "NightMare Device" //Default device name, used in MQTT and other places
+#define DEVICE_NAME "Turing" //Default device name, used in MQTT and other places
 #define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
 #define MQTT_PREPROCESS //Enable MQTT command preprocessing (Requires Command Resolver) (using <DEVICE_NAME>/console/in topic)
 /*---------------------*/
@@ -54,11 +54,12 @@
 #define COMPILE_SCHEDULER // Compile the scheduler module
 /*--- Scheduler configs */
 #define USE_NIGHTMARE_COMMAND // Use the NightMare Command resolver on the scheduler commands
-#define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
+// #define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
 /*---------------------*/
 #define COMPILE_COMMAND_RESOLVER // Compile the command resolver module
 #ifdef COMPILE_COMMAND_RESOLVER
 /*--- Command Resolver configs */
+#define COMPILE_SERIAL_COMMAND_RESOLVER // Compile the serial command resolver
 #define ENABLE_PREPROCESSING // Enable command pre processing
 #define SCHEDULER_AWARE // Compile the command resolver module with scheduler support on the PREPROCESSING
 /*---------------------*/
