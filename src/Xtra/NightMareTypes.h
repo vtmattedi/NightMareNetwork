@@ -9,5 +9,6 @@ struct NightMareResults
 struct NightMareMessage
 {
     String command;
+    String subcommand;
     String args[5] = {"", "", "", "", ""};
 };

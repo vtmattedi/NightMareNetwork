@@ -46,7 +46,7 @@ NightMareResults handleNightMareCommand(const String &message)
     NightMareMessage parsedMsg;
     String current_string = "";
 #ifdef COMPILE_SERIAL
-    Serial.printf("\x1b[96;1m[Command]\x1b[0m Received: '%s'\n", message.c_str());
+    Serial.printf("%s Received: '%s'\n", COMMAND_RESOLVER_LOG, message.c_str());
 #endif
     int index = 0;
     // gets command and args using the delimiters
@@ -94,6 +94,8 @@ NightMareResults handleNightMareCommand(const String &message)
         }
     }
     parsedMsg.command.toUpperCase();
+    parsedMsg.subcommand = parsedMsg.args[0];
+    parsedMsg.subcommand.toLowerCase();
 #ifdef ENABLE_PREPROCESSING
     bool prehandled = true;
     // Basic commands that can be handled without a resolver
@@ -169,6 +171,26 @@ NightMareResults handleNightMareCommand(const String &message)
     }
 #endif
 
+#ifdef COMPILE_WIFI_MODULE
+    else if (parsedMsg.command == "WIFI")
+    {
+        String subcmd = parsedMsg.args[0];
+        subcmd.toUpperCase();
+        if (subcmd == "IP")
+        {
+            result.response = WiFi.localIP().toString();
+        }
+        else if (subcmd == "STATE")
+        {
+
+        }
+        else
+        {
+            result.response = "Unknown WIFI subcommand available: [STATE, RECONNECT].";
+            result.result = false;
+        }
+    }
+#endif
 #ifdef SCHEDULER_AWARE
     /// Format SCHEDULE <command> <delta seconds> [interval]
     /// Schedules a command to be run after a specific delay (in seconds).
@@ -266,3 +288,21 @@ NightMareResults handleNightMareCommand(const String &message)
     }
     return result;
 }
+
+#ifdef COMPILE_SERIAL_COMMAND_RESOLVER
+
+/// @brief Listens to Serial input and resolves commands using the NightMare command resolver.
+/// This function uses Serial.readStringUntil to read input until the specified character is encountered.
+/// @param readUntilChar The character to read until (default is '\n')
+void NightMareCommand_SerialResolver(char readUntilChar)
+{
+    if (Serial.available())
+    {
+        String cmd = Serial.readStringUntil(readUntilChar);
+        cmd.trim();
+        NightMareResults res = handleNightMareCommand(cmd);
+        Serial.printf("<\x1b[90m%s\x1b[0m>%s\n", cmd.c_str(), OK_LOG(res.result));
+        Serial.printf("%s\n", res.response.c_str());
+    }
+}
+#endif

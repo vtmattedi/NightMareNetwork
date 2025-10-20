@@ -2,10 +2,18 @@
 #ifdef COMPILE_SCHEDULER
 Scheduler scheduler;
 static uint16_t taskID = 0;
-#ifdef USE_MILLIS
+#ifdef SCHEDULER_USE_MILLIS
 #define GET_TIME() millis()
 #else
 #define GET_TIME() now()
+#endif
+
+#ifdef COMPILE_SERIAL
+#define SCHEDULER_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", SCHEDULER_LOG, ##__VA_ARGS__)
+#define SCHEDULER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt "\n", ERR_LOG, SCHEDULER_LOG, ##__VA_ARGS__)
+#else
+#define SCHEDULER_LOGF(fmt, ...)
+#define SCHEDULER_ERRORF(fmt, ...)
 #endif
 
 /// @brief Constructor for the Scheduler class.
@@ -41,12 +49,11 @@ uint32_t Scheduler::add(String cmd, uint32_t timestamp)
             tasks[i].repeat = false;
             tasks[i].interval = 0;
             currentTasks++;
-#ifdef COMPILE_SERIAL
-            Serial.printf("\x1b[96;1m[Scheduler]\x1b[0m Added task ID %d: '%s' at %u\n", tasks[i].id, cmd.c_str(), timestamp);
-#endif
+            SCHEDULER_LOGF("Added task ID %d: '%s' at %u\n", tasks[i].id, cmd.c_str(), timestamp);
             return tasks[i].id;
         }
     }
+    SCHEDULER_ERRORF("Failed to add task: '%s' at %u - Scheduler full\n", cmd.c_str(), timestamp);
     return -1; // Indicate failure to add task
 }
 /// @brief Retrieves a scheduled task by its ID.
@@ -99,7 +106,7 @@ bool Scheduler::killByID(uint16_t id)
         {
             tasks[i].armed = false;
             currentTasks--;
-            Serial.printf("\x1b[91;1m[Scheduler]\x1b[0m Killed task ID %d: '%s'\n", tasks[i].id, tasks[i].command.c_str());
+            SCHEDULER_LOGF("Killed task ID %d: '%s'\n", tasks[i].id, tasks[i].command.c_str());
             return true;
         }
     }
@@ -108,6 +115,7 @@ bool Scheduler::killByID(uint16_t id)
 
 /// @brief Checks and runs any tasks that are due for execution.
 // This should be called regularly.
+// Not that the execution of the command is done in the same context as this call.
 void Scheduler::run()
 {
     if (currentTasks == 0)
@@ -119,13 +127,11 @@ void Scheduler::run()
         if (tasks[i].armed && tasks[i].executionTime <= nowTime)
         {
 #ifdef COMPILE_SERIAL
-            Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m Executing task ID %d: '%s' scheduled for %u (now: %u)\n", tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime, nowTime);
+            Serial.printf("%s Executing task ID %d: '%s' scheduled for %u (now: %u)\n", SCHEDULER_LOG, tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime, nowTime);
 #endif
 #ifdef USE_NIGHTMARE_COMMAND
                 NightMareResults res = handleNightMareCommand(tasks[i].command);
-#ifdef COMPILE_SERIAL
-                Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m:[\x1b[%s\x1b[0m] %s\n", res.result ? "92;1mOK" : "91;1mERR", res.response.c_str());
-#endif
+                SCHEDULER_LOGF("Task ID %d executed with result: %s \n%s\n", tasks[i].id, OK_LOG(res.result), res.response.c_str());
 #endif
             // Execute the command
             if (runCmd)
@@ -135,9 +141,7 @@ void Scheduler::run()
 
             if (tasks[i].repeat && tasks[i].interval > 0)
             {
-#ifdef COMPILE_SERIAL
-                Serial.printf("\x1b[96;1m[Scheduler]\x1b[0m Rescheduling task ID %d: '%s' to %u\n", tasks[i].id, tasks[i].command.c_str(), nowTime + tasks[i].interval);
-#endif
+                SCHEDULER_LOGF("Rescheduling task ID %d: '%s' to %u\n", tasks[i].id, tasks[i].command.c_str(), nowTime + tasks[i].interval);
                 // Reschedule the task
                 tasks[i].executionTime = nowTime + tasks[i].interval;
             }
@@ -157,8 +161,9 @@ void Scheduler::run()
 /// If not available, will assume that the old system time was the seconds since boot.
 void Scheduler::onSync(unsigned int oldTime)
 {
-    unsigned int timeDiff = GET_TIME() - oldTime;
+    // unsigned int timeDiff = GET_TIME() - oldTime;
     // When time is synced, we need to adjust old tasks execution times
+    SCHEDULER_LOGF("Adjusting scheduled tasks for time sync. Old time: %u, New time: %u\n", oldTime, GET_TIME());
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
         if (tasks[i].armed)
@@ -167,9 +172,6 @@ void Scheduler::onSync(unsigned int oldTime)
             // new execution time = now() + (old execution time - oldTime)
             // if we do not know
             tasks[i].executionTime = GET_TIME() + (tasks[i].executionTime - oldTime);
-#ifdef COMPILE_SERIAL
-            Serial.printf("\x1b[93;1m[Scheduler]\x1b[0m Disarming past task ID %d: '%s' scheduled for %u\n", tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime);
-#endif
         }
     }
 }

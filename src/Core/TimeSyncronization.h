@@ -18,5 +18,9 @@
 
 #define API_URL "http://worldtimeapi.org/api/timezone/America/Bahia.txt"
 
+#ifdef COMPILE_SCHEDULER
+#include <Xtra/Scheduler.h>
+#endif
+
 bool syncTime();
 #endif

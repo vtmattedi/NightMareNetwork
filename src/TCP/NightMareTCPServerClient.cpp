@@ -1,5 +1,5 @@
 #include "NightMareTCPServerClient.h"
-
+#ifdef COMPILE_NIGHTMARE_TCP_SERVER
 NightMareTCPServerClient::NightMareTCPServerClient()
 {
   // The actual TCP Object
@@ -60,3 +60,5 @@ String NightMareTCPServerClient::getIP()
     return "";
   }
 }
+
+#endif

@@ -1,5 +1,5 @@
 #include "NightMareTCPCore.h"
-
+#if defined(COMPILE_NIGHTMARE_TCP_CLIENT) || defined(COMPILE_NIGHTMARE_TCP_SERVER)
 // Prepare the msg according to the transmission mode
 String PrepareMsg(String msg, TransmissionMode mode)
 {
@@ -56,3 +56,5 @@ int log_f(bool _debug, const char *format, ...)
   }
   return len;
 }
+
+#endif

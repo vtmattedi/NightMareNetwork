@@ -1,5 +1,5 @@
 #include "NightMareTCPServer.h"
-
+#ifdef COMPILE_NIGHTMARE_TCP_SERVER
 String NightMareTCPServer::NightMareCommands_Server(String msg, byte index)
 {
   String response = "";
@@ -299,3 +299,4 @@ NightMareTCPServer::NightMareTCPServer(int port, bool debug) : _message_callback
   _port = port;
   _debug = debug;
 }
+#endif

@@ -5,7 +5,7 @@
 /// @return True if successful or false otherwise.
 bool syncTime()
 {
-bool result = false;
+  bool result = false;
 #ifdef COMPILE_SERIAL
   Serial.println("Syncing Time Online");
 #endif
@@ -13,7 +13,7 @@ bool result = false;
   HTTPClient http;
   http.begin(client, API_URL); // HTTP
   int httpCode = http.GET();
-  
+
   // httpCode will be negative on error
   if (httpCode > 0)
   {
@@ -46,7 +46,11 @@ bool result = false;
       }
       setTime(_timestamp);
       result = true;
-  }
+#if defined(COMPILE_SCHEDULER) && !defined(SCHEDULER_USE_MILLIS)
+      // Notify scheduler of time change
+      scheduler.onSync(millis() / 1000);
+#endif
+    }
   }
   else
   {
@@ -56,7 +60,6 @@ bool result = false;
   }
   http.end();
   return result;
- 
 }
 
 #endif

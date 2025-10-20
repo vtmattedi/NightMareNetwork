@@ -17,6 +17,9 @@
 #define HOUR 3600
 #define MINUTE 60
 
+
+#define USE_MS true
+#define USE_SECONDS false
 /// Max of tasks handled by the Timer Handler
 #define MAX_TASKS 20
 
@@ -34,6 +37,8 @@ public:
   uint16_t interval = 100;
   /// @brief Last time the callback was called.
   uint32_t last_time = 0;
+  /// @brief Flag to indicate if the task is timeout (will self delete after one trigger).
+  bool is_timeout = false;
   /// @brief The pointer to the callback function.
   void (*callback)() = NULL;
   void run();
@@ -62,6 +67,8 @@ public:
   TimerTask _tasks[MAX_TASKS];
   bool create(String label, uint16_t interval, void (*callback)(void), bool use_millis = false);
   indexresult getIndex(String label);
+  indexresult getIndex();
+  bool setTimeout(void (*callback)(void), uint16_t interval, bool use_millis = false);
   void run();
   String Timeleft(String label);
 };

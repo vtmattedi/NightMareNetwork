@@ -1,4 +1,6 @@
 #include "NightMareTCPClient.h"
+#ifdef COMPILE_NIGHTMARE_TCP_CLIENT
+
 
 #ifndef USE_KEEP_ALIVE_BY_DEFAULT
 #define USE_KEEP_ALIVE_BY_DEFAULT false
@@ -295,3 +297,5 @@ void NightMareTCPClient::newMessage(String message)
         }
     }
 }
+
+#endif
