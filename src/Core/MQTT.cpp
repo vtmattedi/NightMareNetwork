@@ -10,6 +10,9 @@ static bool mqtt_connected = false;
 esp_mqtt_client_handle_t mqttClient = NULL;
 static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 0 = disconnected, 1 = local connected, 2 = remote connected
 static bool local_initialized = false; // True if initialized as local, false if remote
+#define MAX_MQTT_RETRIES 1
+static int8_t mqtt_retries = 0;
+
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -33,11 +36,10 @@ static String local_ip = LOCAL_MQTT_HOST;
 #define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
 
 #ifdef COMPILE_SERIAL
-#define printf(...) \
-    printc;         \
-    Serial.printf(__VA_ARGS__);
+#define MQTT_LOG(fmt, ...) \
+    Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
 #else
-#define printf(...)
+#define MQTT_LOG(...)
 #endif
 /*Forward Declarations for private functions*/
 void MQTT_Config(bool local);
@@ -53,7 +55,7 @@ void mqtt_control_task(void *arg)
             switch (cmd)
             {
             case MQTT_CMD_SWITCH_TO_LOCAL:
-                printf("Control Task: Switching to LOCAL...\n");
+                MQTT_LOG("Control Task: Switching to LOCAL...\n");
                 if (mqttClient)
                 {
                     esp_mqtt_client_stop(mqttClient);
@@ -67,7 +69,7 @@ void mqtt_control_task(void *arg)
                 break;
 
             case MQTT_CMD_SWITCH_TO_REMOTE:
-                printf("Control Task: Switching to REMOTE...\n");
+                MQTT_LOG("Control Task: Switching to REMOTE...\n");
                 if (mqttClient)
                 {
                     esp_mqtt_client_stop(mqttClient);
@@ -81,7 +83,7 @@ void mqtt_control_task(void *arg)
                 break;
 
             case MQTT_CMD_DISCONNECT:
-                printf("Control Task: Disconnecting...\n");
+                MQTT_LOG("Control Task: Disconnecting...\n");
                 if (mqttClient)
                 {
                     esp_mqtt_client_stop(mqttClient);
@@ -95,7 +97,7 @@ void mqtt_control_task(void *arg)
                 break;
             // This should rarely be used, but is here for completeness
             case MQTT_CMD_RECONNECT:
-                printf("Control Task: Reconnecting...\n");
+                MQTT_LOG("Control Task: Reconnecting...\n");
                 if (mqttClient)
                 {
                     esp_mqtt_client_reconnect(mqttClient);
@@ -118,10 +120,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
     {
         mqtt_state = local_initialized ? 1 : 2;
-        printf(" MQTT connected successfully!\n");
+        MQTT_LOG(" MQTT connected successfully!\n");
         // Subscribe to all topics
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
-        printf("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
+        MQTT_LOG("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
 #ifdef MQTT_PREPROCESS
         // Send initial messages
         MQTT_Send("/status", "online", true, true);
@@ -130,6 +132,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         {
             MQTT_Send("console/out", "Booted");
             first_time = false;
+        }
+        else {
+            MQTT_Send("console/out", "Connected");
         }
 #endif
         if (handleMqttConnected)
@@ -141,7 +146,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
     {
         mqtt_state = 0;
-        printf("MQTT disconnected!");
+        MQTT_LOG("MQTT disconnected!");
         if (handleMqttDisconnected)
         {
             handleMqttDisconnected(local_initialized);
@@ -150,15 +155,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 
     case MQTT_EVENT_SUBSCRIBED:
-        printf("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
+        MQTT_LOG("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
 
     case MQTT_EVENT_UNSUBSCRIBED:
-        printf("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
+        MQTT_LOG("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
 
+
     case MQTT_EVENT_PUBLISHED:
-        printf("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
+        MQTT_LOG("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
         break;
 
     case MQTT_EVENT_DATA:
@@ -168,7 +174,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
             String topicStr = String(event->topic, event->topic_len);
             String payloadStr = String(event->data, event->data_len);
-            printf("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+            MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
             if (topicStr == String(DEVICE_NAME) + "/console/in" || topicStr == "All/console/in")
             {
@@ -179,17 +185,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             }
             else if (topicStr == "All/connection")
             {
-                bool local = (payloadStr != "go_external");
+                int index = payloadStr.indexOf(';');
+                String cmd = payloadStr.substring(0, index);
+                String targetIP = payloadStr.substring(index + 1);
+
+                bool local = (cmd != "go_external");
                 if (local != local_initialized)
                 {
                     if (local)
                     {
-                        int _index = payloadStr.indexOf(' ');
-                        if (_index > 0)
-                        {
-                            local_ip = payloadStr.substring(_index + 1);
-                            printf("Switching to local with IP: %s\n", local_ip.c_str());
-                        }
+                        local_ip = targetIP;
+                        MQTT_LOG("Switching to LOCAL MQTT at %s\n", local_ip.c_str());
                     }
                     MQTT_change_to(local);
                 }
@@ -202,23 +208,33 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 
     case MQTT_EVENT_ERROR:
-        printf("MQTT_EVENT_ERROR\n");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
         {
-            printf("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
-            printf("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
-            printf("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
-                   strerror(event->error_handle->esp_transport_sock_errno));
+            MQTT_LOG("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
+            MQTT_LOG("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
+            MQTT_LOG("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
+                     strerror(event->error_handle->esp_transport_sock_errno));
         }
         else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED)
         {
-            printf("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
+            MQTT_LOG("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
+        }
+
+        if (mqtt_retries >= MAX_MQTT_RETRIES)
+        {
+            MQTT_LOG("Max MQTT retries reached. Giving up on connection attempts. (switchin)\n");
+            MQTT_change_to(!local_initialized);
+            
+        }
+        else
+        {
+            mqtt_retries++;
         }
 
         break;
 
     default:
-        printf("Other event id:%d\n", event->event_id);
+        MQTT_LOG("Other event id:%d\n", event->event_id);
         break;
     }
 }
@@ -266,7 +282,7 @@ void MQTT_Control_Init()
                     5, // Priority
                     &mqtt_control_task_handle);
 
-        printf("MQTT Control Task initialized\n");
+        MQTT_LOG("MQTT Control Task initialized\n");
     }
 }
 
@@ -299,7 +315,7 @@ void MQTT_Config(bool local)
         // Local connection (non-secure)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtt://%s:%d", local_ip.c_str(), LOCAL_MQTT_PORT);
         mqtt_cfg.uri = uri_buffer;
-        printf("MQTT client initialized for local connection.\n");
+        MQTT_LOG("MQTT client initialized for local connection.\n");
     }
     else
     {
@@ -307,7 +323,7 @@ void MQTT_Config(bool local)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtts://%s:%d", REMOTE_MQTT_URL, REMOTE_MQTT_PORT);
         mqtt_cfg.uri = uri_buffer;
         mqtt_cfg.cert_pem = root_ca; // Set to NULL to disable server cert verification
-        printf("MQTT client initialized for remote connection.\n");
+        MQTT_LOG("MQTT client initialized for remote connection.\n");
     }
 
     mqttClient = esp_mqtt_client_init(&mqtt_cfg);
@@ -319,7 +335,7 @@ void MQTT_Config(bool local)
     }
     else
     {
-        printf("Failed to initialize MQTT client!\n");
+        MQTT_LOG("Failed to initialize MQTT client!\n");
     }
 }
 
@@ -329,7 +345,7 @@ void MQTT_Init(bool local)
 {
     if (mqtt_control_queue)
     {
-        printf("MQTT client already initialized. Use MQTT_change_to.\n");
+        MQTT_LOG("MQTT client already initialized. Use MQTT_change_to.\n");
         return;
     }
     MQTT_Control_Init();
@@ -344,7 +360,7 @@ void MQTT_End()
         esp_mqtt_client_stop(mqttClient);
         esp_mqtt_client_destroy(mqttClient);
         mqttClient = NULL;
-        printf("MQTT client disconnected and resources cleaned up.\n");
+        MQTT_LOG("MQTT client disconnected and resources cleaned up.\n");
     }
     mqtt_state = -1; // Not initialized
 }
@@ -382,7 +398,7 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 {
     if (!mqttClient || mqtt_state <= 0)
     {
-        printf("MQTT client not initialized. Cannot send message.\n");
+        MQTT_LOG("MQTT client not initialized. Cannot send message.\n");
         return;
     }
 
@@ -405,7 +421,7 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
         int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
                                              message.length(), 0, retained ? 1 : 0);
     }
-    printf("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
+    MQTT_LOG("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
 }
 
 /// @brief Sends a raw MQTT message without any modifications on topic name.
@@ -422,17 +438,18 @@ void MQTT_change_to(bool local)
 {
     if (local_initialized == local)
     {
-        printf("MQTT client already initialized as %s. No changes made.\n", local ? "local" : "remote");
+        MQTT_LOG("MQTT client already initialized as %s. No changes made.\n", local ? "local" : "remote");
         return;
     }
+    mqtt_retries = 0;
     mqtt_control_cmd_t cmd = local ? MQTT_CMD_SWITCH_TO_LOCAL : MQTT_CMD_SWITCH_TO_REMOTE;
     if (xQueueSend(mqtt_control_queue, &cmd, pdMS_TO_TICKS(100)) != pdPASS)
     {
-        printf("ERROR: Failed to queue MQTT switch command\n");
+        MQTT_LOG("ERROR: Failed to queue MQTT switch command\n");
     }
     else
     {
-        printf("Queued switch to %s\n", local ? "LOCAL" : "REMOTE");
+        MQTT_LOG("Queued switch to %s\n", local ? "LOCAL" : "REMOTE");
     }
 }
 
@@ -442,9 +459,9 @@ void MQTT_change_to(bool local)
 ///         1 if connected to local MQTT broker.
 ///         2 if connected to remote MQTT broker.
 ///         3 if connecting.
-int8_t MQTT_Connected()
+bool MQTT_Connected()
 {
-    return mqtt_state;
+    return mqtt_state > 0;
 }
 
 /// @brief Checks if the MQTT client is initialized as local.
@@ -462,6 +479,12 @@ void Send_to_MQTT(String topic, String message)
     MQTT_Send_Raw(topic, message);
 }
 
+/// @brief Gets the connection state of the MQTT client.
+/// @return -1 if the MQTT client is not initialized.
+///         0 if not connected to any MQTT broker.
+///         1 if connected to local MQTT broker.
+///         2 if connected to remote MQTT broker.
+///         3 if connecting.
 int8_t MQTT_State()
 {
     return mqtt_state;

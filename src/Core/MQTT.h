@@ -45,7 +45,7 @@ void MQTT_Send(String topic, String message, bool insertOwner = true, bool retai
 void MQTT_onMessage(void (*cb)(String topic, String message));
 void MQTT_onConnected(void (*cb)(void));
 void MQTT_onDisconnected(void (*cb)(bool));
-int8_t MQTT_Connected();
+bool MQTT_Connected();
 void Send_to_MQTT(String topic, String message);
 int8_t MQTT_State();
 #endif
