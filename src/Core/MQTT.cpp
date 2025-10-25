@@ -90,7 +90,7 @@ void mqtt_control_task(void *arg)
                     mqttClient = NULL;
                     mqtt_state = -1;
                 }
-                
+
                 MQTT_Finish();
                 break;
             // This should rarely be used, but is here for completeness
@@ -182,10 +182,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 bool local = (payloadStr != "go_external");
                 if (local != local_initialized)
                 {
-                    if(local)
+                    if (local)
                     {
                         int _index = payloadStr.indexOf(' ');
-                        if(_index > 0)
+                        if (_index > 0)
                         {
                             local_ip = payloadStr.substring(_index + 1);
                             printf("Switching to local with IP: %s\n", local_ip.c_str());
@@ -200,7 +200,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
         break;
     }
-    
+
     case MQTT_EVENT_ERROR:
         printf("MQTT_EVENT_ERROR\n");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
@@ -272,7 +272,8 @@ void MQTT_Control_Init()
 
 /// @brief Starts the MQTT client with the specified configuration.
 /// @param local If true, initializes as local; if false, initializes as remote.
-void MQTT_Config(bool local){
+void MQTT_Config(bool local)
+{
     local_initialized = local;
 
     esp_mqtt_client_config_t mqtt_cfg = {};
@@ -320,7 +321,6 @@ void MQTT_Config(bool local){
     {
         printf("Failed to initialize MQTT client!\n");
     }
-
 }
 
 /// @brief Initializes the MQTT client.
@@ -388,9 +388,23 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 
     if (insertOwner)
         InsertTopicOwner(&topic);
-
-    int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
-                                         message.length(), 0, retained ? 1 : 0);
+    if (message.length() == 0)
+        return;
+    if (message.length() > 1024)
+    {
+        while (message.length() > 1024)
+        {
+            String chunk = message.substring(0, 1024);
+            message = message.substring(1024);
+            int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), chunk.c_str(),
+                                                 chunk.length(), 0, retained ? 1 : 0);
+        }
+    }
+    else
+    {
+        int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
+                                             message.length(), 0, retained ? 1 : 0);
+    }
     printf("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
 }
 
@@ -448,7 +462,8 @@ void Send_to_MQTT(String topic, String message)
     MQTT_Send_Raw(topic, message);
 }
 
-int8_t MQTT_State(){
+int8_t MQTT_State()
+{
     return mqtt_state;
 }
 #endif

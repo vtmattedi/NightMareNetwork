@@ -16,7 +16,7 @@
 #include "NightMareTCPServerClient.h"
 #include <Xtra/NightMareTypes.h>
 #ifdef TCP_USE_NIGHTMARE_COMMANDS
-#include <Xtra/NightMareCommands.h>
+#include <Xtra/NightMareCommand.h>
 #endif
 
 #ifdef ESP8266
@@ -44,6 +44,7 @@ private:
   TServerMessageHandler _message_callback;
   bool _debug;
   bool _EnableNightMareCommands;
+  bool _start = false;
   String NightMareCommands_Server(String msg, byte index);
 public:
   // the timeout in ms of client inactivity
@@ -55,7 +56,28 @@ public:
    *@param debug prints debug info if enabled [false]
    */
   NightMareTCPServer(int port = DEFAULT_PORT, bool debug = false);
-  // Sets the function to handle server messages. It must return a String Response.
+  /**
+   * @brief  the callback that will be invoked when the TCP server receives inbound MESSAGE.
+   * Note that this message is already a String object. and it can be either all data available (TransmissionMode::AllAvailable)
+   * or a size-prefixed message (TransmissionMode::SizeColon) depending on the client's transmission mode.
+   * Use this to register a function from connected clients.
+   *
+   * IF `TCP_USE_NIGHTMARE_COMMANDS` is defined, commands will be processed before invoking this handler.
+   * Therefore if you register `handleNightMareCommand` in the message handler, it will be called twice for each command received.
+   *
+   * IF _EnableNightMareCommands is true, the tcp preprocesses commands before any other handler.
+   * this contains core commands like KEEP_ALIVE, ID and set transmission mode settings.
+   * 
+   * Note:
+   * This callback is invoked from within the TCP server's handle server context.
+   * If running on a task, adjust stack size and priority accordingly to avoid blocking other operations.
+   * Lifetime notes:
+   * - The provided handler must remain valid for as long as the server may call it.
+   * - Prefer capturing by value in lambdas to avoid dangling references.
+   *
+   * @param fn Callback of type TServerMessageHandler to handle incoming messages.
+   * @return Reference to this server instance to allow fluent configuration chaining.
+   */
   NightMareTCPServer &setMessageHandler(TServerMessageHandler fn);
   // Sets the handler for the fast callback. it is imediatly triggred when the fast_char is read in the Stream;
   NightMareTCPServer &setFastHandler(TFastHandler fn);
@@ -76,6 +98,9 @@ public:
   // Sends the message to the client with ID matching client_ID
   bool sendToID(String msg, String client_ID);
 };
+
+NightMareTCPServer * asyncTcpServer();
+void stopAsyncTcpServer();
 
 #endif
 #endif

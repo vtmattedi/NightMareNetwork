@@ -2,6 +2,7 @@
 #ifdef COMPILE_SCHEDULER
 Scheduler scheduler;
 static uint16_t taskID = 0;
+#define COMPILE_SERIAL
 #ifdef SCHEDULER_USE_MILLIS
 #define GET_TIME() millis()
 #else
@@ -9,8 +10,8 @@ static uint16_t taskID = 0;
 #endif
 
 #ifdef COMPILE_SERIAL
-#define SCHEDULER_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", SCHEDULER_LOG, ##__VA_ARGS__)
-#define SCHEDULER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt "\n", ERR_LOG, SCHEDULER_LOG, ##__VA_ARGS__)
+#define SCHEDULER_LOGF(fmt, ...) Serial.printf("%s " fmt , SCHEDULER_LOG, ##__VA_ARGS__)
+#define SCHEDULER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt, ERR_LOG, SCHEDULER_LOG, ##__VA_ARGS__)
 #else
 #define SCHEDULER_LOGF(fmt, ...)
 #define SCHEDULER_ERRORF(fmt, ...)
@@ -126,16 +127,14 @@ void Scheduler::run()
     {
         if (tasks[i].armed && tasks[i].executionTime <= nowTime)
         {
-#ifdef COMPILE_SERIAL
-            Serial.printf("%s Executing task ID %d: '%s' scheduled for %u (now: %u)\n", SCHEDULER_LOG, tasks[i].id, tasks[i].command.c_str(), tasks[i].executionTime, nowTime);
-#endif
 #ifdef USE_NIGHTMARE_COMMAND
                 NightMareResults res = handleNightMareCommand(tasks[i].command);
-                SCHEDULER_LOGF("Task ID %d executed with result: %s \n%s\n", tasks[i].id, OK_LOG(res.result), res.response.c_str());
+                res.response.replace("\n", "\n\t\t");
+                SCHEDULER_LOGF("Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
 #endif
             // Execute the command
             if (runCmd)
-            {
+            { //sipopin 5
                 runCmd(tasks[i].command);
             }
 

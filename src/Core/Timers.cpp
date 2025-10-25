@@ -42,6 +42,7 @@ void TimerTask::reset()
     interval = 100;
     last_time = 0;
     callback = NULL;
+    is_timeout = false;
 }
 
 /// @brief Gets how many ticks {ms or s} are left for the task to be called.

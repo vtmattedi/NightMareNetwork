@@ -182,7 +182,43 @@ NightMareResults handleNightMareCommand(const String &message)
         }
         else if (subcmd == "STATE")
         {
-
+            wl_status_t status = WiFi.status();
+            result.response += formatString("WiFi Status Code: %d - ", status);
+            switch (status)
+            {
+            case WL_NO_SHIELD:
+                result.response += "No Shield";
+                break;
+            case WL_IDLE_STATUS:
+                result.response += "Idle";
+                break;
+            case WL_NO_SSID_AVAIL:
+                result.response += "SSID Unavailable";
+                break;
+            case WL_SCAN_COMPLETED:
+                result.response += "Scan Completed";
+                break;
+            case WL_CONNECTED:
+                result.response += "Connected";
+                break;
+            case WL_CONNECT_FAILED:
+                result.response += "Connect Failed";
+                break;
+            case WL_CONNECTION_LOST:
+                result.response += "Connection Lost";
+                break;
+            case WL_DISCONNECTED:
+                result.response += "Disconnected";
+                break;
+            default:
+                result.response += "Unknown Status";
+                break;
+            }
+        }
+        else if (subcmd == "RECONNECT")
+        {
+            result.response = "not implemented yet";
+            result.result = true;
         }
         else
         {

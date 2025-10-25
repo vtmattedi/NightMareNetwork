@@ -23,8 +23,8 @@ String PrepareMsg(String msg, TransmissionMode mode)
 
 int log_f(bool _debug, const char *format, ...)
 {
-  if (!_debug)
-    return 0;
+  // if (!_debug)
+  //   return 0;
   char loc_buf[64];
   char *temp = loc_buf;
   va_list arg;

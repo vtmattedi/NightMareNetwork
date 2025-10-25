@@ -86,6 +86,10 @@ String NightMareTCPServer::NightMareCommands_Server(String msg, byte index)
       }
       response = "M;ACK;";
     }
+    #ifdef TCP_USE_NIGHTMARE_COMMANDS
+    NightMareResults result = handleNightMareCommand(msg);
+    response = result.response;
+    #endif
   }
 
   return response;
@@ -95,6 +99,7 @@ void NightMareTCPServer::begin()
 {
   _wifiServer.begin(_port);
   log_f(_debug, "Starting NightMare TCP Server at port: %d\n", _port);
+  _start = true;
 }
 
 void NightMareTCPServer::broadcast(String msg)
@@ -107,6 +112,8 @@ void NightMareTCPServer::broadcast(String msg)
 
 void NightMareTCPServer::handleServer()
 {
+  if (!_start)
+    return;
   // polls for new clients
   WiFiClient newClient = _wifiServer.available();
   if (newClient)
@@ -299,4 +306,37 @@ NightMareTCPServer::NightMareTCPServer(int port, bool debug) : _message_callback
   _port = port;
   _debug = debug;
 }
+
+NightMareTCPServer *serverInstance = nullptr;
+
+void tcpServerTask(void *parameter)
+{
+  serverInstance = new NightMareTCPServer(DEFAULT_PORT, true);
+  serverInstance->begin();
+  // serverInstance->setMessageHandler
+  for (;;)
+  {
+    serverInstance->handleServer();
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
+NightMareTCPServer* asyncTcpServer()
+{
+  if (serverInstance != nullptr)
+    return NULL;
+  xTaskCreate(tcpServerTask, "TCP Server", 4096, NULL, 5, NULL);
+  return NULL;
+}
+
+void stopAsyncTcpServer()
+{
+  if (serverInstance != nullptr)
+  {
+    delete serverInstance;
+    serverInstance = nullptr;
+  }
+}
+
+
 #endif

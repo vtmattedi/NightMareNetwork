@@ -22,5 +22,5 @@ extern String formatString(const char *format, ...);
 #define MQTT_LOCAL_LOG "\x1b[34;1m[MQTT-Local]\x1b[0m"
 #define COMMAND_RESOLVER_LOG "\x1b[35;1m[Command-Resolver]\x1b[0m"
 #define WIFI_LOG "\x1b[36;1m[WiFi]\x1b[0m"
-
+#define TCP_LOG "\x1b[32;1m[TCP]\x1b[0m"
 #endif
