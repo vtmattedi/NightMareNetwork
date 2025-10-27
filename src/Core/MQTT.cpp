@@ -17,6 +17,13 @@ static int8_t mqtt_retries = 0;
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
     "\x1b[94;1m[Remote]\x1b[0m"};
+#define MQTT_LOG(fmt, ...) \
+    Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
+#define MQTT_LOGE(fmt, ...) \
+    Serial.printf("%s%s" fmt "\n", ERROR, client_str, ##__VA_ARGS__);
+#else
+#define MQTT_LOG(...)
+#define MQTT_LOGE(...)
 #endif
 // Control commands for safe MQTT operations
 typedef enum
@@ -35,12 +42,6 @@ static String local_ip = LOCAL_MQTT_HOST;
 #define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
 #define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
 
-#ifdef COMPILE_SERIAL
-#define MQTT_LOG(fmt, ...) \
-    Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
-#else
-#define MQTT_LOG(...)
-#endif
 /*Forward Declarations for private functions*/
 void MQTT_Config(bool local);
 // Control task - handles stop/start/destroy operations safely
@@ -133,7 +134,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             MQTT_Send("console/out", "Booted");
             first_time = false;
         }
-        else {
+        else
+        {
             MQTT_Send("console/out", "Connected");
         }
 #endif
@@ -161,7 +163,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_UNSUBSCRIBED:
         MQTT_LOG("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
-
 
     case MQTT_EVENT_PUBLISHED:
         MQTT_LOG("MQTT_EVENT_PUBLISHED, msg_id=%d\n", event->msg_id);
@@ -208,31 +209,82 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 
     case MQTT_EVENT_ERROR:
+    {
+        bool connection_failed = true;
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
         {
             MQTT_LOG("Last error code reported from esp-tls: 0x%x\n", event->error_handle->esp_tls_last_esp_err);
             MQTT_LOG("Last tls stack error number: 0x%x\n", event->error_handle->esp_tls_stack_err);
             MQTT_LOG("Last captured errno : %d (%s)\n", event->error_handle->esp_transport_sock_errno,
                      strerror(event->error_handle->esp_transport_sock_errno));
+            if (event->error_handle->esp_transport_sock_errno == EAGAIN ||
+                event->error_handle->esp_transport_sock_errno == EWOULDBLOCK)
+            {
+                MQTT_LOG("Socket would block - temporary condition");
+                connection_failed = false;
+                // This is typically non-fatal, MQTT client will retry
+            }
+            else if (event->error_handle->esp_transport_sock_errno == ECONNRESET)
+            {
+                MQTT_LOG("Connection reset by peer");
+                // Connection lost, will reconnect automatically
+            }
+            else if (event->error_handle->esp_transport_sock_errno == ENOTCONN)
+            {
+                MQTT_LOG("Socket is not connected");
+                // Will trigger reconnection
+            }
+            else if (event->error_handle->esp_transport_sock_errno == ETIMEDOUT)
+            {
+                MQTT_LOGE("Connection timed out");
+                // Network issues, will retry
+            }
+            else if (event->error_handle->esp_transport_sock_errno == ENOMEM)
+            {
+                MQTT_LOGE("Out of memory");
+                connection_failed = false;
+                // Critical - may need to free resources
+            }
         }
         else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED)
         {
             MQTT_LOG("Connection refused error: 0x%x\n", event->error_handle->connect_return_code);
+            switch (event->error_handle->connect_return_code)
+            {
+            case 0x01:
+                MQTT_LOG("Unacceptable protocol version");
+                break;
+            case 0x02:
+                MQTT_LOG("Identifier rejected");
+                break;
+            case 0x03:
+                MQTT_LOG("Server unavailable");
+                break;
+            case 0x04:
+                MQTT_LOG("Bad username or password");
+                break;
+            case 0x05:
+                MQTT_LOG("Not authorized");
+                break;
+            default:
+                MQTT_LOG("Unknown connection refused code");
+                break;
+            }
         }
-
-        if (mqtt_retries >= MAX_MQTT_RETRIES)
+        if (connection_failed)
         {
-            MQTT_LOG("Max MQTT retries reached. Giving up on connection attempts. (switchin)\n");
-            MQTT_change_to(!local_initialized);
-            
+            if (mqtt_retries >= MAX_MQTT_RETRIES)
+            {
+                MQTT_LOG("Max MQTT retries reached. Giving up on connection attempts. (switchin)\n");
+                MQTT_change_to(!local_initialized);
+            }
+            else
+            {
+                mqtt_retries++;
+            }
         }
-        else
-        {
-            mqtt_retries++;
-        }
-
         break;
-
+    }
     default:
         MQTT_LOG("Other event id:%d\n", event->event_id);
         break;

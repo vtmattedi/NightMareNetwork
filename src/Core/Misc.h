@@ -55,7 +55,6 @@ enum TimeStampFormat
 
 String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format = DateAndTime);
 String formatString(const char *format, ...);
-const char *mqttStatusToString(int);
 
 #ifdef COMPILE_LVGL
 #pragma region "LVGL Helper Functions"

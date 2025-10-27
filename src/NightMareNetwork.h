@@ -29,3 +29,4 @@
 #include <Xtra/Scheduler.h>
 #include <Xtra/NightMareCommand.h>
 #include <TCP/NightMareTCP.h>
+#include <Modules.config.h>
