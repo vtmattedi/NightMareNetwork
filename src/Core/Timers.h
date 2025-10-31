@@ -17,11 +17,10 @@
 #define HOUR 3600
 #define MINUTE 60
 
-
 #define USE_MS true
 #define USE_SECONDS false
 /// Max of tasks handled by the Timer Handler
-#define MAX_TASKS 20
+#define TIMER_MAX_TASKS 20
 
 /// @brief Struct to a single timer task
 struct TimerTask
@@ -60,15 +59,19 @@ struct indexresult
 /// @brief Class to handle multiple Timers
 class TimersHandler
 {
+private:
+  unsigned int timeout_index = 0;
+
 public:
   /// @brief Flag to print debug info
   bool debug = false;
   /// @brief Array holding all the individual tasks
-  TimerTask _tasks[MAX_TASKS];
+  TimerTask _tasks[TIMER_MAX_TASKS];
   bool create(String label, uint16_t interval, void (*callback)(void), bool use_millis = false);
   indexresult getIndex(String label);
   indexresult getIndex();
-  bool setTimeout(void (*callback)(void), uint16_t interval, bool use_millis = false);
+  String setTimeout(void (*callback)(void), uint16_t interval, bool use_millis = false);
+  bool cancelTimeout(String label);
   void run();
   String Timeleft(String label);
 };

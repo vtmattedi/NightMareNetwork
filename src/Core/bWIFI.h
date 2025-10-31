@@ -8,6 +8,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+
+#ifdef COMPILE_OTA
+#include <Core/OTA.h>
+#endif
+
 typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void onWiFiConnected(WiFiConnectedCallback callback);
 void WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0, void *waitCallback(unsigned int) = nullptr);

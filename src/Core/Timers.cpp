@@ -67,7 +67,7 @@ bool TimersHandler::create(String label, uint16_t interval, void (*callback)(voi
     indexresult res = getIndex(label);
     if (res.full || res.found)
         return false;
-    if (res.index < MAX_TASKS)
+    if (res.index < TIMER_MAX_TASKS)
     {
         _tasks[res.index].callback = callback;
         _tasks[res.index].label = label;
@@ -88,7 +88,7 @@ bool TimersHandler::create(String label, uint16_t interval, void (*callback)(voi
 indexresult TimersHandler::getIndex(String label)
 {
     indexresult res;
-    for (size_t i = 0; i < MAX_TASKS; i++)
+    for (size_t i = 0; i < TIMER_MAX_TASKS; i++)
     {
         if (_tasks[i].label == label)
         {
@@ -98,7 +98,7 @@ indexresult TimersHandler::getIndex(String label)
         }
     }
     res.full = true;
-    for (size_t i = 0; i < MAX_TASKS; i++)
+    for (size_t i = 0; i < TIMER_MAX_TASKS; i++)
     {
         if (_tasks[i].label == "unused")
         {
@@ -116,7 +116,7 @@ indexresult TimersHandler::getIndex()
     indexresult res;
     res.full = true;
     res.found = false;
-    for (size_t i = 0; i < MAX_TASKS; i++)
+    for (size_t i = 0; i < TIMER_MAX_TASKS; i++)
     {
         if (_tasks[i].label == "unused")
         {
@@ -132,30 +132,52 @@ indexresult TimersHandler::getIndex()
 /// @brief Runs all the tasks should be called periodically
 void TimersHandler::run()
 {
-    for (size_t i = 0; i < MAX_TASKS; i++)
+    for (size_t i = 0; i < TIMER_MAX_TASKS; i++)
     {
         _tasks[i].run();
     }
 }
 
-bool TimersHandler::setTimeout(void (*callback)(void), uint16_t interval, bool use_millis)
+String TimersHandler::setTimeout(void (*callback)(void), uint16_t interval, bool use_millis)
 {
     indexresult res = getIndex();
     if (res.full)
     {
         TIMER_ERRORF("could not create timeout, array full");
-        return false;
+        return "";
     }
-    if (res.index < MAX_TASKS)
+    if (res.index < TIMER_MAX_TASKS)
     {
         _tasks[res.index].callback = callback;
-        _tasks[res.index].label = "timeout_" + String(res.index);
+        _tasks[res.index].label = "timeout_" + String(timeout_index++);
         _tasks[res.index].interval = interval;
         _tasks[res.index].use_millis = use_millis;
         _tasks[res.index].enable = true;
         _tasks[res.index].is_timeout = true;
         _tasks[res.index].last_time = use_millis ? millis() : now();
         TIMER_LOGF("Timeout Created at [%d] in %d %s", res.index, interval, use_millis ? "ms" : "s");
+        return _tasks[res.index].label;
+    }
+    return "";
+}
+
+/// @brief Cancels a timeout task
+/// @param res the indexresult of the timeout task to be cancelled
+/// @return True if the timeout was cancelled, false otherwise.
+bool TimersHandler::cancelTimeout(String label)
+{ 
+    if (label == "")
+        return false;
+    indexresult res = getIndex(label);
+    if (res.found && res.index < TIMER_MAX_TASKS )
+    {
+        if (!_tasks[res.index].is_timeout)
+        {
+            TIMER_ERRORF("Task at [%d] is not a timeout", res.index);
+            return false;
+        }
+        _tasks[res.index].reset();
+        TIMER_LOGF("Timeout at [%d] cancelled", res.index);
         return true;
     }
     return false;

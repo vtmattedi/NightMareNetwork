@@ -323,16 +323,18 @@ void MQTT_onDisconnected(void (*cb)(bool))
 /// @brief Initialize the MQTT control system (call once during setup)
 void MQTT_Control_Init()
 {
+
     if (!mqtt_control_queue)
     {
         mqtt_control_queue = xQueueCreate(2, sizeof(mqtt_control_cmd_t));
-
+        Serial.printf("%sMQTT Control Queue initialized\n", OK_LOG(mqtt_control_queue));
         xTaskCreate(mqtt_control_task,
                     "mqtt_ctrl",
                     4096, // Stack size
                     NULL,
                     5, // Priority
                     &mqtt_control_task_handle);
+        Serial.printf("%sMQTT Control Task initialized\n", OK_LOG(mqtt_control_queue));
 
         MQTT_LOG("MQTT Control Task initialized\n");
     }

@@ -1,4 +1,3 @@
-#pragma once
 #include "newmodule.example.h"
 #ifdef COMPILE_NEW_MODULE
 

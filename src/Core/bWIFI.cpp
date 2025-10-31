@@ -18,6 +18,17 @@ void onWiFiConnected(WiFiConnectedCallback callback)
     wifiConnectedCallback = callback;
 }
 
+void wifiConnectedInternal(bool firstConnection)
+{
+#ifdef COMPILE_OTA
+    initOTA();
+#endif
+    if (wifiConnectedCallback)
+    {
+        wifiConnectedCallback(firstConnection);
+    }
+}
+
 /// @brief Task to monitor WiFi connection status changes
 /// @param pvParameters Pointer to parameters (expected to be a bool indicating if the task should delete itself after connecting)
 void WiFi_Task(void *pvParameters)
@@ -33,10 +44,7 @@ void WiFi_Task(void *pvParameters)
             if (WiFi.status() == WL_CONNECTED)
             {
                 WIFI_LOGF("WiFi Connected. IP Address: %s", WiFi.localIP().toString().c_str());
-                if (wifiConnectedCallback)
-                {
-                    wifiConnectedCallback(firstConnection);
-                }
+                wifiConnectedInternal(firstConnection);
                 firstConnection = false;
                 if (deleteAfterConnect)
                 {
@@ -81,13 +89,7 @@ void WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
             return;
         }
     }
-    if (wifiConnectedCallback)
-    {
-#ifdef COMPILE_SERIAL
-        Serial.printf("%s %s WiFi Connected. IP Address: %s\n", WIFI_LOG, MILLIS_LOG, WiFi.localIP().toString().c_str());
-#endif
-        wifiConnectedCallback(true);
-    }
+    wifiConnectedInternal(true);
 }
 
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect)
