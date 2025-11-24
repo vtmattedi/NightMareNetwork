@@ -18,13 +18,15 @@ const char *getBootReason(int reason);
 #ifdef COMPILE_WIFI_MODULE
 #include <Core/bWIFI.h>
 #endif
-
+#ifdef COMPILE_HTTP_SERVER
+#include <HTTP/http.h>
+#endif
+#ifdef COMPILE_WEBSOCKET_SERVER
+#include <HTTP/websockets.h>
+#endif
 #endif
 
-
-
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));
-NightMareResults handleNightMareCommand(const String &message);
 
 #ifdef COMPILE_SERIAL_COMMAND_RESOLVER
 void NightMareCommand_SerialResolver(char readUntilChar = '\n');

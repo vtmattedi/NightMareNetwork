@@ -12,3 +12,5 @@ struct NightMareMessage
     String subcommand;
     String args[5] = {"", "", "", "", ""};
 };
+
+NightMareResults handleNightMareCommand(const String &message);

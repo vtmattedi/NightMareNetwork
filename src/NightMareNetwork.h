@@ -26,6 +26,9 @@
 #include <Core/ServerVariables.h>
 #include <Core/TimeSyncronization.h>
 #include <Core/MQTT.h>
+#include <Core/OTA.h>
+#include <Core/bWiFi.h>
+#include <HTTP/http.h>
 #include <Xtra/Scheduler.h>
 #include <Xtra/NightMareCommand.h>
 #include <TCP/NightMareTCP.h>

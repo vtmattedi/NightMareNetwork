@@ -20,7 +20,7 @@ const char *CLIENT[2] = {
 #define MQTT_LOG(fmt, ...) \
     Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
 #define MQTT_LOGE(fmt, ...) \
-    Serial.printf("%s%s" fmt "\n", ERROR, client_str, ##__VA_ARGS__);
+    Serial.printf("%s %s" fmt "\n", OK_LOG(false), client_str, ##__VA_ARGS__);
 #else
 #define MQTT_LOG(...)
 #define MQTT_LOGE(...)
@@ -48,8 +48,7 @@ void MQTT_Config(bool local);
 void mqtt_control_task(void *arg)
 {
     mqtt_control_cmd_t cmd;
-
-    while (1)
+    while (true)
     {
         if (xQueueReceive(mqtt_control_queue, &cmd, portMAX_DELAY))
         {
@@ -109,6 +108,7 @@ void mqtt_control_task(void *arg)
                 break;
             }
         }
+        // vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 /// @brief MQTT event handler.
@@ -155,11 +155,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
         break;
     }
-
     case MQTT_EVENT_SUBSCRIBED:
         MQTT_LOG("MQTT_EVENT_SUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
-
     case MQTT_EVENT_UNSUBSCRIBED:
         MQTT_LOG("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d\n", event->msg_id);
         break;
@@ -323,18 +321,17 @@ void MQTT_onDisconnected(void (*cb)(bool))
 /// @brief Initialize the MQTT control system (call once during setup)
 void MQTT_Control_Init()
 {
-
     if (!mqtt_control_queue)
     {
         mqtt_control_queue = xQueueCreate(2, sizeof(mqtt_control_cmd_t));
-        Serial.printf("%sMQTT Control Queue initialized\n", OK_LOG(mqtt_control_queue));
+        Serial.printf("%s MQTT Control Queue initialized\n", OK_LOG(mqtt_control_queue));
         xTaskCreate(mqtt_control_task,
                     "mqtt_ctrl",
                     4096, // Stack size
                     NULL,
-                    5, // Priority
+                    MQTT_CONTROL_TASK_PRIORITY, // Priority
                     &mqtt_control_task_handle);
-        Serial.printf("%sMQTT Control Task initialized\n", OK_LOG(mqtt_control_queue));
+        Serial.printf("%s MQTT Control Task initialized\n", OK_LOG(mqtt_control_queue));
 
         MQTT_LOG("MQTT Control Task initialized\n");
     }
@@ -363,6 +360,7 @@ void MQTT_Config(bool local)
     mqtt_cfg.lwt_qos = 0;
     mqtt_cfg.lwt_retain = 1;
     mqtt_cfg.task_stack = 8192;
+    mqtt_cfg.task_prio = MQTT_TASK_PRIORITY;
 
     if (local)
     {

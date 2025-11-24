@@ -227,6 +227,90 @@ NightMareResults handleNightMareCommand(const String &message)
         }
     }
 #endif
+#ifdef COMPILE_HTTP_SERVER
+    else if (parsedMsg.command == "HTTPSERVER")
+    {
+        String subcmd = parsedMsg.subcommand;
+        if (subcmd == "priority")
+        {
+            bool priority = parsedMsg.args[1] == "1" || parsedMsg.args[1] == "high";
+            esp_err_t res = setHttpHighPriority(priority);
+            if (res == ESP_OK)
+            {
+                result.response = "HTTP server priority set to " + String(priority ? "HIGH" : "NORMAL") + ".";
+                result.result = true;
+            }
+            else
+            {
+                result.response = "Failed to set HTTP server priority to " + String(priority ? "HIGH" : "NORMAL") + ".";
+                result.result = false;
+            }
+        }
+        else if (subcmd == "status")
+        {
+            HTTP_Server_State state = getHttpState();
+            switch (state)
+            {
+            case HTTP_STOPPED:
+                result.response = "HTTP Server is STOPPED.";
+                break;
+            case HTTP_RUNNING_NORMAL_PRIORITY:
+                result.response = "HTTP Server is RUNNING at NORMAL PRIORITY.";
+                break;
+            case HTTP_RUNNING_HIGH_PRIORITY:
+                result.response = "HTTP Server is RUNNING at HIGH PRIORITY.";
+                break;
+            default:
+                result.response = "HTTP Server state is UNKNOWN.";
+                break;
+            }
+            result.result = true;
+        }
+        else if (subcmd == "reset")
+        {
+            http_stop();
+            if (http_init())
+            {
+                result.response = "HTTP server reset to NORMAL priority and restarted.";
+                result.result = true;
+            }
+            else
+            {
+                result.response = "Failed to restart HTTP server.";
+                result.result = false;
+            }
+        }
+        else if (subcmd == "enable")
+        {
+            bool value = parsedMsg.args[1] == "1" || parsedMsg.args[1] == "true" || parsedMsg.args[1] == "on";
+            HTTP_Server_State state = getHttpState();
+            if (value && state == HTTP_STOPPED)
+            {
+                if (http_init())
+                {
+                    result.response = "HTTP server enabled.";
+                }
+                else
+                {
+                    result.response = "Failed to enable HTTP server.";
+                }
+            }
+            else if (!value && state != HTTP_STOPPED)
+            {
+                http_stop();
+                result.response = "HTTP server disabled.";
+            }
+            else
+            {
+                result.response = "HTTP server already in the desired state.";
+            }
+        }
+        else
+        {
+            result.response = "Unknown HTTPSERVER subcommand available: [PRIORITY <high|normal>, STATUS, RESET, ENABLE <1|0>].";
+        }
+    }
+#endif
 #ifdef SCHEDULER_AWARE
     /// Format SCHEDULE <command> <delta seconds> [interval]
     /// Schedules a command to be run after a specific delay (in seconds).
@@ -295,6 +379,31 @@ NightMareResults handleNightMareCommand(const String &message)
             result.result = false;
         }
     }
+#endif
+#ifdef COMPILE_WEBSOCKET_SERVER
+    else if (parsedMsg.command == "WS")
+    {
+        String subcmd = parsedMsg.args[0];
+        if (subcmd == "list")
+        {
+            result.response += formatString("Total WS active clients: %d\n", ws_clients.count);
+            for (size_t i = 0; i < HTTPD_MAX_OPEN_SOCKETS; i++)
+            {
+                if (ws_clients.wsList[i].active)
+                {
+                    result.response += formatString("Client %d: Socket %d\n", i, ws_clients.wsList[i].sockfd);
+                }
+            }
+        }
+        else
+        {
+            ws_broadcast(subcmd.c_str());
+            result.response = "Broadcasted: \'";
+            result.response += subcmd;
+            result.response += "\' message to all WebSocket clients.";
+        }
+    }
+
 #endif
     else
     {

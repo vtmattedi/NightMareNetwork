@@ -73,7 +73,8 @@ public:
   String setTimeout(void (*callback)(void), uint16_t interval, bool use_millis = false);
   bool cancelTimeout(String label);
   void run();
-  String Timeleft(String label);
+  String timeleft(String label);
+  bool deleteTask(String label);
 };
 
 extern TimersHandler Timers;

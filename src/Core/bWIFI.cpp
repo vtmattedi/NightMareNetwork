@@ -2,7 +2,7 @@
 #ifdef COMPILE_WIFI_MODULE
 
 #ifdef COMPILE_SERIAL
-#define WIFI_LOGF(fmt, ...) Serial.printf("%s %s " fmt "\n", WIFI_LOG, MILLIS_LOG, ##__VA_ARGS__)
+#define WIFI_LOGF(fmt, ...) Serial.printf("%s%s" fmt "\n", MILLIS_LOG, WIFI_LOG, ##__VA_ARGS__)
 #else
 #define WIFI_LOGF(fmt, ...)
 #endif
@@ -50,6 +50,7 @@ void WiFi_Task(void *pvParameters)
                 {
                     WiFiTaskHandle = NULL;
                     vTaskDelete(NULL);
+                    return;
                 }
             }
             else

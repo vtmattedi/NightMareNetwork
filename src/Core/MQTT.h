@@ -36,6 +36,9 @@
 #include <Xtra/NightMareCommand.h>
 #endif
 
+#define MQTT_CONTROL_TASK_PRIORITY 5
+#define MQTT_TASK_PRIORITY 5
+
 void MQTT_Init(bool local = false);
 void MQTT_Finish();
 void MQTT_change_to(bool local);

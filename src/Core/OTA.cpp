@@ -1,6 +1,6 @@
-#include "ota.h"
+#include "OTA.h"
 #ifdef COMPILE_OTA
-#define COMPILE_SERIAL
+
 #ifdef COMPILE_SERIAL
 #define OTA_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", "[OTA]", ##__VA_ARGS__)
 #define OTA_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_LOG, "[OTA]", ##__VA_ARGS__)
@@ -10,7 +10,7 @@
 #endif
 
 ota_callback_t ota_user_callback = nullptr;
-xTaskHandle otaTaskHandle = NULL;
+TaskHandle_t otaTaskHandle = NULL;
 
 void OTA_EventHandler(OTA_INFO info, int data = -1)
 {
@@ -34,7 +34,6 @@ void endOTA()
 
 void progressOTA(unsigned int progress, unsigned int total)
 {
-    // update_progress = (float)progress / total * 100;
     OTA_LOGF("Progress: %u%%", (progress / (total / 100)));
     OTA_EventHandler(OTA_PROGRESS, (progress / (total / 100)));
 }
@@ -63,7 +62,8 @@ void otaTask(void *param)
     while (true)
     {
         ArduinoOTA.handle();
-        vTaskDelay(1 / portTICK_PERIOD_MS);
+        // vTaskDelay(1 / portTICK_PERIOD_MS); 
+        yield();
     }
 }
 
@@ -74,21 +74,20 @@ void initOTA()
     ArduinoOTA.onEnd(endOTA);
     ArduinoOTA.onProgress(progressOTA);
     ArduinoOTA.onError(errorOTA);
+    ArduinoOTA.setTimeout(OTA_TIMEOUT_MS); 
     ArduinoOTA.begin();
-    // bool res = Timers.create("OTA", 1, []()
-    //                     { ArduinoOTA.handle(); }, true);
     bool res = xTaskCreate(
         otaTask,
         "OTA_Task",
         4096,
         NULL,
-        10,
+        OTA_TASK_PRIORITY,
         &otaTaskHandle);
 
-    // Serial.printf("%s OTA Initialized\n", OK_LOG(res));
+    Serial.printf("%s OTA Initialized\n", OK_LOG(res));
 }
 
-void onOTAData(ota_callback_t callback)
+void onOTAEvent(ota_callback_t callback)
 {
     ota_user_callback = callback;
 }

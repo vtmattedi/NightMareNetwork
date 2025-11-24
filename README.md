@@ -14,6 +14,8 @@ The structure of this Lib is as follows:
     + Commonly used structs and functions throughout differents projects.
   + Services Folder
     + Classes that encapsulates a controller for another device on the network
+  + HTTP Folder
+    + HTTP and WEBSOCKET servers (mostly just integrating to nightmare services).
   + Xtra Folder
     + Some extra components that are not really core nor a service but is still common code across multiple devices on the network
   + Tcp Folder

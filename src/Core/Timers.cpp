@@ -165,11 +165,11 @@ String TimersHandler::setTimeout(void (*callback)(void), uint16_t interval, bool
 /// @param res the indexresult of the timeout task to be cancelled
 /// @return True if the timeout was cancelled, false otherwise.
 bool TimersHandler::cancelTimeout(String label)
-{ 
+{
     if (label == "")
         return false;
     indexresult res = getIndex(label);
-    if (res.found && res.index < TIMER_MAX_TASKS )
+    if (res.found && res.index < TIMER_MAX_TASKS)
     {
         if (!_tasks[res.index].is_timeout)
         {
@@ -186,12 +186,26 @@ bool TimersHandler::cancelTimeout(String label)
 /// @brief Gets the time left on a specific task
 /// @param label The label of the task that we want to find how many time is left.
 /// @return A String with the time left of the task with the label.
-String TimersHandler::Timeleft(String label)
+String TimersHandler::timeleft(String label)
 {
     indexresult res = getIndex(label);
     if (res.found)
         return String(_tasks[res.index].timeLeft());
 
     return "There is no task with such label";
+}
+
+bool TimersHandler::deleteTask(String label)
+{
+    if (label == "")
+        return false;
+    indexresult res = getIndex(label);
+    if (res.found)
+    {
+        _tasks[res.index].reset();
+        return true;
+    }
+
+    return false;
 }
 #endif

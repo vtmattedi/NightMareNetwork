@@ -1,6 +1,6 @@
-#pragma once
 #include "UserDefines.h"
 #ifdef COMPILE_LVGL
+#pragma once
 
 unsigned char *get_var_by_num(unsigned char num)
 {
