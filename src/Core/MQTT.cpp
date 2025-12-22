@@ -12,7 +12,7 @@ static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 
 static bool local_initialized = false; // True if initialized as local, false if remote
 #define MAX_MQTT_RETRIES 1
 static int8_t mqtt_retries = 0;
-
+#define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -39,10 +39,13 @@ typedef enum
 static QueueHandle_t mqtt_control_queue = NULL;
 static TaskHandle_t mqtt_control_task_handle = NULL;
 static String local_ip = LOCAL_MQTT_HOST;
+static bool manual_control = false;
+static bool mqtt_server_state[2] = {false, false}; // {local, remote}
 #define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
 #define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
 
 /*Forward Declarations for private functions*/
+/// @brief MQTT configuration and initialization
 void MQTT_Config(bool local);
 // Control task - handles stop/start/destroy operations safely
 void mqtt_control_task(void *arg)
@@ -93,7 +96,7 @@ void mqtt_control_task(void *arg)
                     mqtt_state = -1;
                 }
 
-                MQTT_Finish();
+               
                 break;
             // This should rarely be used, but is here for completeness
             case MQTT_CMD_RECONNECT:
@@ -179,14 +182,35 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             {
                 // Handle command internally
                 NightMareResults res = handleNightMareCommand(payloadStr);
-                MQTT_Send(String(DEVICE_NAME) + "/console/out", res.response);
+                MQTT_Send("/console/out", res.response);
                 return; // Do not pass to external handler
             }
-            else if (topicStr == "All/connection")
+            else if (topicStr.startsWith(String(DEVICE_NAME) + "/console/controlled/") && topicStr.endsWith("/in"))
             {
+                // handle controlled Response:
+                //  Turing/console/controlled/1/in
+                //  Turing/console/controlled/1/out
+                const int first_slash = topicStr.indexOf('/', strlen(DEVICE_NAME "/console/controlled"));
+                const int second_slash = topicStr.indexOf('/', first_slash + 1);
+                String control_id = topicStr.substring(first_slash + 1, second_slash);
+                MQTT_LOG("Controlled Console ID: %s\n", control_id.c_str());
+                String out_topic = "/console/controlled/" + control_id + "/out";
+                // Handle controlled console command
+                NightMareResults res = handleNightMareCommand(payloadStr);
+                MQTT_Send(out_topic, res.response);
+                return; // Do not pass to external
+            }
+            else if (topicStr == "All/connection" )
+            {
+                // if the connection was manual, ignore auto commands once
+                if (manual_control)
+                    manual_control = false;
+                    return;
                 int index = payloadStr.indexOf(';');
                 String cmd = payloadStr.substring(0, index);
                 String targetIP = payloadStr.substring(index + 1);
+                if (index == -1)
+                    targetIP = LOCAL_MQTT_HOST;
 
                 bool local = (cmd != "go_external");
                 if (local != local_initialized)
@@ -201,7 +225,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 return; // Do not pass to external handler
             }
 #endif
-            handleMqttMessage(topicStr, payloadStr);
+            if (handleMqttMessage)
+                handleMqttMessage(topicStr, payloadStr);
         }
         break;
     }
@@ -415,6 +440,16 @@ void MQTT_End()
         MQTT_LOG("MQTT client disconnected and resources cleaned up.\n");
     }
     mqtt_state = -1; // Not initialized
+
+    // mqtt_control_cmd_t cmd = MQTT_CMD_DISCONNECT;
+    // if (xQueueSend(mqtt_control_queue, &cmd, pdMS_TO_TICKS(100)) != pdPASS)
+    // {
+    //     MQTT_LOG("ERROR: Failed to queue MQTT disconnect command\n");
+    // }
+    // else
+    // {
+    //     MQTT_LOG("Queued MQTT disconnect command\n");
+    // }
 }
 
 /// @brief Finalizes the MQTT system by deleting the control queue and task.
@@ -441,6 +476,8 @@ void InsertTopicOwner(String *topic)
     *topic = DEVICE_NAME + String("/") + *topic;
 }
 
+#define MQTT_MAX_CHUNK_SIZE 512
+#define MQTT_CHUNK_DELIMITER ";;"
 /// @brief  Sends an MQTT message to the specified topic.
 /// @param topic The topic to publish the message to.
 /// @param message The message payload to send.
@@ -458,20 +495,27 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
         InsertTopicOwner(&topic);
     if (message.length() == 0)
         return;
-    if (message.length() > 1024)
+    if (message.length() > MQTT_MAX_CHUNK_SIZE)
     {
-        while (message.length() > 1024)
+        int totalChunks = (message.length() / MQTT_MAX_CHUNK_SIZE);
+        int chunkId = 0;
+        while (message.length() > MQTT_MAX_CHUNK_SIZE)
         {
-            String chunk = message.substring(0, 1024);
-            message = message.substring(1024);
+            String chunk = MQTT_CHUNK_DELIMITER + String(chunkId) + "/" + String(totalChunks) + MQTT_CHUNK_DELIMITER + message.substring(0, MQTT_MAX_CHUNK_SIZE);
+            message = message.substring(MQTT_MAX_CHUNK_SIZE);
             int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), chunk.c_str(),
-                                                 chunk.length(), 0, retained ? 1 : 0);
+                                                 chunk.length(), 0, retained );
+            chunkId++;
         }
+
+        String chunk = MQTT_CHUNK_DELIMITER + String(chunkId) + "/" + String(totalChunks) + MQTT_CHUNK_DELIMITER + message;
+        int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), chunk.c_str(),
+                                             chunk.length(), 0, retained );
     }
     else
     {
         int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
-                                             message.length(), 0, retained ? 1 : 0);
+                                             message.length(), 0, retained);
     }
     MQTT_LOG("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
 }
@@ -484,11 +528,17 @@ void MQTT_Send_Raw(String topic, String message)
     MQTT_Send(topic, message, false, false);
 }
 
+void MQTT_force_change_to(bool local)
+{
+    manual_control = true;
+    MQTT_change_to(local);
+}
+
 /// @brief Changes the initialization of the MQTT client to local or remote.
 /// @param local if true, initializes as local; if false, initializes as remote.
 void MQTT_change_to(bool local)
 {
-    if (local_initialized == local)
+    if (local_initialized == local && mqtt_state != -1)
     {
         MQTT_LOG("MQTT client already initialized as %s. No changes made.\n", local ? "local" : "remote");
         return;
@@ -540,5 +590,23 @@ void Send_to_MQTT(String topic, String message)
 int8_t MQTT_State()
 {
     return mqtt_state;
+}
+
+String MQTTStateJson()
+{
+    String state = "{";
+    state += "\"initialized\":";
+    state += (mqtt_state == -1) ? "false" : "true";
+    state += ",";
+    state += "\"connected\":";
+    state += (mqtt_state > 0) ? "true" : "false";
+    state += ",";
+    state += "\"mode\":\"";
+    state += (local_initialized) ? "local" : "remote";
+    state += "\",";
+    state += "\"state\":";
+    state += String(mqtt_state);
+    state += "}";
+    return state;
 }
 #endif

@@ -10,10 +10,10 @@ static uint16_t taskID = 0;
 #endif
 
 #ifdef COMPILE_SERIAL
-#define SCHEDULER_LOGF(fmt, ...) Serial.printf("%s " fmt , SCHEDULER_LOG, ##__VA_ARGS__)
-#define SCHEDULER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt, ERR_LOG, SCHEDULER_LOG, ##__VA_ARGS__)
+#define SCHEDULER_TAGF(fmt, ...) Serial.printf("%s " fmt, SCHEDULER_TAG, ##__VA_ARGS__)
+#define SCHEDULER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt, ERR_TAG, SCHEDULER_TAG, ##__VA_ARGS__)
 #else
-#define SCHEDULER_LOGF(fmt, ...)
+#define SCHEDULER_TAGF(fmt, ...)
 #define SCHEDULER_ERRORF(fmt, ...)
 #endif
 
@@ -50,7 +50,7 @@ uint32_t Scheduler::add(String cmd, uint32_t timestamp)
             tasks[i].repeat = false;
             tasks[i].interval = 0;
             currentTasks++;
-            SCHEDULER_LOGF("Added task ID %d: '%s' at %u\n", tasks[i].id, cmd.c_str(), timestamp);
+            SCHEDULER_TAGF("Added task ID %d: '%s' at %u\n", tasks[i].id, cmd.c_str(), timestamp);
             return tasks[i].id;
         }
     }
@@ -107,7 +107,7 @@ bool Scheduler::killByID(uint16_t id)
         {
             tasks[i].armed = false;
             currentTasks--;
-            SCHEDULER_LOGF("Killed task ID %d: '%s'\n", tasks[i].id, tasks[i].command.c_str());
+            SCHEDULER_TAGF("Killed task ID %d: '%s'\n", tasks[i].id, tasks[i].command.c_str());
             return true;
         }
     }
@@ -128,19 +128,19 @@ void Scheduler::run()
         if (tasks[i].armed && tasks[i].executionTime <= nowTime)
         {
 #ifdef USE_NIGHTMARE_COMMAND
-                NightMareResults res = handleNightMareCommand(tasks[i].command);
-                res.response.replace("\n", "\n\t\t");
-                SCHEDULER_LOGF("Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
+            NightMareResults res = handleNightMareCommand(tasks[i].command);
+            res.response.replace("\n", "\n\t\t");
+            SCHEDULER_TAGF("Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
 #endif
             // Execute the command
             if (runCmd)
-            { //sipopin 5
+            { // sipopin 5
                 runCmd(tasks[i].command);
             }
 
             if (tasks[i].repeat && tasks[i].interval > 0)
             {
-                SCHEDULER_LOGF("Rescheduling task ID %d: '%s' to %u\n", tasks[i].id, tasks[i].command.c_str(), nowTime + tasks[i].interval);
+                SCHEDULER_TAGF("Rescheduling task ID %d: '%s' to %u\n", tasks[i].id, tasks[i].command.c_str(), nowTime + tasks[i].interval);
                 // Reschedule the task
                 tasks[i].executionTime = nowTime + tasks[i].interval;
             }
@@ -160,9 +160,12 @@ void Scheduler::run()
 /// If not available, will assume that the old system time was the seconds since boot.
 void Scheduler::onSync(unsigned int oldTime)
 {
+#ifdef SCHEDULER_USE_MILLIS
+    return; // No adjustment needed when using millis()
+#endif
     // unsigned int timeDiff = GET_TIME() - oldTime;
     // When time is synced, we need to adjust old tasks execution times
-    SCHEDULER_LOGF("Adjusting scheduled tasks for time sync. Old time: %u, New time: %u\n", oldTime, GET_TIME());
+    SCHEDULER_TAGF("Adjusting scheduled tasks for time sync. Old time: %u, New time: %u\n", oldTime, GET_TIME());
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
         if (tasks[i].armed)

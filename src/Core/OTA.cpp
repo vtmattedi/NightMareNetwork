@@ -1,9 +1,10 @@
 #include "OTA.h"
 #ifdef COMPILE_OTA
-
+// #define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
-#define OTA_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", "[OTA]", ##__VA_ARGS__)
-#define OTA_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_LOG, "[OTA]", ##__VA_ARGS__)
+#define OTA_TAG "\x1b[32m[OTA]\x1b[0m"
+#define OTA_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", OTA_TAG, ##__VA_ARGS__)
+#define OTA_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_LOG, OTA_TAG, ##__VA_ARGS__)
 #else
 #define OTA_LOGF(fmt, ...)
 #define OTA_ERRORF(fmt, ...)
@@ -59,10 +60,11 @@ void errorOTA(ota_error_t error)
 
 void otaTask(void *param)
 {
+    OTA_LOGF("OTA Task Started\n");
     while (true)
     {
         ArduinoOTA.handle();
-        // vTaskDelay(1 / portTICK_PERIOD_MS); 
+        vTaskDelay(100 / portTICK_PERIOD_MS); 
         yield();
     }
 }

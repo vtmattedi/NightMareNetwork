@@ -1,4 +1,5 @@
 #include "NightMareCommand.h"
+
 NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message))
@@ -80,7 +81,6 @@ NightMareResults handleNightMareCommand(const String &message)
             // go to next char
             continue;
         }
-
         if (in_quotes)
         {
             quote += c;
@@ -95,7 +95,7 @@ NightMareResults handleNightMareCommand(const String &message)
     }
     parsedMsg.command.toUpperCase();
     parsedMsg.subcommand = parsedMsg.args[0];
-    parsedMsg.subcommand.toLowerCase();
+    parsedMsg.subcommand.toUpperCase();
 #ifdef ENABLE_PREPROCESSING
     bool prehandled = true;
     // Basic commands that can be handled without a resolver
@@ -111,21 +111,21 @@ NightMareResults handleNightMareCommand(const String &message)
     else if (parsedMsg.command == "BOOTINFO")
     {
         auto doc = DynamicJsonDocument(256);
-        doc["ResetReason"] = getBootReason(esp_reset_reason());
-        doc["IsTimeSynced"] = now() > 1600000000;
+        doc["ResetReason"] = SystemSettings.get("boot_reason", "Unknown");
+        doc["IsTimeSynced"] = SystemSettings.getFlag("time_synced");
         doc["CurrentTime"] = now();
         doc["Uptime"] = millis() / 1000;
-        doc["BootTime"] = now() - (millis() / 1000);
+        doc["BootTime"] = SystemSettings.get("boot_time", "0").toInt();
         String res = "";
         serializeJson(doc, res);
         result.response = res;
     }
+
 #ifdef COMPILE_MQTT
     else if (parsedMsg.command == "MQTT")
     {
-        String subcmd = parsedMsg.args[0];
-        subcmd.toUpperCase();
-        if (subcmd == "STATE")
+        result.result = true;
+        if (parsedMsg.subcommand == "STATE")
         {
             int8_t state = MQTT_State();
             switch (state)
@@ -147,26 +147,115 @@ NightMareResults handleNightMareCommand(const String &message)
                 break;
             }
         }
-        else if (subcmd == "CONNECT")
+        else if (parsedMsg.subcommand == "CONNECT")
         {
             String dest = parsedMsg.args[1];
             dest.toUpperCase();
             if (dest == "LOCAL" || dest == "1")
             {
                 MQTT_change_to(true);
-                result.response = "MQTT Connecting To Local...";
             }
             else if (dest == "REMOTE" || dest == "2")
             {
                 MQTT_change_to(false);
-                result.response = "MQTT Connecting To Remote...";
             }
-            result.result = true;
+            else
+            {
+                // connect to current
+                MQTT_change_to(MQTT_isLocal());
+            }
+        }
+        else if (parsedMsg.subcommand == "DISCONNECT")
+        {
+            MQTT_End();
+        }
+        else if (parsedMsg.subcommand == "SWAP")
+        {
+            MQTT_change_to(!MQTT_isLocal());
         }
         else
         {
-            result.response = "Unknown MQTT subcommand available: [CONNECT <Local|Remote>, STATUS].";
+            result.response = "Unknown MQTT subcommand available: [CONNECT <Local|Remote>, STATE, DISCONNECT, SWAP].";
             result.result = false;
+        }
+        if (result.result)
+        {
+            result.response = MQTTStateJson();
+        }
+    }
+#endif
+
+#ifdef COMPILE_CONFIGS
+    else if (parsedMsg.command == "CONFIG")
+    {
+        String name = parsedMsg.args[1];
+        String value = parsedMsg.args[2];
+        bool save = parsedMsg.args[3] == "1" || parsedMsg.args[3] == "-s" || parsedMsg.args[3] == "save";
+        
+        if (parsedMsg.subcommand == "GET")
+        {
+            if (name == "" || name == "ALL")
+                result.response = Config.getAllSettings();
+            else
+            {
+                if (Config.exists(name))
+                {
+                    result.response = "{\"" + name + "\":\"" + Config.get(name) + "\"}";
+                }
+                else
+                {
+                    result.response = "{\"error\":\"Configuration '" + name + "' does not exist.\"}";
+                }
+            }
+        }
+        else if (parsedMsg.subcommand == "SET" && name != "" && value != "")
+        {
+            Config.set(name, value);
+            bool saved = false;
+            if (save)
+                saved = Config.save();
+            result.response = "{\"" + name + "\":\"" + Config.get(name) + "\", \"saved\":" + String(saved ? "true" : "false") + "}";
+        }
+        else if (parsedMsg.subcommand == "SAVE")
+        {
+            if (Config.save())
+                result.response = "Configurations saved successfully.";
+            else
+                result.response = "Failed to save configurations.";
+        }
+        else
+        {
+            result.response = "Unknown CONFIG subcommand available: [GET <name | all>, SET <name> <value>].";
+        }
+    }
+    else if (parsedMsg.command == "SYSTEMCONFIGS")
+    {
+        String name = parsedMsg.args[1];
+        String value = parsedMsg.args[2];
+        if (parsedMsg.subcommand == "GET")
+        {
+            if (name == "" || name == "ALL")
+                result.response = SystemSettings.getAllSettings();
+            else
+            {
+                if (SystemSettings.exists(name))
+                {
+                    result.response = "{\"" + name + "\":\"" + SystemSettings.get(name) + "\"}";
+                }
+                else
+                {
+                    result.response = "{\"error\":\"Configuration '" + name + "' does not exist.\"}";
+                }
+            }
+        }
+        else if (parsedMsg.subcommand == "SET" && name != "" && value != "")
+        {
+            SystemSettings.set(name, value);
+            result.response = "{\"" + name + "\":\"" + SystemSettings.get(name) + "\"}";
+        }
+        else
+        {
+            result.response = SystemSettings.getAllSettings();
         }
     }
 #endif
@@ -174,13 +263,11 @@ NightMareResults handleNightMareCommand(const String &message)
 #ifdef COMPILE_WIFI_MODULE
     else if (parsedMsg.command == "WIFI")
     {
-        String subcmd = parsedMsg.args[0];
-        subcmd.toUpperCase();
-        if (subcmd == "IP")
+        if (parsedMsg.subcommand == "IP")
         {
             result.response = WiFi.localIP().toString();
         }
-        else if (subcmd == "STATE")
+        else if (parsedMsg.subcommand == "STATE")
         {
             wl_status_t status = WiFi.status();
             result.response += formatString("WiFi Status Code: %d - ", status);
@@ -215,10 +302,67 @@ NightMareResults handleNightMareCommand(const String &message)
                 break;
             }
         }
-        else if (subcmd == "RECONNECT")
+        else if (parsedMsg.subcommand == "RECONNECT")
         {
             result.response = "not implemented yet";
             result.result = true;
+        }
+        else if (parsedMsg.subcommand == "SCAN")
+        {
+            bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
+            int16_t res = WiFi.scanComplete();
+            auto doc = DynamicJsonDocument(2560);
+            if (start || res == -2)
+            {
+                int16_t res = WiFi.scanNetworks(true);
+                if (res == -1)
+                {
+                    doc["control"] = "scan_started";
+                }
+                else
+                {
+                    doc["control"] = "scan_start_failed";
+                }
+            }
+            else
+            {
+                if (res == -1)
+                {
+                    doc["control"] = "scan_in_progress";
+                }
+                else
+                {
+                    doc["control"] = "scan_done";
+                    JsonArray networks = doc.createNestedArray("networks");
+                    for (int i = 0; i < res; i++)
+                    {
+                        JsonObject net = networks.createNestedObject();
+                        net["ssid"] = WiFi.SSID(i);
+                        net["rssi"] = WiFi.RSSI(i);
+                        net["mac"] = WiFi.BSSIDstr(i);
+                        net["channel"] = WiFi.channel(i);
+                        net["encryptionType"] = WiFi_getAuthTypeName(WiFi.encryptionType(i));
+                    }
+                }
+            }
+            String resStr = "";
+            // Serial.printf("doc size: %lu\n", doc.memoryUsage());
+            serializeJson(doc, resStr);
+            result.response = resStr;
+        }
+        else if (parsedMsg.subcommand == "CHANGE")
+        {
+            if (parsedMsg.args[1].length() == 0)
+            {
+                result.response = "No SSID provided to CHANGE.";
+            }
+            else
+            {
+                String ssid = parsedMsg.args[1];
+                String password = parsedMsg.args[2];
+                bool changeResult = WiFi_ChangeCredentials(ssid, password);
+                result.response = formatString("WiFi credentials change %s.", changeResult ? "successful" : "failed");
+            }
         }
         else
         {
@@ -227,11 +371,11 @@ NightMareResults handleNightMareCommand(const String &message)
         }
     }
 #endif
+
 #ifdef COMPILE_HTTP_SERVER
     else if (parsedMsg.command == "HTTPSERVER")
     {
-        String subcmd = parsedMsg.subcommand;
-        if (subcmd == "priority")
+        if (parsedMsg.subcommand == "PRIORITY")
         {
             bool priority = parsedMsg.args[1] == "1" || parsedMsg.args[1] == "high";
             esp_err_t res = setHttpHighPriority(priority);
@@ -246,7 +390,7 @@ NightMareResults handleNightMareCommand(const String &message)
                 result.result = false;
             }
         }
-        else if (subcmd == "status")
+        else if (parsedMsg.subcommand == "STATUS")
         {
             HTTP_Server_State state = getHttpState();
             switch (state)
@@ -266,7 +410,7 @@ NightMareResults handleNightMareCommand(const String &message)
             }
             result.result = true;
         }
-        else if (subcmd == "reset")
+        else if (parsedMsg.subcommand == "RESET")
         {
             http_stop();
             if (http_init())
@@ -280,7 +424,7 @@ NightMareResults handleNightMareCommand(const String &message)
                 result.result = false;
             }
         }
-        else if (subcmd == "enable")
+        else if (parsedMsg.subcommand == "ENABLE")
         {
             bool value = parsedMsg.args[1] == "1" || parsedMsg.args[1] == "true" || parsedMsg.args[1] == "on";
             HTTP_Server_State state = getHttpState();
@@ -311,6 +455,7 @@ NightMareResults handleNightMareCommand(const String &message)
         }
     }
 #endif
+
 #ifdef SCHEDULER_AWARE
     /// Format SCHEDULE <command> <delta seconds> [interval]
     /// Schedules a command to be run after a specific delay (in seconds).
@@ -342,18 +487,16 @@ NightMareResults handleNightMareCommand(const String &message)
     // Format: SCHEDULER <subcommand> : LIST, CLEAR
     else if (parsedMsg.command == "SCHEDULER")
     {
-        String subcmd = parsedMsg.args[0];
-        subcmd.toUpperCase();
-        if (subcmd == "LIST")
+        if (parsedMsg.subcommand == "LIST")
         {
             result.response = scheduler.listTasks();
         }
-        else if (subcmd == "CLEAR")
+        else if (parsedMsg.subcommand == "CLEAR")
         {
             scheduler.clear();
             result.response = "All scheduled tasks cleared.";
         }
-        else if (subcmd == "KILL")
+        else if (parsedMsg.subcommand == "KILL")
         {
             if (parsedMsg.args[1].length() == 0)
             {
@@ -380,11 +523,11 @@ NightMareResults handleNightMareCommand(const String &message)
         }
     }
 #endif
+
 #ifdef COMPILE_WEBSOCKET_SERVER
     else if (parsedMsg.command == "WS")
     {
-        String subcmd = parsedMsg.args[0];
-        if (subcmd == "list")
+        if (parsedMsg.subcommand == "LIST")
         {
             result.response += formatString("Total WS active clients: %d\n", ws_clients.count);
             for (size_t i = 0; i < HTTPD_MAX_OPEN_SOCKETS; i++)
@@ -397,9 +540,9 @@ NightMareResults handleNightMareCommand(const String &message)
         }
         else
         {
-            ws_broadcast(subcmd.c_str());
+            ws_broadcast(parsedMsg.subcommand.c_str());
             result.response = "Broadcasted: \'";
-            result.response += subcmd;
+            result.response += parsedMsg.subcommand;
             result.response += "\' message to all WebSocket clients.";
         }
     }
@@ -413,15 +556,16 @@ NightMareResults handleNightMareCommand(const String &message)
     // If not handled, pass to resolver
     if (resolveCommand && !prehandled)
         result = resolveCommand(parsedMsg);
-
 #else
     if (resolveCommand)
         result = resolveCommand(parsedMsg);
 #endif
 
-#if defined(COMPILE_SERIAL) && defined(DEBUG)
+#if defined(COMPILE_SERIAL) && defined(DEBUG_CMD_RESOLVER)
     Serial.printf("\tmessage = <%s> | \n\tcommand = <%s> | \n\t -args[0] = <%s> | \n\t -args[1] = <%s> | \n\t -args[2] = <%s> |  \n\t -args[3] = <%s>  \n\t -args[4] = <%s> \n\t\n", message.c_str(), parsedMsg.command.c_str(), parsedMsg.args[0].c_str(), parsedMsg.args[1].c_str(), parsedMsg.args[2].c_str(), parsedMsg.args[3].c_str(), parsedMsg.args[4].c_str());
+
 #endif
+
     if (result.response.length() == 0)
     {
         char buffer[256];
@@ -431,6 +575,7 @@ NightMareResults handleNightMareCommand(const String &message)
             snprintf(buffer, sizeof(buffer), "Command \'%s\' unrecognized.", parsedMsg.command.c_str());
         result.response = String(buffer);
     }
+
     return result;
 }
 
@@ -450,4 +595,5 @@ void NightMareCommand_SerialResolver(char readUntilChar)
         Serial.printf("%s\n", res.response.c_str());
     }
 }
+
 #endif

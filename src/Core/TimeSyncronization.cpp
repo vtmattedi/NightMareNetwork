@@ -1,9 +1,12 @@
 #include "TimeSyncronization.h"
 #ifdef COMPILE_TIMESYNC
 
+void (*timeSyncCallback)(void) = nullptr;
+void _setTime(unsigned long timestamp);
+
 /// @brief Attempts to get the time synced using worldtimeapi.
 /// @return True if successful or false otherwise.
-bool syncTime()
+bool autoSyncTime()
 {
   bool result = false;
 #ifdef COMPILE_SERIAL
@@ -44,12 +47,8 @@ bool syncTime()
           _timestamp += _offset;
         }
       }
-      setTime(_timestamp);
+      _setTime(_timestamp);
       result = true;
-#if defined(COMPILE_SCHEDULER) && !defined(SCHEDULER_USE_MILLIS)
-      // Notify scheduler of time change
-      scheduler.onSync(millis() / 1000);
-#endif
     }
   }
   else
@@ -60,6 +59,35 @@ bool syncTime()
   }
   http.end();
   return result;
+}
+
+/// @brief Manually syncs the time to a specific timestamp.
+/// @param timestamp The timestamp to set the time to.
+void manualSyncTime(unsigned long timestamp)
+{
+  _setTime(timestamp);
+}
+
+/// @brief Internal function to set the time and handle related tasks.
+/// @param timestamp The timestamp to set the time to.
+void _setTime(unsigned long timestamp)
+{
+  setTime(timestamp);
+  SystemSettings.setFlag("time_synced", true);
+  SystemSettings.set("boot_time", String(timestamp - (millis() / 1000)));
+  if (timeSyncCallback)
+  {
+    timeSyncCallback();
+  }
+#if defined(COMPILE_SCHEDULER) && !defined(SCHEDULER_USE_MILLIS)
+  // Notify scheduler of time change
+  scheduler.onSync(millis() / 1000);
+#endif
+}
+
+void onTimeSync(void (*callback)(void))
+{
+  timeSyncCallback = callback;
 }
 
 #endif

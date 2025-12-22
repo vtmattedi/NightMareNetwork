@@ -24,6 +24,10 @@ const char *getBootReason(int reason);
 #ifdef COMPILE_WEBSOCKET_SERVER
 #include <HTTP/websockets.h>
 #endif
+#ifdef COMPILE_CONFIGS
+#include <Core/Configs.h>
+#endif
+
 #endif
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));

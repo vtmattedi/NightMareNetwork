@@ -40,6 +40,7 @@
 #define MQTT_TASK_PRIORITY 5
 
 void MQTT_Init(bool local = false);
+void MQTT_End();
 void MQTT_Finish();
 void MQTT_change_to(bool local);
 bool MQTT_isLocal();
@@ -51,5 +52,6 @@ void MQTT_onDisconnected(void (*cb)(bool));
 bool MQTT_Connected();
 void Send_to_MQTT(String topic, String message);
 int8_t MQTT_State();
+String MQTTStateJson();
 #endif
 #endif

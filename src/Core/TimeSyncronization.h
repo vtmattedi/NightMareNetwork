@@ -15,12 +15,17 @@
 #include <TimeLib.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-
+#include <Core/Configs.h>
 #define API_URL "http://worldtimeapi.org/api/timezone/America/Bahia.txt"
 
 #ifdef COMPILE_SCHEDULER
 #include <Xtra/Scheduler.h>
 #endif
 
-bool syncTime();
+bool autoSyncTime();
+void manualSyncTime(unsigned long timestamp);
+void onTimeSync(void (*callback)(void));
+
+
+
 #endif

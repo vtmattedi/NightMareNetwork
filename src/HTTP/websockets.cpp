@@ -1,6 +1,7 @@
 #include "websockets.h"
 #ifdef COMPILE_WEBSOCKET_SERVER
 #define HTTP_LOG "\x1B[32;1m[WS]\x1B[0m"
+#define WS_LOGF(fmt, ...) Serial.printf("%s %s " fmt "\n", MILLIS_LOG, HTTP_LOG, ##__VA_ARGS__)
 #ifdef COMPILE_SERIAL
 #define HTTP_LOGF(fmt, ...) Serial.printf("%s %s " fmt "\n", MILLIS_LOG, HTTP_LOG, ##__VA_ARGS__)
 #define HTTP_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_LOG, HTTP_LOG, ##__VA_ARGS__)
@@ -85,7 +86,7 @@ esp_err_t ws_handler(httpd_req_t *req)
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*"); // optional
         int fd = httpd_req_to_sockfd(req);
         ws_clients.addSocket(fd);
-
+        WS_LOGF("WebSocket client connected, socket=%d", fd);
         return ESP_OK;
     }
 
@@ -100,11 +101,13 @@ esp_err_t ws_handler(httpd_req_t *req)
         return ret;
     }
     HTTP_LOGF("ws_handler called, frame=%d", ws_pkt.type);
+
     // Close frame -> remove client
     if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE)
     {
         int fd = httpd_req_to_sockfd(req);
         ws_clients.removeSocket(fd);
+        WS_LOGF("WebSocket client disconnected [Close Frame], socket=%d", fd);
         return ESP_OK;
     }
 
@@ -124,46 +127,34 @@ esp_err_t ws_handler(httpd_req_t *req)
     {
         free(buf);
         HTTP_ERRORF("ws_recv_frame (data) failed: %d", ret);
+        WS_LOGF("ws_recv_frame (data) failed: %d", ret);
         return ret;
     }
 
     buf[ws_pkt.len] = 0;
     HTTP_LOGF("WS Received (%d): %s", ws_pkt.len, (char *)buf);
-    if (ws_pkt.len == 3)
+    String message = "";
+    if (strcmp((char *)buf, "req_sensors") == 0)
     {
-        if (buf[2] == ';')
-        {
-            // Special case: client is updating scheduler requests
-            int fd = httpd_req_to_sockfd(req);
-            uint8_t requests = atoi((char *)buf);
-            ws_clients.updateSchedulerRequests(fd, requests);
-            free(buf);
-            if (requests & WS_SENSORS_REQUEST_MASK)
-            {
-                String message = "1:";
-                message += handleNightMareCommand("sensors").response;
-                httpd_ws_frame_t out = {
-                    .type = HTTPD_WS_TYPE_TEXT,
-                    .payload = (uint8_t *)message.c_str(),
-                    .len = message.length()};
-                httpd_ws_send_frame(req, &out);
-            }
-            else if (requests & WS_MUX_REQUEST_MASK)
-            {
-                String message = "2:";
-                message += handleNightMareCommand("mux").response;
-                httpd_ws_frame_t out = {
-                    .type = HTTPD_WS_TYPE_TEXT,
-                    .payload = (uint8_t *)message.c_str(),
-                    .len = message.length()};
-                httpd_ws_send_frame(req, &out);
-            }
-            return ESP_OK;
-        }
+        message = "01:" + handleNightMareCommand("SENSORS").response;
     }
-    String message = "0:";
-    message += handleNightMareCommand(String((char *)buf, ws_pkt.len)).response;
-
+    else if (strcmp((char *)buf, "req_sensors_data") == 0)
+    {
+        message = "02:" + handleNightMareCommand("SENSORSDATA").response;
+    }
+    else if (strcmp((char *)buf, "req_mux") == 0)
+    {
+        message = "03:" + handleNightMareCommand("MUX").response;
+    }
+    else if (strcmp((char *)buf, "req_mux_data") == 0)
+    {
+        message = "04:" + handleNightMareCommand("MUXDATA -q").response;
+    }
+    else
+    {
+        message = "00:";
+        message += handleNightMareCommand(String((char *)buf, ws_pkt.len)).response;
+    }
     httpd_ws_frame_t out = {
         .type = HTTPD_WS_TYPE_TEXT,
         .payload = (uint8_t *)message.c_str(),
@@ -201,7 +192,7 @@ void ws_broadcast(const char *message)
         esp_err_t ret = httpd_ws_send_frame_async(ws_server, sock, &frame);
         if (ret != ESP_OK)
         {
-            HTTP_ERRORF("Broadcast to %d failed (%d), removing client", sock, ret);
+            WS_LOGF("Broadcast to %d failed (%d), removing client", sock, ret);
             ws_clients.removeSocket(sock);
         }
     }
@@ -211,13 +202,14 @@ void startWebsocketServer(httpd_handle_t server_handle)
 {
     ws_server = server_handle;
     httpd_register_uri_handler(server_handle, &ws_handshake);
-    auto res = xTaskCreatePinnedToCore(ws_scheduler_task, "ws_scheduler_task", 4096, NULL, 5, NULL, 1);
-    Serial.printf("%s WebSocket Server Task Started\n", OK_LOG(res == pdPASS));
+    // auto res = xTaskCreatePinnedToCore(ws_scheduler_task, "ws_scheduler_task", 4096, NULL, 5, NULL, 1);
+    // Serial.printf("%s WebSocket Server Task Started\n", OK_LOG(res == pdPASS));
 }
 
 void http_close_cb(httpd_handle_t hd, int fd)
 {
     // server closed or socket dropped
+    WS_LOGF("HTTP close callback for socket %d", fd);
     ws_clients.removeSocket(fd);
 }
 

@@ -1,5 +1,6 @@
 #include "http.h"
 #ifdef COMPILE_HTTP_SERVER
+#define COMPILE_SERIAL
 #define HTTP_LOG "\x1B[32m[HTTP]\x1B[0m"
 #ifdef COMPILE_SERIAL
 #define HTTP_LOGF(fmt, ...) Serial.printf("%s %s " fmt "\n", MILLIS_LOG, HTTP_LOG, ##__VA_ARGS__)
@@ -43,7 +44,7 @@ esp_err_t error_handler(httpd_req_t *req, httpd_err_code_t error)
 esp_err_t nm_server(httpd_req_t *req)
 {
     unsigned long _micros = micros();
-    char buf[100];
+    char buf[256];
     int ret, remaining = req->content_len;
     while (remaining > 0)
     {
@@ -58,7 +59,10 @@ esp_err_t nm_server(httpd_req_t *req)
     }
     NightMareResults res = handleNightMareCommand(String(buf, req->content_len));
     httpd_resp_set_hdr(req, "Content-Type", "application/json");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "http://localhost:5173");
+    char origin[128];
+    httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin));
+    // HTTP_LOGF("Origin: %s\n", origin);
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", origin);
     httpd_resp_send(req, res.response.c_str(), HTTPD_RESP_USE_STRLEN);
     _micros = micros() - _micros;
     // Log the processing time
@@ -78,6 +82,7 @@ httpd_uri_t uri_nm = {
     .method = HTTP_POST,
     .handler = nm_server,
     .user_ctx = NULL};
+
 
 /** @brief Sets HTTP server priority and (re)start server
     @param useHighPriority If true, sets higher priority for the HTTP server task.
@@ -103,7 +108,7 @@ esp_err_t setHttpHighPriority(bool useHighPriority)
         httpd_register_uri_handler(server, &uri_root);
         httpd_register_uri_handler(server, &uri_nm);
 #ifdef COMPILE_WEBSOCKET_SERVER
-            startWebsocketServer(server);
+        startWebsocketServer(server);
 #endif
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, error_handler);
         http_state = useHighPriority ? HTTP_RUNNING_HIGH_PRIORITY : HTTP_RUNNING_NORMAL_PRIORITY;
