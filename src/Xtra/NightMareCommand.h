@@ -28,6 +28,10 @@ const char *getBootReason(int reason);
 #include <Core/Configs.h>
 #endif
 
+#ifdef COMPILE_TIMERS
+#include <Core/Timers.h> 
+#endif
+
 #endif
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));

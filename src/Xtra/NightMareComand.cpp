@@ -191,7 +191,7 @@ NightMareResults handleNightMareCommand(const String &message)
         String name = parsedMsg.args[1];
         String value = parsedMsg.args[2];
         bool save = parsedMsg.args[3] == "1" || parsedMsg.args[3] == "-s" || parsedMsg.args[3] == "save";
-        
+
         if (parsedMsg.subcommand == "GET")
         {
             if (name == "" || name == "ALL")
@@ -521,6 +521,29 @@ NightMareResults handleNightMareCommand(const String &message)
             result.response = "Unknown SCHEDULER subcommand.";
             result.result = false;
         }
+    }
+#endif
+
+#ifdef COMPILE_TIMERS
+
+    else if (parsedMsg.command == "TIMERS")
+    {
+        DynamicJsonDocument doc(512);
+        JsonArray tasks = doc.createNestedArray("tasks");
+        JsonArray timeouts = doc.createNestedArray("timeouts");
+        for (size_t i = 0; i < TIMER_MAX_TASKS; i++)
+        {
+            if (Timers._tasks[i].label != "unused")
+            {
+                JsonObject task = Timers._tasks[i].is_timeout ? timeouts.createNestedObject() : tasks.createNestedObject();
+                task["label"] = Timers._tasks[i].label;
+                task["interval"] = Timers._tasks[i].interval;
+                task["timeLeft"] = Timers.timeleft(Timers._tasks[i].label);
+            }
+        }
+        String resStr = "";
+        serializeJson(doc, resStr);
+        result.response = resStr;
     }
 #endif
 
