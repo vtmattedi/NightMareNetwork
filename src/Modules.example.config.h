@@ -59,6 +59,7 @@
 #define COMPILE_COMMAND_RESOLVER // Compile the command resolver module
 #ifdef COMPILE_COMMAND_RESOLVER
 /*--- Command Resolver configs */
+#define COMPILE_ASYNC_COMMANDS // Compile support for asynchronous commands (commands that run in a separate task and do not block the main loop)
 #define COMPILE_SERIAL_COMMAND_RESOLVER // Compile the serial command resolver
 #define ENABLE_PREPROCESSING // Enable command pre processing
 #define SCHEDULER_AWARE // Compile the command resolver module with scheduler support on the PREPROCESSING

@@ -34,8 +34,34 @@ const char *getBootReason(int reason);
 
 #endif
 
+
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));
 
+#ifdef COMPILE_ASYNC_COMMANDS
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#define ASYNC_COMMANDS_TASK_STACK 4096
+#define ASYNC_COMMANDS_TASK_PRIORITY 1
+#define ASYNC_COMMANDS_QUEUE_SIZE 10
+#define ASYNC_COMMANDS_SINGLE_TASK_DELAY_MS 10
+#define ASYNC_COMMAND_END_TAG ";;finished;;"
+#define ASYNC_COMMAND_ERROR_TAG(var) String(String(";;error;;") + String(var) + String(";;")).c_str()
+enum AsyncCommandResult
+{
+    ASYNC_CMD_SUCCESS = 0,
+    ASYNC_CMD_QUEUE_FULL = 1,
+    ASYNC_CMD_TASK_CREATION_FAILED = 2,
+    ASYNC_CMD_SINGLE_TASK_NOT_INIT = 3,
+    ASYNC_CMD_FAILED_TO_MALLOC_PARAMS = 4
+};
+
+
+uint8_t dispatchAsyncCommand(String command, NightmareContext context);
+
+void asyncSend(const String &msg, NightmareContext context);
+
+#endif
+
 #ifdef COMPILE_SERIAL_COMMAND_RESOLVER
-void NightMareCommand_SerialResolver(char readUntilChar = '\n');
+void NightMareCommand_SerialResolver(HardwareSerial* _Serial, char readUntilChar = '\n');
 #endif

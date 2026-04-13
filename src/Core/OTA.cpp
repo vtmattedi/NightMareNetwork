@@ -1,5 +1,6 @@
 #include "OTA.h"
 #ifdef COMPILE_OTA
+
 // #define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 #define OTA_TAG "\x1b[32m[OTA]\x1b[0m"
@@ -71,7 +72,8 @@ void otaTask(void *param)
 
 void initOTA()
 {
-    ArduinoOTA.setHostname(DEVICE_NAME);
+    
+    ArduinoOTA.setHostname(getDeviceName());
     ArduinoOTA.onStart(startOTA);
     ArduinoOTA.onEnd(endOTA);
     ArduinoOTA.onProgress(progressOTA);

@@ -19,13 +19,13 @@
 #ifndef MQTT_CREDS_H
 #error "Please create a creds.h file with the necessary definitions."
 #endif
-#ifndef DEVICE_NAME
-#warning "DEVICE_NAME not defined, using default name."
-#define DEVICE_NAME "NightMare Device"
-#endif
-#ifdef USING_DEFAULT_DEVICE_NAME
-#warning "Using default DEVICE_NAME, please define a unique name in Modules.config.h"
-#endif
+// #ifndef DEVICE_NAME
+// #warning "DEVICE_NAME not defined, using default name."
+// #define DEVICE_NAME "NightMare Device"
+// #endif
+// #ifdef USING_DEFAULT_DEVICE_NAME
+// #warning "Using default DEVICE_NAME, please define a unique name in Modules.config.h"
+// #endif
 // #define COMPILE_SERIAL
 #define LOCAL_MQTT true
 #define REMOTE_MQTT false
@@ -34,11 +34,13 @@
 //This will make the MQTT client handle commands sent to the topic <DEVICE_NAME>/console/in
 #ifdef MQTT_PREPROCESS
 #include <Xtra/NightMareCommand.h>
+#include <Core/TimeSyncronization.h>
+
 #endif
 
 #define MQTT_CONTROL_TASK_PRIORITY 5
 #define MQTT_TASK_PRIORITY 5
-
+#define MAX_ASYNC_QUEUE_MESSAGES 5
 void MQTT_Init(bool local = false);
 void MQTT_End();
 void MQTT_Finish();
@@ -53,5 +55,6 @@ bool MQTT_Connected();
 void Send_to_MQTT(String topic, String message);
 int8_t MQTT_State();
 String MQTTStateJson();
+bool MQTT_Queue_Async_Message(String topic, String message, bool insertOwner = false, bool retained = false);
 #endif
 #endif

@@ -2,6 +2,21 @@
 
 NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
 
+void asyncSend(const String &msg, NightmareContext context)
+{
+    // This function can be used by commands to send messages asynchronously, for example to send progress updates. It will send the message to the source of the command, for example if the command was received via MQTT it will send the message back to the MQTT topic it was received from.
+    if (context.msgSource == NM_CMD_SRC_MQTT)
+    {
+        MQTT_Send(context.sourceIdentifier, msg, false, false);
+    }
+    else if (context.msgSource == NM_CMD_SRC_SERIAL)
+    {
+        HardwareSerial *_Serial = reinterpret_cast<HardwareSerial *>(context.userContext);
+        if (_Serial)
+            _Serial->println(msg);
+    }
+}
+
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message))
 {
     resolveCommand = resolver;
@@ -38,12 +53,13 @@ const char *getBootReason(int reason)
 }
 #endif
 
-NightMareResults handleNightMareCommand(const String &message)
+NightMareResults handleNightMareCommand(const String &message, NightmareContext context)
 {
     const char delimiter = ' ';
     NightMareResults result;
     result.response = "No command resolved";
     result.result = true;
+    result.context = context;
     NightMareMessage parsedMsg;
     String current_string = "";
 #ifdef COMPILE_SERIAL
@@ -89,7 +105,7 @@ NightMareResults handleNightMareCommand(const String &message)
         {
             if (index == 0)
                 parsedMsg.command += c;
-            else if (index < 5)
+            else if (index < 6)
                 parsedMsg.args[index - 1] += c;
         }
     }
@@ -120,7 +136,20 @@ NightMareResults handleNightMareCommand(const String &message)
         serializeJson(doc, res);
         result.response = res;
     }
-
+    else if (parsedMsg.command == "HARDWAREINFO")
+    {
+        auto doc = DynamicJsonDocument(512);
+        doc["ChipModel"] = ESP.getChipModel();
+        doc["ChipCores"] = ESP.getChipCores();
+        doc["ChipRevision"] = ESP.getChipRevision();
+        doc["FlashSizeMB"] = ESP.getFlashChipSize() / (1024 * 1024);
+        doc["HeapSize"] = ESP.getHeapSize();
+        doc["PsramSize"] = ESP.getPsramSize();
+        doc["MACAddress"] = WiFi.macAddress();
+        String res = "";
+        serializeJson(doc, res);
+        result.response = res;
+    }
 #ifdef COMPILE_MQTT
     else if (parsedMsg.command == "MQTT")
     {
@@ -191,16 +220,16 @@ NightMareResults handleNightMareCommand(const String &message)
         String name = parsedMsg.args[1];
         String value = parsedMsg.args[2];
         bool save = parsedMsg.args[3] == "1" || parsedMsg.args[3] == "-s" || parsedMsg.args[3] == "save";
-
+        bool get_privileged = parsedMsg.args[2] == "-p";
         if (parsedMsg.subcommand == "GET")
         {
-            if (name == "" || name == "ALL")
-                result.response = Config.getAllSettings();
+            if (name == "" || name == "all" || name == "ALL")
+                result.response = Config.getAllSettings(get_privileged);
             else
             {
                 if (Config.exists(name))
                 {
-                    result.response = "{\"" + name + "\":\"" + Config.get(name) + "\"}";
+                    result.response = "{\"" + name + "\":\"" + Config.get(name, "", get_privileged) + "\"}";
                 }
                 else
                 {
@@ -210,11 +239,10 @@ NightMareResults handleNightMareCommand(const String &message)
         }
         else if (parsedMsg.subcommand == "SET" && name != "" && value != "")
         {
-            Config.set(name, value);
-            bool saved = false;
-            if (save)
-                saved = Config.save();
-            result.response = "{\"" + name + "\":\"" + Config.get(name) + "\", \"saved\":" + String(saved ? "true" : "false") + "}";
+            bool set_privileged = parsedMsg.args[3] == "-p";
+            Config.set(name, value, set_privileged);
+            bool saved = Config.get(name, "", set_privileged) == value;
+            result.response = "{\"" + name + "\":\"" + Config.get(name, "", set_privileged) + "\", \"saved\":" + String(saved ? "true" : "false") + "}";
         }
         else if (parsedMsg.subcommand == "SAVE")
         {
@@ -305,8 +333,8 @@ NightMareResults handleNightMareCommand(const String &message)
         else if (parsedMsg.subcommand == "RECONNECT")
         {
             result.response = "not implemented yet";
-            result.result = true;
         }
+
         else if (parsedMsg.subcommand == "SCAN")
         {
             bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
@@ -322,6 +350,41 @@ NightMareResults handleNightMareCommand(const String &message)
                 else
                 {
                     doc["control"] = "scan_start_failed";
+                }
+                // if we are on an async context we can wait for the scan to complete and send the results in one go, otherwise user must pool.
+                if (context.async)
+                {
+                    result.context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after scan is complete
+                    res = WiFi.scanComplete();
+                    while (res == -1)
+                    {
+                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                        res = WiFi.scanComplete();
+                    }
+                    if (res == -2)
+                    {
+                        doc["control"] = "scan_failed";
+                    }
+                    else
+                    {
+                        // After scan is complete, get results and respond
+                        doc["control"] = "scan_done";
+                        JsonArray networks = doc.createNestedArray("networks");
+                        for (int i = 0; i < res; i++)
+                        {
+                            JsonObject net = networks.createNestedObject();
+                            net["ssid"] = WiFi.SSID(i);
+                            net["rssi"] = WiFi.RSSI(i);
+                            net["mac"] = WiFi.BSSIDstr(i);
+                            net["channel"] = WiFi.channel(i);
+                            net["encryptionType"] = WiFi_getAuthTypeName(WiFi.encryptionType(i));
+                        }
+                    }
+                    Serial.printf("ScanResults: %d networks found\n", res);
+                    String resStr = "";
+                    // Serial.printf("doc size: %lu\n", doc.memoryUsage());
+                    serializeJson(doc, resStr);
+                    asyncSend(resStr, context);
                 }
             }
             else
@@ -350,6 +413,7 @@ NightMareResults handleNightMareCommand(const String &message)
             serializeJson(doc, resStr);
             result.response = resStr;
         }
+
         else if (parsedMsg.subcommand == "CHANGE")
         {
             if (parsedMsg.args[1].length() == 0)
@@ -362,11 +426,18 @@ NightMareResults handleNightMareCommand(const String &message)
                 String password = parsedMsg.args[2];
                 bool changeResult = WiFi_ChangeCredentials(ssid, password);
                 result.response = formatString("WiFi credentials change %s.", changeResult ? "successful" : "failed");
+#ifdef COMPILE_MQTT
+                if (context.msgSource == NM_CMD_SRC_MQTT)
+                {
+                    context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after reconnecting to MQTT with the new credentials
+                    MQTT_Queue_Async_Message(context.sourceIdentifier, result.response, false, false);
+                };
+#endif
             }
         }
         else
         {
-            result.response = "Unknown WIFI subcommand available: [STATE, RECONNECT].";
+            result.response = "Unknown WIFI subcommand available: [IP, STATE, SCAN <-s|-start>, CHANGE <ssid> <password>, RECONNECT].";
             result.result = false;
         }
     }
@@ -578,7 +649,11 @@ NightMareResults handleNightMareCommand(const String &message)
     }
     // If not handled, pass to resolver
     if (resolveCommand && !prehandled)
-        result = resolveCommand(parsedMsg);
+    {
+        auto res = resolveCommand(parsedMsg);
+        result.response = res.response;
+        result.result = res.result;
+    }
 #else
     if (resolveCommand)
         result = resolveCommand(parsedMsg);
@@ -598,7 +673,7 @@ NightMareResults handleNightMareCommand(const String &message)
             snprintf(buffer, sizeof(buffer), "Command \'%s\' unrecognized.", parsedMsg.command.c_str());
         result.response = String(buffer);
     }
-
+    result.context = context;
     return result;
 }
 
@@ -606,17 +681,184 @@ NightMareResults handleNightMareCommand(const String &message)
 
 /// @brief Listens to Serial input and resolves commands using the NightMare command resolver.
 /// This function uses Serial.readStringUntil to read input until the specified character is encountered.
+/// @param _Serial A HardwareSerial Object Pointer.
 /// @param readUntilChar The character to read until (default is '\n')
-void NightMareCommand_SerialResolver(char readUntilChar)
+/// @note: If readUntilChar is set to 0, it will read until no more data is available in the buffer, allowing for multi-line commands.
+void NightMareCommand_SerialResolver(HardwareSerial *_Serial, char readUntilChar)
 {
-    if (Serial.available())
+    if (_Serial == nullptr)
+        return;
+    if (_Serial->available())
     {
-        String cmd = Serial.readStringUntil(readUntilChar);
+        String cmd = "";
+        if (readUntilChar != 0)
+        {
+            cmd = _Serial->readStringUntil(readUntilChar);
+        }
+        else
+        {
+            while (_Serial->available())
+            {
+                cmd += (char)_Serial->read();
+                delay(10); // Small delay to allow buffer to fill
+            }
+        }
         cmd.trim();
-        NightMareResults res = handleNightMareCommand(cmd);
-        Serial.printf("<\x1b[90m%s\x1b[0m>%s\n", cmd.c_str(), OK_LOG(res.result));
-        Serial.printf("%s\n", res.response.c_str());
+        _Serial->printf("<\x1b[90m%s\x1b[0m>%s\n", cmd.c_str(), "processing...");
+        NightMareResults res = handleNightMareCommand(cmd, NightmareContext(NM_CMD_SRC_SERIAL, "Serial", _Serial, true));
+        _Serial->printf("<\x1b[90m%s\x1b[0m>%s\n", cmd.c_str(), OK_LOG(res.result));
+        if (res.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
+        {
+            _Serial->printf("%s\n", res.response.c_str());
+        }
     }
 }
 
+#endif
+
+#ifdef COMPILE_ASYNC_COMMANDS
+#ifdef ASYNC_COMMANDS_SINGLE_TASK
+
+QueueHandle_t asyncCommandQueue;
+static bool asyncWorkerTaskRunning = false;
+
+void xCommandWorkerTask(void *param)
+{
+    NightMareAsyncParam *taskParam;
+    for (;;)
+    {
+        if (xQueueReceive(asyncCommandQueue, &taskParam, portMAX_DELAY) == pdPASS)
+        {
+
+            String command = taskParam->command;
+            NightmareContext context = taskParam->context;
+            Serial.print(ASYNC_TAG);
+            Serial.print(" Worker task received id: ");
+            Serial.println(context.sourceIdentifier);
+            delete taskParam;
+            Serial.print(ASYNC_TAG);
+            Serial.print(" [");
+            Serial.print(context.sourceIdentifier);
+            Serial.println("] starting execution.");
+            unsigned long startTime = millis();
+            NightMareResults res = handleNightMareCommand(command, context);
+            Serial.print(ASYNC_TAG);
+            Serial.print(" [");
+            Serial.print(context.sourceIdentifier);
+            Serial.print("] executed in ");
+            Serial.print(millis() - startTime);
+            Serial.println("ms.");
+            Serial.printf("src: %02x\n", res.context.msgSource);
+            // If the response is meant to be sent via MQTT
+            if (res.context.msgSource == NM_CMD_SRC_MQTT && res.context.sourceIdentifier.length() > 0)
+            {
+                MQTT_Send(context.sourceIdentifier, res.response, false, false);
+                Serial.print(ASYNC_TAG);
+                Serial.print(" [");
+                Serial.print(context.sourceIdentifier);
+                Serial.println("] MQTT response sent.");
+            }
+            // if the command handler indicated that it will handle the MQTT response itself we end the async response here.
+            if (context.msgSource == NM_CMD_SRC_MQTT && res.context.sourceIdentifier.length() > 0)
+            {
+                MQTT_Send(context.sourceIdentifier, ASYNC_COMMAND_END_TAG, false, false);
+                Serial.print(ASYNC_TAG);
+                Serial.print(" [");
+                Serial.print(context.sourceIdentifier);
+                Serial.println("] MQTT finished sent.");
+            }
+        }
+        // Using the task blocker instead
+        // vTaskDelay(ASYNC_COMMANDS_SINGLE_TASK_DELAY_MS / portTICK_PERIOD_MS);
+    }
+}
+
+void startAsyncCommandWorker()
+{
+    asyncCommandQueue = xQueueCreate(ASYNC_COMMANDS_QUEUE_SIZE, sizeof(NightMareAsyncParam *));
+    if (asyncCommandQueue == NULL)
+    {
+        Serial.printf("%s Failed to create async command queue.\n", ERR_TAG);
+        return;
+    }
+    BaseType_t res = xTaskCreate(
+        xCommandWorkerTask,
+        "AsyncCmdWorker",
+        ASYNC_COMMANDS_TASK_STACK,
+        nullptr,
+        ASYNC_COMMANDS_TASK_PRIORITY,
+        nullptr);
+    if (res != pdPASS)
+    {
+        Serial.printf("%s Error creating async handler task.\n", ERR_TAG);
+        return;
+    }
+    Serial.printf("%s Async handler Task Created.\n", OK_TAG);
+    asyncWorkerTaskRunning = true;
+    return;
+}
+#else
+void xCommandWorkerTask(void *param)
+{
+    NightMareAsyncParam *taskParam = (NightMareAsyncParam *)param;
+    String command = taskParam->command;
+    NightmareContext context = taskParam->context;
+    delete taskParam;
+
+    NightMareResults res = handleNightMareCommand(command, context);
+    if (context.msgSource == NM_CMD_SRC_MQTT && context.sourceIdentifier.length() > 0)
+    {
+        MQTT_Queue_Async_Message(context.sourceIdentifier, res.response, false, false);
+        MQTT_Queue_Async_Message(context.sourceIdentifier, ASYNC_COMMAND_END_TAG, false, false);
+    }
+
+    vTaskDelete(NULL);
+}
+#endif
+
+uint8_t dispatchAsyncCommand(String command, NightmareContext context)
+{
+    NightMareAsyncParam *param = new NightMareAsyncParam();
+
+    if (!param)
+        return ASYNC_CMD_FAILED_TO_MALLOC_PARAMS;
+
+    param->command = command;
+    param->context = context;
+    param->context.async = true; // Mark the context as async so handlers can know to respond with async message format if needed.
+#ifdef ASYNC_COMMANDS_SINGLE_TASK
+    // if task has not been init, init it.
+    if (!asyncWorkerTaskRunning)
+        startAsyncCommandWorker();
+    // if task is still not init i.e. init failled
+    if (!asyncWorkerTaskRunning)
+    {
+        delete param;
+        return ASYNC_CMD_SINGLE_TASK_NOT_INIT;
+    }
+
+    if (xQueueSend(asyncCommandQueue, &param, 0) != pdPASS)
+    {
+        delete param;
+        Serial.printf("%s Async command queue is full. Failed to dispatch command.\n", ERR_TAG);
+        return ASYNC_CMD_QUEUE_FULL;
+    }
+    Serial.printf("%s Dispatched async command to worker task: %s\n", ASYNC_TAG, command.c_str());
+#else
+    BaseType_t res = xTaskCreate(
+        xCommandWorkerTask,
+        "AsyncCmdWorker",
+        ASYNC_COMMANDS_TASK_STACK,
+        param,
+        ASYNC_COMMANDS_TASK_PRIORITY,
+        nullptr);
+    if (res != pdPASS)
+    {
+        delete param;
+        Serial.printf("%s Error creating dispatch task.\n", ERR_TAG);
+        return ASYNC_CMD_TASK_CREATION_FAILED;
+    }
+#endif
+    return ASYNC_CMD_SUCCESS;
+}
 #endif

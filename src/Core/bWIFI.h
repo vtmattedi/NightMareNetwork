@@ -2,6 +2,7 @@
 #ifndef NIGHTMARE_CORE_BWIFI_H
 #define NIGHTMARE_CORE_BWIFI_H
 #include <Modules.config.h>
+#include <LOGS.h>
 #ifdef COMPILE_WIFI_MODULE
 
 #include <WiFi.h>
@@ -26,7 +27,7 @@
 
 #endif
 typedef void (*WiFiConnectedCallback)(bool firstConnection);
-void onWiFiConnected(WiFiConnectedCallback callback);
+void WiFi_onConnected(WiFiConnectedCallback callback);
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0, void *waitCallback(unsigned int) = nullptr);
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect = true);
 void WiFi_Disconnect();

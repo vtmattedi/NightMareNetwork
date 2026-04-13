@@ -17,6 +17,9 @@ extern String formatString(const char *format, ...);
 #define INFO_TAG "\x1b[92;1m[INFO]\x1b[0m"
 #define OK_TAG "\x1b[92;1m[OK]\x1b[0m"
 #define OK_LOG(var) var ? OK_TAG : ERR_TAG
+#define ASYNC_TAG "\x1b[95;1m[ASYNC]\x1b[0m"
+#define SYNC_TAG "\x1b[94;1m[SYNC]\x1b[0m"
+#define ASYNC_LOG(var) var ? ASYNC_TAG : SYNC_TAG
 
 #define TIMER_TAG "\x1b[97;1m[Timer]\x1b[0m"
 #define SCHEDULER_TAG "\x1b[96;1m[Scheduler]\x1b[0m"

@@ -1,5 +1,8 @@
 #include "MQTT.h"
+#include "Misc.h"
+
 #ifdef COMPILE_MQTT
+const char *root_ca PROGMEM = ROOT_CA;
 /// @brief Callback function to handle incoming MQTT messages.
 void (*handleMqttMessage)(String topic, String message) = NULL;
 
@@ -12,7 +15,7 @@ static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 
 static bool local_initialized = false; // True if initialized as local, false if remote
 #define MAX_MQTT_RETRIES 1
 static int8_t mqtt_retries = 0;
-#define COMPILE_SERIAL
+// #define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -41,6 +44,14 @@ static TaskHandle_t mqtt_control_task_handle = NULL;
 static String local_ip = LOCAL_MQTT_HOST;
 static bool manual_control = false;
 static bool mqtt_server_state[2] = {false, false}; // {local, remote}
+struct MQTTAsyncMessage
+{
+    bool active;
+    String topic;
+    String message;
+    bool retained;
+};
+static MQTTAsyncMessage mqtt_async_message_queue[MAX_ASYNC_QUEUE_MESSAGES]; // Simple fixed-size queue for async messages
 #define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
 #define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
 
@@ -96,7 +107,6 @@ void mqtt_control_task(void *arg)
                     mqtt_state = -1;
                 }
 
-               
                 break;
             // This should rarely be used, but is here for completeness
             case MQTT_CMD_RECONNECT:
@@ -128,13 +138,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // Subscribe to all topics
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
         MQTT_LOG("Subscription to #: %s (rc=%d)\n", rc >= 0 ? "Success" : "Failed", rc);
+        // Always publish retained online state so it clears retained LWT offline.
+        MQTT_Send("/status", "online", true, true);
 #ifdef MQTT_PREPROCESS
         // Send initial messages
-        MQTT_Send("/status", "online", true, true);
         static bool first_time = true;
         if (first_time)
         {
             MQTT_Send("console/out", "Booted");
+            MQTT_Send_Raw("n8n/request", "time");
             first_time = false;
         }
         else
@@ -142,6 +154,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             MQTT_Send("console/out", "Connected");
         }
 #endif
+        for (int i = 0; i < MAX_ASYNC_QUEUE_MESSAGES; i++)
+        {
+            if (mqtt_async_message_queue[i].active)
+            {
+                MQTT_Send(mqtt_async_message_queue[i].topic, mqtt_async_message_queue[i].message, false, mqtt_async_message_queue[i].retained);
+                mqtt_async_message_queue[i].active = false; // Mark as sent
+            }
+        }
         if (handleMqttConnected)
         {
             handleMqttConnected(); // Call the connected handler if set
@@ -151,7 +171,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
     {
         mqtt_state = 0;
-        MQTT_LOG("MQTT disconnected!");
+        MQTT_LOG("MQTT disconnected!\n");
         if (handleMqttDisconnected)
         {
             handleMqttDisconnected(local_initialized);
@@ -171,41 +191,90 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_DATA:
     {
-        if (handleMqttMessage && event->data_len > 0 && event->topic_len > 0)
+        if (event->data_len > 0 && event->topic_len > 0)
         {
-
             String topicStr = String(event->topic, event->topic_len);
+            topicStr.toLowerCase();
             String payloadStr = String(event->data, event->data_len);
+            String deviceName = String(DEVICE_NAME);
+            deviceName.toLowerCase();
             MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+            // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
-            if (topicStr == String(DEVICE_NAME) + "/console/in" || topicStr == "All/console/in")
+            if (topicStr == deviceName + "/console/in" || topicStr == "all/console/in")
             {
                 // Handle command internally
-                NightMareResults res = handleNightMareCommand(payloadStr);
+                MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+                NightMareResults res = handleNightMareCommand(payloadStr, {NM_CMD_SRC_MQTT, topicStr, NULL});
                 MQTT_Send("/console/out", res.response);
                 return; // Do not pass to external handler
             }
-            else if (topicStr.startsWith(String(DEVICE_NAME) + "/console/controlled/") && topicStr.endsWith("/in"))
+            else if ((topicStr.startsWith(deviceName + "/console/controlled/") || topicStr.startsWith(deviceName + "/console/asynccontrolled/")) && topicStr.endsWith("/in"))
             {
-                // handle controlled Response:
+                //  handle controlled Response:
                 //  Turing/console/controlled/1/in
                 //  Turing/console/controlled/1/out
-                const int first_slash = topicStr.indexOf('/', strlen(DEVICE_NAME "/console/controlled"));
-                const int second_slash = topicStr.indexOf('/', first_slash + 1);
-                String control_id = topicStr.substring(first_slash + 1, second_slash);
-                MQTT_LOG("Controlled Console ID: %s\n", control_id.c_str());
-                String out_topic = "/console/controlled/" + control_id + "/out";
+                MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+                bool asyncRequested = topicStr.startsWith(deviceName + "/console/asynccontrolled/");
+                const String topicMiddle = String(DEVICE_NAME) + (asyncRequested ? "/console/asynccontrolled/" : "/console/controlled/");
+
+                const int topicPrefixLen = topicMiddle.length();
+                const int second_slash = topicStr.indexOf('/', topicPrefixLen);
+                if (second_slash <= topicPrefixLen)
+                {
+                    MQTT_LOGE("Invalid controlled topic: %s\n", topicStr.c_str());
+                    return;
+                }
+                String control_id = topicStr.substring(topicPrefixLen, second_slash);
+                MQTT_LOG("%s Controlled Console ID: %s\n", ASYNC_LOG(asyncRequested), control_id.c_str());
+                String out_topic = topicMiddle + control_id + "/out";
+#ifdef COMPILE_ASYNC_COMMANDS
+                if (asyncRequested)
+                {
+                    uint8_t res = dispatchAsyncCommand(payloadStr, {NM_CMD_SRC_MQTT, out_topic, NULL, true});
+                    if (res != ASYNC_CMD_SUCCESS)
+                    {
+                        MQTT_LOGE("Failed to dispatch async command: %s\n", payloadStr.c_str());
+                        String errorMsg;
+                        switch (res)
+                        {
+                        case ASYNC_CMD_QUEUE_FULL:
+                            errorMsg = "Async command queue is full. Please try again later.";
+                            break;
+                        case ASYNC_CMD_TASK_CREATION_FAILED:
+                            errorMsg = "Failed to create task for async command.";
+                            break;
+                        case ASYNC_CMD_SINGLE_TASK_NOT_INIT:
+                            errorMsg = "Async command worker task is not running.";
+                            break;
+                        case ASYNC_CMD_FAILED_TO_MALLOC_PARAMS:
+                            errorMsg = "Failed to allocate memory for async command.";
+                            break;
+                        default:
+                            errorMsg = "Unknown error dispatching async command.";
+                            break;
+                        }
+                        MQTT_Send(out_topic, ASYNC_COMMAND_ERROR_TAG(errorMsg.c_str()), false, false);
+                    }
+                    return; // Do not pass to external handler
+                }
+#else
+                asyncRequested = false; // If async support is not compiled, treat as normal controlled command
+#endif
                 // Handle controlled console command
-                NightMareResults res = handleNightMareCommand(payloadStr);
-                MQTT_Send(out_topic, res.response);
+                NightMareResults res = handleNightMareCommand(payloadStr, {NM_CMD_SRC_MQTT, out_topic, NULL, false});
+                if (res.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
+                {
+                    MQTT_Send(out_topic, res.response, false, false);
+                }
                 return; // Do not pass to external
             }
-            else if (topicStr == "All/connection" )
+            else if (topicStr == "all/connection")
             {
                 // if the connection was manual, ignore auto commands once
                 if (manual_control)
                     manual_control = false;
-                    return;
+                return;
                 int index = payloadStr.indexOf(';');
                 String cmd = payloadStr.substring(0, index);
                 String targetIP = payloadStr.substring(index + 1);
@@ -222,6 +291,67 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     }
                     MQTT_change_to(local);
                 }
+                return; // Do not pass to external handler
+            }
+            else if (topicStr == "n8n/time")
+            {
+                /*
+                 {"timestamp":1773198413,"offset":0}
+                */
+                uint32_t timestamp = 0;
+                int32_t offset = 0;
+
+                // Tolerate non-compact payloads with extra formatting/newlines.
+                auto extractNumericAfterKey = [](const String &src, const char *key, bool allowSign, long *outValue) -> bool
+                {
+                    int keyPos = src.indexOf(key);
+                    if (keyPos < 0)
+                        return false;
+                    int colonPos = src.indexOf(':', keyPos);
+                    if (colonPos < 0)
+                        return false;
+
+                    int i = colonPos + 1;
+                    while (i < src.length() && (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n' || src[i] == '"'))
+                        i++;
+
+                    String num;
+                    if (allowSign && i < src.length() && (src[i] == '-' || src[i] == '+'))
+                    {
+                        num += src[i++];
+                    }
+                    while (i < src.length() && isDigit(src[i]))
+                    {
+                        num += src[i++];
+                    }
+
+                    if (num.length() == 0 || num == "+" || num == "-")
+                        return false;
+                    *outValue = num.toInt();
+                    return true;
+                };
+
+                long tsTmp = 0;
+                long offTmp = 0;
+                bool tsOk = extractNumericAfterKey(payloadStr, "timestamp", false, &tsTmp);
+                bool offOk = extractNumericAfterKey(payloadStr, "offset", true, &offTmp);
+
+                if (!(tsOk && offOk))
+                {
+                    MQTT_LOGE("Invalid time sync payload: %s\n", payloadStr.c_str());
+                    return;
+                }
+
+                timestamp = static_cast<uint32_t>(tsTmp);
+                offset = static_cast<int32_t>(offTmp);
+                if (timestamp == 0)
+                {
+                    MQTT_LOGE("Invalid time sync timestamp: %s\n", payloadStr.c_str());
+                    return;
+                }
+
+                manualSyncTime(timestamp + (offset + GMT) * HOUR);
+                MQTT_LOG("Time synchronized to %s (timestamp: %u)\n", TIME_STR(now()), now());
                 return; // Do not pass to external handler
             }
 #endif
@@ -373,9 +503,10 @@ void MQTT_Config(bool local)
 
     // Allocate memory for strings that need to persist
     static char uri_buffer[128];
-    static char last_will_topic[64] = DEVICE_NAME "/status\0";
+    static char last_will_topic[64];
     static char last_will_message[16] = "offline\0";
     static char client_id_buffer[64];
+    snprintf(last_will_topic, sizeof(last_will_topic), "%s/status", DEVICE_NAME);
     snprintf(client_id_buffer, sizeof(client_id_buffer), "%s-%x", DEVICE_NAME, esp_random());
     mqtt_cfg.username = MQTT_USER;
     mqtt_cfg.password = MQTT_PASSWD;
@@ -473,7 +604,7 @@ void InsertTopicOwner(String *topic)
 {
     if (topic->startsWith("/"))
         *topic = topic->substring(1);
-    *topic = DEVICE_NAME + String("/") + *topic;
+    *topic = String(DEVICE_NAME) + String("/") + *topic;
 }
 
 #define MQTT_MAX_CHUNK_SIZE 512
@@ -504,20 +635,28 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
             String chunk = MQTT_CHUNK_DELIMITER + String(chunkId) + "/" + String(totalChunks) + MQTT_CHUNK_DELIMITER + message.substring(0, MQTT_MAX_CHUNK_SIZE);
             message = message.substring(MQTT_MAX_CHUNK_SIZE);
             int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), chunk.c_str(),
-                                                 chunk.length(), 0, retained );
+                                                 chunk.length(), 0, retained);
             chunkId++;
         }
 
         String chunk = MQTT_CHUNK_DELIMITER + String(chunkId) + "/" + String(totalChunks) + MQTT_CHUNK_DELIMITER + message;
         int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), chunk.c_str(),
-                                             chunk.length(), 0, retained );
+                                             chunk.length(), 0, retained);
     }
     else
     {
         int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
                                              message.length(), 0, retained);
     }
+    const char *CLIENT[2] = {
+        "\x1b[93;1m[Local]\x1b[0m",
+        "\x1b[94;1m[Remote]\x1b[0m"};
+#undef MQTT_LOG
+#define MQTT_LOG(fmt, ...) \
+    Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
     MQTT_LOG("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
+#undef MQTT_LOG
+#define MQTT_LOG(...)
 }
 
 /// @brief Sends a raw MQTT message without any modifications on topic name.
@@ -609,4 +748,43 @@ String MQTTStateJson()
     state += "}";
     return state;
 }
+
+/**
+ * @brief Queues an asynchronous MQTT message for publishing.
+ *
+ * This function attempts to add a message to the asynchronous MQTT message queue.
+ * It searches for an available slot in the queue and, if found, stores the provided
+ * topic and message. Optionally, it can insert the owner into the topic string.
+ *
+ * @param topic The MQTT topic to publish the message to.
+ * @param message The message payload to be published.
+ * @param insertOwner If true, inserts the owner information into the topic.
+ * @param retained If true, the message will be sent as a retained MQTT message.
+ * @return true if the message was successfully queued; false if the queue is full.
+ */
+bool MQTT_Queue_Async_Message(String topic, String message, bool insertOwner, bool retained)
+{
+    int index = -1;
+    for (int i = 0; i < MAX_ASYNC_QUEUE_MESSAGES; i++)
+    {
+        if (!mqtt_async_message_queue[i].active)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index == -1)
+    {
+        MQTT_LOGE("Async message queue is full! Cannot queue message: %s\n", topic.c_str());
+        return false;
+    }
+    if (insertOwner)
+        InsertTopicOwner(&topic);
+    mqtt_async_message_queue[index].active = true;
+    mqtt_async_message_queue[index].topic = topic;
+    mqtt_async_message_queue[index].message = message;
+    mqtt_async_message_queue[index].retained = retained;
+    return true;
+}
+
 #endif

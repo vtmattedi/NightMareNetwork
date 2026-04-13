@@ -9,27 +9,35 @@
 
 static WiFiConnectedCallback wifiConnectedCallback = nullptr;
 static TaskHandle_t WiFiTaskHandle = nullptr;
+static bool firstConnection = true;
 #define COMPILE_SERIAL
 /// @brief Set a callback function to be called when WiFi is connected
 /// @param callback The callback function to be set
 /// The callback function should have the signature: bool callback(bool firstConnection)
-void onWiFiConnected(WiFiConnectedCallback callback)
+void WiFi_onConnected(WiFiConnectedCallback callback)
 {
     wifiConnectedCallback = callback;
 }
 
-void wifiConnectedInternal(bool firstConnection)
+void wifiConnectedInternal()
 {
+    if (firstConnection)
+    {
 #ifdef COMPILE_OTA
-    initOTA();
+        initOTA();
 #endif
 #ifdef COMPILE_TIMESYNC
-    bool syncres = autoSyncTime();
-    WIFI_TAGF("Time sync result: %s", OK_LOG(syncres));
+        bool syncres = autoSyncTime();
+        WIFI_TAGF("Time sync result: %s", OK_LOG(syncres));
 #endif
+    }
     if (wifiConnectedCallback)
     {
         wifiConnectedCallback(firstConnection);
+    }
+    if (firstConnection)
+    {
+        firstConnection = false;
     }
 }
 
@@ -38,7 +46,6 @@ void wifiConnectedInternal(bool firstConnection)
 void WiFi_Task(void *pvParameters)
 {
     wl_status_t old_state = WL_DISCONNECTED;
-    bool firstConnection = true;
     bool deleteAfterConnect = *(bool *)pvParameters;
     delete (bool *)pvParameters;
     while (true)
@@ -48,8 +55,7 @@ void WiFi_Task(void *pvParameters)
             if (WiFi.status() == WL_CONNECTED)
             {
                 WIFI_TAGF("WiFi Connected. IP Address: %s", WiFi.localIP().toString().c_str());
-                wifiConnectedInternal(firstConnection);
-                firstConnection = false;
+                wifiConnectedInternal();
                 if (deleteAfterConnect)
                 {
                     WiFiTaskHandle = NULL;
@@ -80,7 +86,7 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
 {
     WIFI_TAGF("<Sync> Connecting to WiFi SSID: %s", ssid);
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(DEVICE_NAME);
+    WiFi.setHostname(getDeviceName());
     WiFi.begin(ssid, password);
     unsigned int start = millis();
     while (WiFi.status() != WL_CONNECTED)
@@ -95,7 +101,7 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
             return false;
         }
     }
-    wifiConnectedInternal(true);
+    wifiConnectedInternal();
     return true;
 }
 
@@ -104,7 +110,7 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
 
     WIFI_TAGF("<Async> Connecting to WiFi SSID: %s", ssid);
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(DEVICE_NAME);
+    WiFi.setHostname(getDeviceName());
     WiFi.begin(ssid, password);
 
     if (WiFiTaskHandle)
@@ -144,14 +150,14 @@ void WiFi_Auto()
 {
     // Ensure Configs module is initialized
     Config.begin();
-    if (!Config.exists("_ssid") || !Config.exists("_password"))
+    if (!Config.exists("_ssid", true) || !Config.exists("_password", true))
     {
         WIFI_TAGF("No stored WiFi credentials found. Using default.");
         Config.set("_ssid", DEFAULT_SSID, true);
         Config.set("_password", DEFAULT_PASSWORD, true);
     }
-    String ssid = Config.get("_ssid");
-    String password = Config.get("_password");
+    String ssid = Config.get("_ssid", "", true);
+    String password = Config.get("_password", "", true);
     WiFi_ConnectAsync(ssid.c_str(), password.c_str(), true);
 }
 
@@ -164,8 +170,8 @@ bool WiFi_ChangeCredentials(const String &ssid, const String &password)
     {
         WIFI_TAGF("Failed to connect with new credentials. Keeping old ones.");
         WIFI_TAGF("Reconnecting to previous WiFi credentials.");
-        String old_ssid = Config.get("_ssid");
-        String old_password = Config.get("_password");
+        String old_ssid = Config.get("_ssid", "", true  );
+        String old_password = Config.get("_password", "", true);
         WiFi_ConnectAsync(old_ssid.c_str(), old_password.c_str(), true);
         return false;
     }

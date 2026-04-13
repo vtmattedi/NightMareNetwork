@@ -1,3 +1,4 @@
+
 #include <Core/Misc.h>
 #ifdef COMPILE_MISC
 /// @brief Uses `printf` to format a String object. 

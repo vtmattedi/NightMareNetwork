@@ -9,3 +9,6 @@
 static const char *root_ca PROGMEM = R"EOF(
 remote mqtt broker root ca certificate here
 )EOF";
+
+#define DEFAULT_SSID "your_wifi_ssid"
+#define DEFAULT_PASSWORD "your_wifi_password"

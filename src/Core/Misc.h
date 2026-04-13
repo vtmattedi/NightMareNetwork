@@ -23,20 +23,25 @@
 
 #define HOUR 3600
 #define MINUTE 60
+// Returns "HH:MM"
 #define TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTime)
 #define TIME_STR(var) TIME(var).c_str()
+// Returns "DD-MM-YYYY"
 #define DATE(var) timestampToDateString(var,TimeStampFormat::OnlyDate)
 #define DATE_STR(var) DATE(var).c_str()
 #define TIME_SINCE(var) timestampToDateString(var,TimeStampFormat::TimeSinceStamp)
 #define TIME_SINCE_STR(var) TIME_SINCE(var).c_str()
 #define COUNTDOWN(var) timestampToDateString(var,TimeStampFormat::CountdownFromTimestamp)
 #define COUNTDOWN_STR(var) COUNTDOWN(var).c_str()
+// Returns "HH:MM" with live updating: ':' will blink every second
 #define LIVE_TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTimeLive)
 #define LIVE_TIME_STR(var) LIVE_TIME(var).c_str()
+// Returns "DayOfWeek, DD-MM-YYYY"
 #define DOW_DATE(var) timestampToDateString(var,TimeStampFormat::DowDate)
 #define DOW_DATE_STR(var) DOW_DATE(var).c_str()
-#define DATE_NO_YEAR_STR(var) timestampToDateString(var,TimeStampFormat::SmallDate).c_str()
+// Returns "DD-MM"
 #define DATE_NO_YEAR(var) timestampToDateString(var,TimeStampFormat::SmallDate)
+#define DATE_NO_YEAR_STR(var) timestampToDateString(var,TimeStampFormat::SmallDate).c_str()
 
 
 #define FORMAT_BUFFER_SIZE 1024 // max String length

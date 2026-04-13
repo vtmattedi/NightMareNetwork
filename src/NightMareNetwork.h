@@ -21,6 +21,8 @@
 #define MINUTE 60
 #endif
 
+#include <Modules.config.h>
+#include <LOGS.h>
 #include <Core/Misc.h>
 #include <Core/Timers.h>
 #include <Core/ServerVariables.h>

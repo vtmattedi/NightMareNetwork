@@ -18,9 +18,69 @@
 #define CONFIG_ERRORF(fmt, ...)
 #endif
 
-Configs Config;
+// #define DEVICE_NAME_MAX 48
+char DEVICE_NAME[DEVICE_NAME_MAX] = "Esp32-nm-"; // Default device name, used in MQTT and other places (can be overridden by defining DEVICE_NAME in Modules.config.h before including this header)
+void initPersistentSettings(Configs &configs);
+Configs Config(true); // Global instance of Configs with auto-save enabled
 
-Configs SystemSettings;
+Configs SystemSettings(false); // Global instance of Configs for non-persistent system settings with auto-save disabled
+
+Configs::Configs(bool saveAfterSet)
+{
+    this->saveAfterSet = saveAfterSet;
+}
+
+int Configs::NotifyOnChange(ConfigCallback cb)
+{
+    if (!cb)
+    {
+        CONFIG_ERRORF("NotifyOnChange received null callback.");
+        return -1;
+    }
+
+    for (int i = 0; i < callbackCount; i++)
+    {
+        if (callbacks[i] == cb)
+        {
+            CONFIG_LOGF("NotifyOnChange callback already registered.");
+            return i;
+        }
+    }
+
+    if (callbackCount >= CONFIGS_MAX_CALLBACKS)
+    {
+        CONFIG_ERRORF("Max callbacks reached (%d).", CONFIGS_MAX_CALLBACKS);
+        return -1;
+    }
+
+    callbacks[callbackCount++] = cb;
+    CONFIG_LOGF("Registered config callback (%d/%d).", callbackCount, CONFIGS_MAX_CALLBACKS);
+    return callbackCount - 1;
+}
+
+bool Configs::UnnotifyChange(int callbackId)
+{
+    if (callbackId < 0 || callbackId >= callbackCount || !callbacks[callbackId])
+    {
+        CONFIG_ERRORF("Invalid callback ID: %d", callbackId);
+        return false;
+    }
+
+    callbacks[callbackId] = nullptr;
+    CONFIG_LOGF("Unregistered config callback ID: %d", callbackId);
+    return true;
+}
+
+void Configs::notifyCallbacks(const String &key, const String &value)
+{
+    for (int i = 0; i < callbackCount; i++)
+    {
+        if (callbacks[i])
+        {
+            callbacks[i](key, value);
+        }
+    }
+}
 
 bool Configs::begin()
 {
@@ -39,6 +99,8 @@ bool Configs::begin()
     CONFIG_LOGF("LittleFS mounted successfully.");
     load();
     initialized = true;
+    initPersistentSettings(*this);
+
     return true;
 }
 
@@ -117,11 +179,14 @@ bool Configs::save()
 
 bool Configs::set(const String &key, const String &value, bool privileged)
 {
+    // no key
     if (key.length() == 0)
     {
         CONFIG_ERRORF("Attempted to set empty key.");
         return false;
     }
+
+    // key already exists, update value
     for (int i = 0; i < count; i++)
     {
         if (entries[i].key == key)
@@ -139,51 +204,83 @@ bool Configs::set(const String &key, const String &value, bool privileged)
 
             CONFIG_LOGF("Updated %s = %s", key.c_str(), value.c_str());
 
-            if (callback)
-                callback(key, value);
+            notifyCallbacks(key, value);
+            if (saveAfterSet)
+                save();
             return true;
         }
     }
 
+    // key does not exist -> settings are full
     if (count >= CONFIGS_MAX_ENTRIES)
     {
         CONFIG_ERRORF("Max entries reached (%d). Cannot set %s.", CONFIGS_MAX_ENTRIES, key.c_str());
         return false;
     }
 
+    // Add new key-value pair
     entries[count].key = key;
     entries[count].value = value;
     count++;
 
     CONFIG_LOGF("Added %s = %s", key.c_str(), value.c_str());
 
-    if (callback)
-        callback(key, value);
+    notifyCallbacks(key, value);
+
+    if (saveAfterSet)
+        save();
 
     return true;
 }
 
-String Configs::get(const String &key, const String &defaultValue)
+String Configs::get(const String &key, const String &defaultValue, bool privileged)
 {
+    if (!initialized && saveAfterSet) // if not initialized, and auto-saving is enabled I.E. persistent configs, load.
+    {
+        CONFIG_LOGF("Configs not initialized, auto-loading due to get() call for key: %s", key.c_str());
+        bool res = begin();
+        if (!res)
+        {
+            CONFIG_ERRORF("Failed to initialize configs on get() call. Returning default value for key: %s", key.c_str());
+            return defaultValue;
+        }
+    }
     for (int i = 0; i < count; i++)
     {
         if (entries[i].key == key)
+        {
+            if (!privileged && key.length() > 0 && key[0] == '_')
+            {
+                CONFIG_LOGF("Attempt to get privileged key %s, skipping.", key.c_str());
+                return defaultValue;
+            }
             return entries[i].value;
+        }
     }
 
     // CONFIG_LOGF("Get %s → default (%s)", key.c_str(), defaultValue.c_str());
     return defaultValue;
 }
 
-bool Configs::exists(const String &key)
+bool Configs::exists(const String &key, bool privileged)
 {
+    if (key.length() == 0)
+    {
+        CONFIG_ERRORF("Attempted to check existence of empty key.");
+        return false;
+    }
+    if (!privileged && key.length() > 0 && key[0] == '_')
+    {
+        CONFIG_LOGF("Attempt to check existence of privileged key %s, skipping.", key.c_str());
+        return false;
+    }
     for (int i = 0; i < count; i++)
         if (entries[i].key == key)
             return true;
     return false;
 }
 
-bool Configs::remove(const String &key)
+bool Configs::remove(const String &key, bool privileged)
 {
     for (int i = 0; i < count; i++)
     {
@@ -194,6 +291,8 @@ bool Configs::remove(const String &key)
             count--;
 
             CONFIG_LOGF("Removed %s", key.c_str());
+            if (saveAfterSet)
+                save();
             return true;
         }
     }
@@ -202,9 +301,22 @@ bool Configs::remove(const String &key)
     return false;
 }
 
-void Configs::clear()
+void Configs::clear(bool privileged, bool persistent)
 {
+
     count = 0;
+    for (int i = 0; i < CONFIGS_MAX_ENTRIES; i++)
+    {
+        if (!privileged && entries[i].key.length() > 0 && entries[i].key[0] == '_')
+            continue;
+        entries[i].key = "";
+        entries[i].value = "";
+    }
+    if (persistent)
+    {
+        LittleFS.remove(CONFIGS_FILE);
+        save();
+    }
     CONFIG_LOGF("Cleared all settings.");
 }
 
@@ -238,14 +350,45 @@ void Configs::performanceTest()
     CONFIG_LOGF("Got 100 entries in %lu ms", getDuration);
 }
 
-bool Configs::setFlag(const String &key, bool value)
+bool Configs::setFlag(const String &key, bool value, bool privileged)
 {
-    return set(key, value ? "1" : "0");
+    return set(key, value ? "1" : "0", privileged);
 }
 
-bool Configs::getFlag(const String &key)
+bool Configs::getFlag(const String &key, bool privileged)
 {
-    return get(key, "0") == "1";
+    return get(key, "0", privileged) == "1";
+}
+
+void onDeviceNameChange(const String &key, const String &value)
+{
+    CONFIG_LOGF("Config changed: %s = %s", key.c_str(), value.c_str());
+    if (key == "_device_name")
+    {
+        strncpy(DEVICE_NAME, value.c_str(), DEVICE_NAME_MAX - 1);
+        DEVICE_NAME[DEVICE_NAME_MAX - 1] = '\0'; // Ensure null-termination
+    }
+}
+
+void initPersistentSettings(Configs &configs)
+{
+    Serial.printf("initing configs configs...\n");
+    if (!configs.exists("_device_name", true))
+    {
+        String defaultName = String(DEVICE_NAME) + String((uint32_t)ESP.getEfuseMac(), HEX);
+        configs.set("_device_name", defaultName, true);
+    }
+    onDeviceNameChange("_device_name", configs.get("_device_name", "", true));
+    configs.NotifyOnChange(onDeviceNameChange);
+}
+
+const char *getDeviceName()
+{
+    if (DEVICE_NAME[0] == '\0')
+    {
+        return "ESP32-Device";
+    }
+    return DEVICE_NAME;
 }
 
 // ---- Returns all settings as JSON ----

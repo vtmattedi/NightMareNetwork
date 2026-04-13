@@ -128,7 +128,7 @@ void Scheduler::run()
         if (tasks[i].armed && tasks[i].executionTime <= nowTime)
         {
 #ifdef USE_NIGHTMARE_COMMAND
-            NightMareResults res = handleNightMareCommand(tasks[i].command);
+            NightMareResults res = handleNightMareCommand(tasks[i].command, {NM_CMD_SRC_SCHEDULER, String(tasks[i].id), nullptr, false});
             res.response.replace("\n", "\n\t\t");
             SCHEDULER_TAGF("Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
 #endif

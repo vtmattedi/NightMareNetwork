@@ -53,7 +53,7 @@ uint16_t TimerTask::timeLeft()
     if (use_millis)
         _now = millis();
 
-    return _now - last_time;
+    return  interval - (_now - last_time);
 }
 
 /// @brief Create a task to be run and adds it to the array of the Handler

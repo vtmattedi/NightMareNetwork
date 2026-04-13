@@ -8,8 +8,6 @@
 
 #ifdef USE_NIGHTMARE_COMMAND
 #include <Xtra/NightMareTypes.h>
-// this has to be here because of the circular dependency
-extern NightMareResults handleNightMareCommand(const String &message);
 #endif
 
 // #define SCHEDULER_USE_MILLIS //Use millis() instead of now() for scheduling tasks, useful if you don't have time sync
@@ -27,7 +25,7 @@ struct SchedulerTask
 // Usage:
 // Scheduler scheduler;
 // on setup():
-//  - scheduler.onCommand(your_function_to_run_commands);
+//  - scheduler.onCommand(your_function_to_run_commands); 
 // on loop():
 //  - scheduler.run();
 
