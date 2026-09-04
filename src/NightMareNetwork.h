@@ -24,6 +24,7 @@
 #include <Modules.config.h>
 #include <LOGS.h>
 #include <Core/Misc.h>
+#include <Core/LVGL_Util.h>
 #include <Core/Timers.h>
 #include <Core/ServerVariables.h>
 #include <Core/TimeSyncronization.h>
