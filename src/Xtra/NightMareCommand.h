@@ -7,7 +7,6 @@
 #ifdef ENABLE_PREPROCESSING
 #include <TimeLib.h>
 #include <ArduinoJson.h>
-const char *getBootReason(int reason);
 
 #ifdef SCHEDULER_AWARE
 #include <Xtra/Scheduler.h>
@@ -27,41 +26,64 @@ const char *getBootReason(int reason);
 #ifdef COMPILE_CONFIGS
 #include <Core/Configs.h>
 #endif
-
+#ifdef COMPILE_MISC
+#include <Core/Misc.h>
+#endif
 #ifdef COMPILE_TIMERS
-#include <Core/Timers.h> 
+#include <Core/Timers.h>
 #endif
 
 #endif
-
-
-void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));
 
 #ifdef COMPILE_ASYNC_COMMANDS
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#define ASYNC_COMMANDS_TASK_STACK 4096
-#define ASYNC_COMMANDS_TASK_PRIORITY 1
-#define ASYNC_COMMANDS_QUEUE_SIZE 10
-#define ASYNC_COMMANDS_SINGLE_TASK_DELAY_MS 10
-#define ASYNC_COMMAND_END_TAG ";;finished;;"
-#define ASYNC_COMMAND_ERROR_TAG(var) String(String(";;error;;") + String(var) + String(";;")).c_str()
-enum AsyncCommandResult
-{
-    ASYNC_CMD_SUCCESS = 0,
-    ASYNC_CMD_QUEUE_FULL = 1,
-    ASYNC_CMD_TASK_CREATION_FAILED = 2,
-    ASYNC_CMD_SINGLE_TASK_NOT_INIT = 3,
-    ASYNC_CMD_FAILED_TO_MALLOC_PARAMS = 4
-};
-
-
-uint8_t dispatchAsyncCommand(String command, NightmareContext context);
-
-void asyncSend(const String &msg, NightmareContext context);
-
+#include <Xtra/NightMareAsyncCommands.h>
 #endif
 
+/// @brief Registers the user-supplied command handler invoked for any command the built-in
+/// preprocessor doesn't already resolve.
+/// @param resolver Function taking a `const NightMareMessage &` and returning a `NightMareResults`.
+void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message));
+
+/// @brief Parses a raw command line into command / subcommand / args, per the NightMare Message
+/// grammar: `COMMAND SUBCOMMAND ARG0 ARG1 ARG2 ARG3 ARG4`. Command and subcommand are uppercased;
+/// args are kept as-is. A `"..."` quoted word is taken as a single argument with the quotes removed.
+/// @param message The command string to parse.
+/// @return The parsed NightMareMessage.
+NightMareMessage parseNightMareMessage(const String &message);
+
+/// @brief Core synchronous command executor: parses the message, runs it through the built-in
+/// preprocessor, and falls back to the registered resolver. Always runs on the calling task.
+/// Most callers want handleNightMareCommand() instead; this is exposed for the async worker to
+/// invoke without re-triggering async dispatch.
+/// @param message The input command message as a string.
+/// @param context The context of the command, including its source and identifier.
+/// @return A NightMareResults struct containing the result of the command execution.
+NightMareResults executeNightMareCommand(const String &message, NightmareContext context);
+
+/// @brief Single entrypoint for running a NightMare command. Runs synchronously unless
+/// `context.async` is set, in which case the command is queued for the async worker (started
+/// automatically on first use) and this returns immediately; the worker delivers the real response
+/// later via the context's source. If the async dispatch itself fails (queue full, worker couldn't
+/// start, ...), a failure result is returned rather than silently falling back to a blocking call.
+/// @param message The raw command string, e.g. `"WIFI SCAN -s"`. Callers that only have a message
+/// string can omit context entirely, e.g. `handleNightMareCommand("PING")`.
+/// @param context Execution context; defaults to an anonymous synchronous context.
+/// @return The command result, or the dispatch outcome when queued asynchronously.
+NightMareResults handleNightMareCommand(const String &message, NightmareContext context = NightmareContext());
+
+/// @brief Generates a JSON string representing the normalized system status, including IP address, HTTP server state, OTA update status, and async command system readiness.
+/// @return A JSON string containing the system status information.
+String getSystemStatus();
+
 #ifdef COMPILE_SERIAL_COMMAND_RESOLVER
-void NightMareCommand_SerialResolver(HardwareSerial* _Serial, char readUntilChar = '\n');
+#ifdef ESP32_C3
+#define SERIALTYPE HWCDC
+#else
+#define SERIALTYPE HardwareSerial
+#endif
+
+/// @brief Generic function to listen to Serial input and resolve commands using the NightMare command resolver.
+/// @param _Serial Serial object pointer to the serial interface to listen to.
+/// @param readUntilChar char to read until, default is '\n'. If set to 0, it will read until no more data is available in the buffer, allowing for multi-line commands.
+void NightMareCommand_SerialResolver(SERIALTYPE *_Serial, char readUntilChar = '\n');
 #endif

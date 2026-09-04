@@ -1,11 +1,11 @@
 #include "OTA.h"
 #ifdef COMPILE_OTA
-
+#define COMPILE_SERIAL
 // #define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 #define OTA_TAG "\x1b[32m[OTA]\x1b[0m"
 #define OTA_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", OTA_TAG, ##__VA_ARGS__)
-#define OTA_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_LOG, OTA_TAG, ##__VA_ARGS__)
+#define OTA_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_TAG, OTA_TAG, ##__VA_ARGS__)
 #else
 #define OTA_LOGF(fmt, ...)
 #define OTA_ERRORF(fmt, ...)
@@ -65,20 +65,22 @@ void otaTask(void *param)
     while (true)
     {
         ArduinoOTA.handle();
-        vTaskDelay(100 / portTICK_PERIOD_MS); 
+        vTaskDelay(100 / portTICK_PERIOD_MS);
         yield();
     }
+    // should never reach here, but if it does, we should clean up and disable OTA
+    SystemSettings.setFlag("ota_enabled", false);
 }
 
 void initOTA()
 {
-    
+
     ArduinoOTA.setHostname(getDeviceName());
     ArduinoOTA.onStart(startOTA);
     ArduinoOTA.onEnd(endOTA);
     ArduinoOTA.onProgress(progressOTA);
     ArduinoOTA.onError(errorOTA);
-    ArduinoOTA.setTimeout(OTA_TIMEOUT_MS); 
+    ArduinoOTA.setTimeout(OTA_TIMEOUT_MS);
     ArduinoOTA.begin();
     bool res = xTaskCreate(
         otaTask,
@@ -87,7 +89,7 @@ void initOTA()
         NULL,
         OTA_TASK_PRIORITY,
         &otaTaskHandle);
-
+    SystemSettings.setFlag("ota_enabled", res);
     Serial.printf("%s OTA Initialized\n", OK_LOG(res));
 }
 

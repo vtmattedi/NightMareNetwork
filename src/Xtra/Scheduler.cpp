@@ -1,5 +1,8 @@
 #include "Scheduler.h"
 #ifdef COMPILE_SCHEDULER
+#ifdef USE_NIGHTMARE_COMMAND
+#include <Xtra/NightMareCommand.h>
+#endif
 Scheduler scheduler;
 static uint16_t taskID = 0;
 #define COMPILE_SERIAL

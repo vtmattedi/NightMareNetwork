@@ -60,7 +60,8 @@ enum TimeStampFormat
 
 String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format = DateAndTime);
 String formatString(const char *format, ...);
-
+float ramUsagePercent();
+const char *getBootReason(int reason);
 #ifdef COMPILE_LVGL
 #pragma region "LVGL Helper Functions"
 void set_lv_flag(lv_obj_t *obj, bool value, lv_obj_flag_t flag = LV_OBJ_FLAG_HIDDEN);

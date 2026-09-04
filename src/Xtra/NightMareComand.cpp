@@ -1,72 +1,43 @@
 #include "NightMareCommand.h"
 
-NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
+#ifdef COMPILE_SERIAL
+#define COMMAND_RESOLVER_LOGF(fmt, ...) Serial.printf("%s " fmt "\n", COMMAND_RESOLVER_TAG, ##__VA_ARGS__)
+#define COMMAND_RESOLVER_ERRORF(fmt, ...) Serial.printf("%s %s " fmt "\n", ERR_TAG, COMMAND_RESOLVER_TAG, ##__VA_ARGS__)
+#else
+#define COMMAND_RESOLVER_LOGF(fmt, ...)
+#define COMMAND_RESOLVER_ERRORF(fmt, ...)
+#endif
 
-void asyncSend(const String &msg, NightmareContext context)
-{
-    // This function can be used by commands to send messages asynchronously, for example to send progress updates. It will send the message to the source of the command, for example if the command was received via MQTT it will send the message back to the MQTT topic it was received from.
-    if (context.msgSource == NM_CMD_SRC_MQTT)
-    {
-        MQTT_Send(context.sourceIdentifier, msg, false, false);
-    }
-    else if (context.msgSource == NM_CMD_SRC_SERIAL)
-    {
-        HardwareSerial *_Serial = reinterpret_cast<HardwareSerial *>(context.userContext);
-        if (_Serial)
-            _Serial->println(msg);
-    }
-}
+/// @brief  Global function pointer to the command resolver function. This function should be set by the user of the library to handle incoming commands.
+NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
 
 void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &message))
 {
     resolveCommand = resolver;
 }
 
-#ifdef ENABLE_PREPROCESSING
-const char *getBootReason(int reason)
+/// @brief Parses a command string into a NightMareMessage struct.
+/// @param message The command string to parse.
+/// @return A NightMareMessage struct containing the parsed command and its arguments.
+NightMareMessage parseNightMareMessage(const String &message)
 {
-    switch (reason)
-    {
-    case 1:
-        return "Power on";
-    case 2:
-        return "External pin";
-    case 3:
-        return "Software reset";
-    case 4:
-        return "Panic";
-    case 5:
-        return "Interrupt watchdog";
-    case 6:
-        return "Task watchdog";
-    case 7:
-        return "Other watchdog";
-    case 8:
-        return "Deep sleep exit";
-    case 9:
-        return "Brownout";
-    case 10:
-        return "SDIO reset";
-    default:
-        return "Unknown";
-    }
-}
-#endif
+    /* NightMare Message Parser:
 
-NightMareResults handleNightMareCommand(const String &message, NightmareContext context)
-{
-    const char delimiter = ' ';
-    NightMareResults result;
-    result.response = "No command resolved";
-    result.result = true;
-    result.context = context;
+    input: "COMMAND SUBCOMMAND ARG0 ARG1 ARG2 ARG3 ARG4"
+    output: NightMareMessage {
+        command: "COMMAND",
+        subcommand: "SUBCOMMAND", //Equals to args[0]
+        args: ["ARG0", "ARG1", "ARG2", "ARG3", "ARG4"]
+    }
+        notes:
+        1- command and subcommand are converted to uppercase, args are kept as is.
+        2- when we meet a " in the beginning of a word, we will consider everything until the next " as a single argument, and we will remove the " from the argument.
+        3- if we meet a " in the middle of a word, it is considered as part of the argument, and we will not remove it.
+
+    */
     NightMareMessage parsedMsg;
     String current_string = "";
-#ifdef COMPILE_SERIAL
-    Serial.printf("%s Received: '%s'\n", COMMAND_RESOLVER_LOG, message.c_str());
-#endif
     int index = 0;
-    // gets command and args using the delimiters
     bool in_quotes = false;
     String quote = "";
     for (size_t i = 0; i < message.length(); i++)
@@ -80,21 +51,18 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         if (c == '\"')
         {
             in_quotes = !in_quotes;
-            // start of quote
             if (in_quotes)
                 quote = "";
             else
             {
                 if (quote.length() == 0)
                     quote = "\"";
-                // end of quote
                 if (index == 0)
                     parsedMsg.command += quote;
                 else if (index < 5)
                     parsedMsg.args[index - 1] += quote;
                 quote = "";
             }
-            // go to next char
             continue;
         }
         if (in_quotes)
@@ -112,6 +80,24 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     parsedMsg.command.toUpperCase();
     parsedMsg.subcommand = parsedMsg.args[0];
     parsedMsg.subcommand.toUpperCase();
+    return parsedMsg;
+}
+
+/// @brief Core synchronous command executor: parses the message, runs it through the built-in
+/// preprocessor, and falls back to the registered resolver. Always runs on the calling task.
+/// Most callers want handleNightMareCommand() instead; this is exposed for the async worker to
+/// invoke without re-triggering async dispatch.
+/// @param message The input command message as a string.
+/// @param context The context of the command, including its source and identifier.
+/// @return A NightMareResults struct containing the result of the command execution, the response
+NightMareResults executeNightMareCommand(const String &message, NightmareContext context)
+{
+    NightMareResults result;
+    result.response = "No command resolved";
+    result.result = true;
+    result.context = context;
+    NightMareMessage parsedMsg = parseNightMareMessage(message);
+    COMMAND_RESOLVER_LOGF("Received: '%s'", message.c_str());
 #ifdef ENABLE_PREPROCESSING
     bool prehandled = true;
     // Basic commands that can be handled without a resolver
@@ -150,6 +136,32 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         serializeJson(doc, res);
         result.response = res;
     }
+    else if (parsedMsg.command == "TEST")
+    {
+        NightMareMessage testMsg = parseNightMareMessage(parsedMsg.args[0]);
+        String res = "Parsed Test Message: \n";
+        res += "Command: " + testMsg.command + "\n";
+        res += "Subcommand: " + testMsg.subcommand + "\n";
+        res += "Args: [";
+        for (int i = 0; i < 5; i++)
+        {
+            res += testMsg.args[i];
+            if (i < 4)
+                res += ", ";
+        }
+        res += "]";
+        result.response = res;
+        result.result = true;
+    }
+    // else if (parsedMsg.command == "TIME")
+    // {
+    //     istime
+    // }
+    else if (parsedMsg.command == "SYSTEMINFO")
+    {
+        result.response = getSystemStatus();
+    }
+
 #ifdef COMPILE_MQTT
     else if (parsedMsg.command == "MQTT")
     {
@@ -380,7 +392,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                             net["encryptionType"] = WiFi_getAuthTypeName(WiFi.encryptionType(i));
                         }
                     }
-                    Serial.printf("ScanResults: %d networks found\n", res);
+                    COMMAND_RESOLVER_LOGF("ScanResults: %d networks found", res);
                     String resStr = "";
                     // Serial.printf("doc size: %lu\n", doc.memoryUsage());
                     serializeJson(doc, resStr);
@@ -677,6 +689,39 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     return result;
 }
 
+/// @brief Single entrypoint for running a NightMare command. Runs synchronously unless
+/// `context.async` is set, in which case the command is queued for the async worker (started
+/// automatically on first use) and this returns immediately; the worker delivers the real response
+/// later via the context's source. If the async dispatch itself fails (queue full, worker couldn't
+/// start, ...), a failure result is returned rather than silently falling back to a blocking call.
+/// @param message The raw command string. Callers with only a message string can omit context,
+/// e.g. `handleNightMareCommand("PING")`.
+/// @param context Execution context; defaults to an anonymous synchronous context.
+/// @return The command result, or the dispatch outcome when queued asynchronously.
+NightMareResults handleNightMareCommand(const String &message, NightmareContext context)
+{
+#ifdef COMPILE_ASYNC_COMMANDS
+    if (context.async)
+    {
+        NightMareResults result;
+        result.context = context;
+        uint8_t dispatchStatus = dispatchAsyncCommand(message, context);
+        result.result = (dispatchStatus == ASYNC_CMD_SUCCESS);
+        if (result.result)
+        {
+            result.response = "Command dispatched for asynchronous execution.";
+            result.context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // the worker delivers the real response
+        }
+        else
+        {
+            result.response = asyncCommandErrorMessage(dispatchStatus);
+        }
+        return result;
+    }
+#endif
+    return executeNightMareCommand(message, context);
+}
+
 #ifdef COMPILE_SERIAL_COMMAND_RESOLVER
 
 /// @brief Listens to Serial input and resolves commands using the NightMare command resolver.
@@ -684,7 +729,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 /// @param _Serial A HardwareSerial Object Pointer.
 /// @param readUntilChar The character to read until (default is '\n')
 /// @note: If readUntilChar is set to 0, it will read until no more data is available in the buffer, allowing for multi-line commands.
-void NightMareCommand_SerialResolver(HardwareSerial *_Serial, char readUntilChar)
+void NightMareCommand_SerialResolver(SERIALTYPE *_Serial, char readUntilChar)
 {
     if (_Serial == nullptr)
         return;
@@ -716,149 +761,32 @@ void NightMareCommand_SerialResolver(HardwareSerial *_Serial, char readUntilChar
 
 #endif
 
+String getSystemStatus()
+{
+    DynamicJsonDocument doc(1024);
+#ifdef COMPILE_HTTP_SERVER
+    bool httpDirect = getHttpState() > 0;
+#else
+    bool httpDirect = false; // TODO: implement direct http and set this to true when it's implemented and enabled.
+#endif
+
+    JsonObject system = doc.createNestedObject("System");
+    system["Uptime"] = millis() / 1000;
+    system["FreeHeap"] = ramUsagePercent();
+    system["boot_time"] = SystemSettings.get("boot_time");
+    system["time_synced"] = SystemSettings.getFlag("time_synced");
+    system["reset_reason"] = esp_reset_reason();
+    system["wifi_rssi"] = WiFi.RSSI();
+    system["mqtt_connection"] = MQTT_isLocal() ? "Local" : "Remote";
+    system["ip_address"] = WiFi.localIP().toString();
+    system["direct_http"] = httpDirect;
+    system["OTA_enabled"] = SystemSettings.getFlag("ota_enabled");
 #ifdef COMPILE_ASYNC_COMMANDS
-#ifdef ASYNC_COMMANDS_SINGLE_TASK
-
-QueueHandle_t asyncCommandQueue;
-static bool asyncWorkerTaskRunning = false;
-
-void xCommandWorkerTask(void *param)
-{
-    NightMareAsyncParam *taskParam;
-    for (;;)
-    {
-        if (xQueueReceive(asyncCommandQueue, &taskParam, portMAX_DELAY) == pdPASS)
-        {
-
-            String command = taskParam->command;
-            NightmareContext context = taskParam->context;
-            Serial.print(ASYNC_TAG);
-            Serial.print(" Worker task received id: ");
-            Serial.println(context.sourceIdentifier);
-            delete taskParam;
-            Serial.print(ASYNC_TAG);
-            Serial.print(" [");
-            Serial.print(context.sourceIdentifier);
-            Serial.println("] starting execution.");
-            unsigned long startTime = millis();
-            NightMareResults res = handleNightMareCommand(command, context);
-            Serial.print(ASYNC_TAG);
-            Serial.print(" [");
-            Serial.print(context.sourceIdentifier);
-            Serial.print("] executed in ");
-            Serial.print(millis() - startTime);
-            Serial.println("ms.");
-            Serial.printf("src: %02x\n", res.context.msgSource);
-            // If the response is meant to be sent via MQTT
-            if (res.context.msgSource == NM_CMD_SRC_MQTT && res.context.sourceIdentifier.length() > 0)
-            {
-                MQTT_Send(context.sourceIdentifier, res.response, false, false);
-                Serial.print(ASYNC_TAG);
-                Serial.print(" [");
-                Serial.print(context.sourceIdentifier);
-                Serial.println("] MQTT response sent.");
-            }
-            // if the command handler indicated that it will handle the MQTT response itself we end the async response here.
-            if (context.msgSource == NM_CMD_SRC_MQTT && res.context.sourceIdentifier.length() > 0)
-            {
-                MQTT_Send(context.sourceIdentifier, ASYNC_COMMAND_END_TAG, false, false);
-                Serial.print(ASYNC_TAG);
-                Serial.print(" [");
-                Serial.print(context.sourceIdentifier);
-                Serial.println("] MQTT finished sent.");
-            }
-        }
-        // Using the task blocker instead
-        // vTaskDelay(ASYNC_COMMANDS_SINGLE_TASK_DELAY_MS / portTICK_PERIOD_MS);
-    }
-}
-
-void startAsyncCommandWorker()
-{
-    asyncCommandQueue = xQueueCreate(ASYNC_COMMANDS_QUEUE_SIZE, sizeof(NightMareAsyncParam *));
-    if (asyncCommandQueue == NULL)
-    {
-        Serial.printf("%s Failed to create async command queue.\n", ERR_TAG);
-        return;
-    }
-    BaseType_t res = xTaskCreate(
-        xCommandWorkerTask,
-        "AsyncCmdWorker",
-        ASYNC_COMMANDS_TASK_STACK,
-        nullptr,
-        ASYNC_COMMANDS_TASK_PRIORITY,
-        nullptr);
-    if (res != pdPASS)
-    {
-        Serial.printf("%s Error creating async handler task.\n", ERR_TAG);
-        return;
-    }
-    Serial.printf("%s Async handler Task Created.\n", OK_TAG);
-    asyncWorkerTaskRunning = true;
-    return;
-}
+    system["ASYNC_enabled"] = isAsyncCommandSystemReady();
 #else
-void xCommandWorkerTask(void *param)
-{
-    NightMareAsyncParam *taskParam = (NightMareAsyncParam *)param;
-    String command = taskParam->command;
-    NightmareContext context = taskParam->context;
-    delete taskParam;
-
-    NightMareResults res = handleNightMareCommand(command, context);
-    if (context.msgSource == NM_CMD_SRC_MQTT && context.sourceIdentifier.length() > 0)
-    {
-        MQTT_Queue_Async_Message(context.sourceIdentifier, res.response, false, false);
-        MQTT_Queue_Async_Message(context.sourceIdentifier, ASYNC_COMMAND_END_TAG, false, false);
-    }
-
-    vTaskDelete(NULL);
+    system["ASYNC_enabled"] = false;
+#endif
+    String msg;
+    serializeJson(doc, msg);
+    return msg;
 }
-#endif
-
-uint8_t dispatchAsyncCommand(String command, NightmareContext context)
-{
-    NightMareAsyncParam *param = new NightMareAsyncParam();
-
-    if (!param)
-        return ASYNC_CMD_FAILED_TO_MALLOC_PARAMS;
-
-    param->command = command;
-    param->context = context;
-    param->context.async = true; // Mark the context as async so handlers can know to respond with async message format if needed.
-#ifdef ASYNC_COMMANDS_SINGLE_TASK
-    // if task has not been init, init it.
-    if (!asyncWorkerTaskRunning)
-        startAsyncCommandWorker();
-    // if task is still not init i.e. init failled
-    if (!asyncWorkerTaskRunning)
-    {
-        delete param;
-        return ASYNC_CMD_SINGLE_TASK_NOT_INIT;
-    }
-
-    if (xQueueSend(asyncCommandQueue, &param, 0) != pdPASS)
-    {
-        delete param;
-        Serial.printf("%s Async command queue is full. Failed to dispatch command.\n", ERR_TAG);
-        return ASYNC_CMD_QUEUE_FULL;
-    }
-    Serial.printf("%s Dispatched async command to worker task: %s\n", ASYNC_TAG, command.c_str());
-#else
-    BaseType_t res = xTaskCreate(
-        xCommandWorkerTask,
-        "AsyncCmdWorker",
-        ASYNC_COMMANDS_TASK_STACK,
-        param,
-        ASYNC_COMMANDS_TASK_PRIORITY,
-        nullptr);
-    if (res != pdPASS)
-    {
-        delete param;
-        Serial.printf("%s Error creating dispatch task.\n", ERR_TAG);
-        return ASYNC_CMD_TASK_CREATION_FAILED;
-    }
-#endif
-    return ASYNC_CMD_SUCCESS;
-}
-#endif

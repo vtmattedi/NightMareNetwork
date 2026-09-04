@@ -9,6 +9,7 @@
 #include <Modules.config.h>
 #ifdef COMPILE_MQTT
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #define MQTT_SKIP_PUBLISH_IF_DISCONNECTED
 #include "mqtt_client.h"
 #include "creds.h"

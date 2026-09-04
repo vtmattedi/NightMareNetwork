@@ -15,7 +15,7 @@ static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 
 static bool local_initialized = false; // True if initialized as local, false if remote
 #define MAX_MQTT_RETRIES 1
 static int8_t mqtt_retries = 0;
-// #define COMPILE_SERIAL
+#define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -146,7 +146,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (first_time)
         {
             MQTT_Send("console/out", "Booted");
-            MQTT_Send_Raw("n8n/request", "time");
+            MQTT_Send_Raw("Control/request", "time");
             first_time = false;
         }
         else
@@ -198,25 +198,28 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             String payloadStr = String(event->data, event->data_len);
             String deviceName = String(DEVICE_NAME);
             deviceName.toLowerCase();
-            MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
             // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
+            NightmareContext context = {NM_CMD_SRC_MQTT, topicStr, NULL};
             if (topicStr == deviceName + "/console/in" || topicStr == "all/console/in")
             {
+                context.sourceIdentifier = deviceName + "/console/out";
                 // Handle command internally
                 MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
-                NightMareResults res = handleNightMareCommand(payloadStr, {NM_CMD_SRC_MQTT, topicStr, NULL});
-                MQTT_Send("/console/out", res.response);
+                NightMareResults res = handleNightMareCommand(payloadStr, context);
+                if (res.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
+                {
+                    MQTT_Send(context.sourceIdentifier, res.response, false, false);
+                }
                 return; // Do not pass to external handler
             }
-            else if ((topicStr.startsWith(deviceName + "/console/controlled/") || topicStr.startsWith(deviceName + "/console/asynccontrolled/")) && topicStr.endsWith("/in"))
+            else if (topicStr.startsWith(deviceName + "/console/controlled/") && topicStr.endsWith("/in"))
             {
                 //  handle controlled Response:
                 //  Turing/console/controlled/1/in
                 //  Turing/console/controlled/1/out
                 MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
-                bool asyncRequested = topicStr.startsWith(deviceName + "/console/asynccontrolled/");
-                const String topicMiddle = String(DEVICE_NAME) + (asyncRequested ? "/console/asynccontrolled/" : "/console/controlled/");
+                const String topicMiddle = String(DEVICE_NAME) + "/console/controlled/";
 
                 const int topicPrefixLen = topicMiddle.length();
                 const int second_slash = topicStr.indexOf('/', topicPrefixLen);
@@ -226,43 +229,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     return;
                 }
                 String control_id = topicStr.substring(topicPrefixLen, second_slash);
-                MQTT_LOG("%s Controlled Console ID: %s\n", ASYNC_LOG(asyncRequested), control_id.c_str());
+                MQTT_LOG("Controlled Console ID: %s\n", control_id.c_str());
                 String out_topic = topicMiddle + control_id + "/out";
-#ifdef COMPILE_ASYNC_COMMANDS
-                if (asyncRequested)
-                {
-                    uint8_t res = dispatchAsyncCommand(payloadStr, {NM_CMD_SRC_MQTT, out_topic, NULL, true});
-                    if (res != ASYNC_CMD_SUCCESS)
-                    {
-                        MQTT_LOGE("Failed to dispatch async command: %s\n", payloadStr.c_str());
-                        String errorMsg;
-                        switch (res)
-                        {
-                        case ASYNC_CMD_QUEUE_FULL:
-                            errorMsg = "Async command queue is full. Please try again later.";
-                            break;
-                        case ASYNC_CMD_TASK_CREATION_FAILED:
-                            errorMsg = "Failed to create task for async command.";
-                            break;
-                        case ASYNC_CMD_SINGLE_TASK_NOT_INIT:
-                            errorMsg = "Async command worker task is not running.";
-                            break;
-                        case ASYNC_CMD_FAILED_TO_MALLOC_PARAMS:
-                            errorMsg = "Failed to allocate memory for async command.";
-                            break;
-                        default:
-                            errorMsg = "Unknown error dispatching async command.";
-                            break;
-                        }
-                        MQTT_Send(out_topic, ASYNC_COMMAND_ERROR_TAG(errorMsg.c_str()), false, false);
-                    }
-                    return; // Do not pass to external handler
-                }
-#else
-                asyncRequested = false; // If async support is not compiled, treat as normal controlled command
-#endif
-                // Handle controlled console command
-                NightMareResults res = handleNightMareCommand(payloadStr, {NM_CMD_SRC_MQTT, out_topic, NULL, false});
+                // Whether the command actually runs async is up to the device (handleNightMareCommand /
+                // the command itself), not the transport - the controlled topic always just asks for a
+                // result and reports whatever comes back.
+                NightMareResults res = handleNightMareCommand(payloadStr, {NM_CMD_SRC_MQTT, out_topic, NULL});
                 if (res.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
                 {
                     MQTT_Send(out_topic, res.response, false, false);
@@ -293,8 +265,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 return; // Do not pass to external handler
             }
-            else if (topicStr == "n8n/time")
+            else if (topicStr == "control/time")
             {
+                MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+
                 /*
                  {"timestamp":1773198413,"offset":0}
                 */
@@ -302,54 +276,38 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 int32_t offset = 0;
 
                 // Tolerate non-compact payloads with extra formatting/newlines.
-                auto extractNumericAfterKey = [](const String &src, const char *key, bool allowSign, long *outValue) -> bool
+                DynamicJsonDocument doc(256);
+                DeserializationError error = deserializeJson(doc, payloadStr);
+                if (error)
                 {
-                    int keyPos = src.indexOf(key);
-                    if (keyPos < 0)
-                        return false;
-                    int colonPos = src.indexOf(':', keyPos);
-                    if (colonPos < 0)
-                        return false;
-
-                    int i = colonPos + 1;
-                    while (i < src.length() && (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n' || src[i] == '"'))
-                        i++;
-
-                    String num;
-                    if (allowSign && i < src.length() && (src[i] == '-' || src[i] == '+'))
-                    {
-                        num += src[i++];
-                    }
-                    while (i < src.length() && isDigit(src[i]))
-                    {
-                        num += src[i++];
-                    }
-
-                    if (num.length() == 0 || num == "+" || num == "-")
-                        return false;
-                    *outValue = num.toInt();
-                    return true;
-                };
-
-                long tsTmp = 0;
-                long offTmp = 0;
-                bool tsOk = extractNumericAfterKey(payloadStr, "timestamp", false, &tsTmp);
-                bool offOk = extractNumericAfterKey(payloadStr, "offset", true, &offTmp);
-
-                if (!(tsOk && offOk))
+                    MQTT_LOGE("Failed to parse time sync payload: %s\n", payloadStr.c_str());
+                    return;
+                }
+                if (!doc.containsKey("timestamp") || !doc.containsKey("offset"))
                 {
-                    MQTT_LOGE("Invalid time sync payload: %s\n", payloadStr.c_str());
+                    MQTT_LOGE("Time sync payload missing required fields: %s\n", payloadStr.c_str());
                     return;
                 }
 
-                timestamp = static_cast<uint32_t>(tsTmp);
-                offset = static_cast<int32_t>(offTmp);
+                if (!doc["timestamp"].is<double>() || !doc["offset"].is<int32_t>())
+                {
+                    MQTT_LOGE("Time sync payload has invalid offset or timestamp: %s\n", payloadStr.c_str());
+                    return;
+                }
+
+                double rawTimestamp = doc["timestamp"].as<double>();
+                if (rawTimestamp > 4294967295.0)
+                    rawTimestamp /= 1000.0; // sender sent milliseconds since epoch, not seconds
+
+                timestamp = (uint32_t)rawTimestamp;
+                offset = doc["offset"].as<int32_t>();
                 if (timestamp == 0)
                 {
-                    MQTT_LOGE("Invalid time sync timestamp: %s\n", payloadStr.c_str());
+                    MQTT_LOGE("Time sync payload has invalid offset or timestamp: %s\n", payloadStr.c_str());
                     return;
                 }
-
+                
+                MQTT_LOG("Time sync received: timestamp=%u, offset=%d\n", timestamp, offset);
                 manualSyncTime(timestamp + (offset + GMT) * HOUR);
                 MQTT_LOG("Time synchronized to %s (timestamp: %u)\n", TIME_STR(now()), now());
                 return; // Do not pass to external handler
@@ -508,29 +466,29 @@ void MQTT_Config(bool local)
     static char client_id_buffer[64];
     snprintf(last_will_topic, sizeof(last_will_topic), "%s/status", DEVICE_NAME);
     snprintf(client_id_buffer, sizeof(client_id_buffer), "%s-%x", DEVICE_NAME, esp_random());
-    mqtt_cfg.username = MQTT_USER;
-    mqtt_cfg.password = MQTT_PASSWD;
-    mqtt_cfg.client_id = client_id_buffer;
-    mqtt_cfg.lwt_topic = last_will_topic;
-    mqtt_cfg.lwt_msg = last_will_message;
-    mqtt_cfg.lwt_qos = 0;
-    mqtt_cfg.lwt_retain = 1;
-    mqtt_cfg.task_stack = 8192;
-    mqtt_cfg.task_prio = MQTT_TASK_PRIORITY;
+    mqtt_cfg.credentials.username = MQTT_USER;
+    mqtt_cfg.credentials.authentication.password = MQTT_PASSWD;
+    mqtt_cfg.credentials.client_id = client_id_buffer;
+    mqtt_cfg.session.last_will.topic = last_will_topic;
+    mqtt_cfg.session.last_will.msg = last_will_message;
+    mqtt_cfg.session.last_will.qos = 0;
+    mqtt_cfg.session.last_will.retain = 1;
+    mqtt_cfg.task.stack_size = 8192;
+    mqtt_cfg.task.priority = MQTT_TASK_PRIORITY;
 
     if (local)
     {
         // Local connection (non-secure)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtt://%s:%d", local_ip.c_str(), LOCAL_MQTT_PORT);
-        mqtt_cfg.uri = uri_buffer;
+        mqtt_cfg.broker.address.uri = uri_buffer;
         MQTT_LOG("MQTT client initialized for local connection.\n");
     }
     else
     {
         // Remote connection (secure)
         snprintf(uri_buffer, sizeof(uri_buffer), "mqtts://%s:%d", REMOTE_MQTT_URL, REMOTE_MQTT_PORT);
-        mqtt_cfg.uri = uri_buffer;
-        mqtt_cfg.cert_pem = root_ca; // Set to NULL to disable server cert verification
+        mqtt_cfg.broker.address.uri = uri_buffer;
+        mqtt_cfg.broker.verification.certificate = root_ca; // Set to NULL to disable server cert verification
         MQTT_LOG("MQTT client initialized for remote connection.\n");
     }
 
@@ -648,15 +606,8 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
         int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), message.c_str(),
                                              message.length(), 0, retained);
     }
-    const char *CLIENT[2] = {
-        "\x1b[93;1m[Local]\x1b[0m",
-        "\x1b[94;1m[Remote]\x1b[0m"};
-#undef MQTT_LOG
-#define MQTT_LOG(fmt, ...) \
-    Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
+
     MQTT_LOG("\x1b[90;1m<<<\x1b[0m[%s]:%s\n", topic.c_str(), message.c_str());
-#undef MQTT_LOG
-#define MQTT_LOG(...)
 }
 
 /// @brief Sends a raw MQTT message without any modifications on topic name.

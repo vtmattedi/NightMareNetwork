@@ -121,13 +121,15 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
         return false;
     }
     bool *deleteParam = new bool(deleteAfterConnect);
+    // tskNO_AFFINITY instead of core 1: the ESP32-C6 (and C3/H2/S2) is
+    // single-core, so pinning to core 1 fails configASSERT and panics.
     bool res = xTaskCreatePinnedToCore(WiFi_Task,
                                        "WiFi_Task",
                                        4096,
                                        deleteParam,
                                        1,
                                        &WiFiTaskHandle,
-                                       1);
+                                       tskNO_AFFINITY);
 
 #ifdef COMPILE_SERIAL
     if (res != pdPASS)

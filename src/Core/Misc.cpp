@@ -220,4 +220,43 @@ String insert_color(String text, int color)
 #endif
 
 
+float ramUsagePercent()
+{
+    size_t totalHeap = ESP.getHeapSize();   // Total heap
+    size_t freeHeap = ESP.getFreeHeap();    // Free heap
+    size_t usedHeap = totalHeap - freeHeap; // Used heap
+    float percentUsed = ((float)usedHeap / (float)totalHeap) * 100.0;
+    return percentUsed;
+}
+
+const char *getBootReason(int reason)
+{
+    switch (reason)
+    {
+    case 1:
+        return "Power on";
+    case 2:
+        return "External pin";
+    case 3:
+        return "Software reset";
+    case 4:
+        return "Panic";
+    case 5:
+        return "Interrupt watchdog";
+    case 6:
+        return "Task watchdog";
+    case 7:
+        return "Other watchdog";
+    case 8:
+        return "Deep sleep exit";
+    case 9:
+        return "Brownout";
+    case 10:
+        return "SDIO reset";
+    default:
+        return "Unknown";
+    }
+}
+
+
 #endif

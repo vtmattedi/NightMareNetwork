@@ -7,7 +7,7 @@
 // #include <ArduinoOTA.h>
 #include <Core/Timers.h>
 #include <ArduinoOTA.h>
-
+#include <Core/Configs.h>
 #define OTA_TIMEOUT_MS 5000
 #define OTA_TASK_PRIORITY 1
 

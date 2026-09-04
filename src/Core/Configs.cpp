@@ -89,7 +89,7 @@ bool Configs::begin()
         return true;
     }
 
-    if (!LittleFS.begin())
+    if (!LittleFS.begin(true)) // format-on-fail: formats a fresh/corrupt FS partition once, then mounts
     {
         CONFIG_ERRORF("LittleFS mount failed.");
         SystemSettings.setFlag("LittleFS_mounted", false);

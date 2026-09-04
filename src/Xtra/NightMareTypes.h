@@ -12,7 +12,11 @@ enum CommandSource
     NM_CMD_ANS_DO_NOT_RESPOND = 0xFF
 };
 
-
+/// @brief Struct to hold the context of a command, including its source, identifier, user-defined context, and whether it should be handled asynchronously.
+/// @param msgSource The source of the command (e.g., MQTT, Serial, HTTP, Websocket, Scheduler).
+/// @param sourceIdentifier A string identifier for the command source (e.g., MQTT topic,
+/// @param userContext An optional pointer to user-defined context (e.g., client object).
+/// @param async A boolean indicating whether the command should be handled asynchronously.
 struct NightmareContext
 {
     CommandSource msgSource; // 0 = unknown, 1 = MQTT, 2 = Serial, 3 = HTTP, 4 = Websocket, 0xFF = Do not respond
@@ -44,9 +48,5 @@ struct NightMareMessage
 struct NightMareAsyncParam
 {
     String command;
-    NightmareContext context;   
+    NightmareContext context;
 };
-
-
-
-NightMareResults handleNightMareCommand(const String &message, NightmareContext context = NightmareContext());
