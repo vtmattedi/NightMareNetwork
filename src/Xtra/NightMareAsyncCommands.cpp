@@ -30,7 +30,7 @@ static void deliverAsyncResult(const String &command, const NightMareResults &re
     }
     else if (context.msgSource == NM_CMD_SRC_SERIAL && context.userContext)
     {
-        HWCDC *_Serial = reinterpret_cast<HWCDC *>(context.userContext);
+        SERIALTYPE *_Serial = reinterpret_cast<SERIALTYPE *>(context.userContext);
         _Serial->printf("<\x1b[90m%s\x1b[0m>%s\n", command.c_str(), OK_LOG(res.result));
         _Serial->printf("%s\n", res.response.c_str());
     }
@@ -128,7 +128,7 @@ void asyncSend(const String &msg, NightmareContext context)
     }
     else if (context.msgSource == NM_CMD_SRC_SERIAL && context.userContext)
     {
-        HWCDC *_Serial = reinterpret_cast<HWCDC *>(context.userContext);
+        SERIALTYPE *_Serial = reinterpret_cast<SERIALTYPE *>(context.userContext);
         _Serial->println(msg);
     }
 }
