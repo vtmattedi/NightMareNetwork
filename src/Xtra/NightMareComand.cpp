@@ -83,6 +83,46 @@ NightMareMessage parseNightMareMessage(const String &message)
     return parsedMsg;
 }
 
+#ifdef ENABLE_PREPROCESSING
+/// Maximum directory depth walked by FS LIST; bounds the recursion on a fixed-size stack.
+#define FS_LIST_MAX_DEPTH 4
+/// JSON capacity for the FS LIST response. Overflow is reported instead of silently truncated.
+#define FS_LIST_JSON_CAPACITY 4096
+
+/// @brief Recursively appends every entry under a directory to `files` as {name, size} objects.
+/// Names are full paths from the FS root, so the flat array still describes the whole tree;
+/// directories are listed with a trailing slash and a size of 0.
+/// @param files The array to append the entries to.
+/// @param path Directory to walk, with a leading slash and no trailing slash ("" for the root).
+/// @param depth Remaining levels to descend; recursion stops at 0.
+static void listFileTree(JsonArray &files, const String &path, uint8_t depth)
+{
+    File dir = LittleFS.open(path.length() ? path.c_str() : "/");
+    if (!dir || !dir.isDirectory())
+        return;
+    File entry = dir.openNextFile();
+    while (entry)
+    {
+        // File::name() is the bare entry name on newer cores and the full path on older ones,
+        // so build the path from the parent rather than trusting either.
+        String name = entry.name();
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0)
+            name = name.substring(slash + 1);
+        String fullPath = path + "/" + name;
+        bool isDir = entry.isDirectory();
+        JsonObject entryObj = files.createNestedObject();
+        entryObj["name"] = isDir ? fullPath + "/" : fullPath;
+        entryObj["size"] = isDir ? 0 : entry.size();
+        entry.close();
+        if (isDir && depth > 0)
+            listFileTree(files, fullPath, depth - 1);
+        entry = dir.openNextFile();
+    }
+    dir.close();
+}
+#endif
+
 /// @brief Core synchronous command executor: parses the message, runs it through the built-in
 /// preprocessor, and falls back to the registered resolver. Always runs on the calling task.
 /// Most callers want handleNightMareCommand() instead; this is exposed for the async worker to
@@ -161,7 +201,105 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
     {
         result.response = getSystemStatus();
     }
-
+    else if (parsedMsg.command == "FS")
+    {
+        if (parsedMsg.subcommand == "LIST")
+        {
+            auto doc = DynamicJsonDocument(FS_LIST_JSON_CAPACITY);
+            JsonArray files = doc.createNestedArray("files");
+            listFileTree(files, "", FS_LIST_MAX_DEPTH);
+            if (doc.overflowed())
+            {
+                result.response = "Too many files to list: the tree exceeds " + String(FS_LIST_JSON_CAPACITY) + " bytes of JSON.";
+                result.result = false;
+            }
+            else
+            {
+                String resStr = "";
+                serializeJson(doc, resStr);
+                result.response = resStr;
+                result.result = true;
+            }
+        }
+        else if (parsedMsg.subcommand == "READ")
+        {
+            String filename = parsedMsg.args[1];
+            if (filename.length() == 0)
+            {
+                result.response = "No filename provided to READ.";
+                result.result = false;
+            }
+            else
+            {
+                if (LittleFS.exists(filename))
+                {
+                    File file = LittleFS.open(filename, "r");
+                    if (file)
+                    {
+                        result.response = file.readString();
+                        file.close();
+                        result.result = true;
+                    }
+                    else
+                    {
+                        result.response = "Failed to open file '" + filename + "' for reading.";
+                        result.result = false;
+                    }
+                }
+                else
+                {
+                    result.response = "File '" + filename + "' does not exist.";
+                    result.result = false;
+                }
+            }
+        }
+        else if (parsedMsg.subcommand == "STATUS")
+        {
+            auto doc = DynamicJsonDocument(512);
+            doc["totalBytes"] = LittleFS.totalBytes();
+            doc["usedBytes"] = LittleFS.usedBytes();
+            doc["initialized"] = SystemSettings.getFlag("LittleFS_mounted");
+            String resStr = "";
+            serializeJson(doc, resStr);
+            result.response = resStr;
+            result.result = true;
+        }
+        else if (parsedMsg.subcommand == "DELETE")
+        {
+            String filename = parsedMsg.args[1];
+            if (filename.length() == 0)
+            {
+                result.response = "No filename provided to DELETE.";
+                result.result = false;
+            }
+            else
+            {
+                if (LittleFS.exists(filename))
+                {
+                    if (LittleFS.remove(filename))
+                    {
+                        result.response = "File '" + filename + "' deleted successfully.";
+                        result.result = true;
+                    }
+                    else
+                    {
+                        result.response = "Failed to delete file '" + filename + "'.";
+                        result.result = false;
+                    }
+                }
+                else
+                {
+                    result.response = "File '" + filename + "' does not exist.";
+                    result.result = false;
+                }
+            }
+        }
+        else
+        {
+            result.response = "Unknown FS subcommand available: [LIST, DELETE <filename>].";
+            result.result = false;
+        }
+    }
 #ifdef COMPILE_MQTT
     else if (parsedMsg.command == "MQTT")
     {
@@ -544,9 +682,9 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
     /// Schedules a command to be run after a specific delay (in seconds).
     else if (parsedMsg.command == "SCHEDULE")
     {
-        unsigned long timestamp = now();
-        timestamp += strtoul(parsedMsg.args[1].c_str(), NULL, 10);
-        int id = scheduler.add(parsedMsg.args[0], timestamp);
+        uint32_t executionTime = strtoul(parsedMsg.args[1].c_str(), nullptr, 10);
+        String label = "TASK_" + String(millis());
+        int id = scheduler.addTask(label, parsedMsg.args[0], 0, executionTime, false);
         if (id != -1)
         {
             if (parsedMsg.args[2].toInt() > 0)
@@ -602,6 +740,23 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
         else
         {
             result.response = "Unknown SCHEDULER subcommand.";
+            result.result = false;
+        }
+    }
+
+    else if (parsedMsg.command == "TASK")
+    {
+        uint32_t executionTime = strtoul(parsedMsg.args[3].c_str(), nullptr, 10);
+        uint32_t interval = strtoul(parsedMsg.args[2].c_str(), nullptr, 10);
+        int id = scheduler.addTask(parsedMsg.args[0], parsedMsg.args[1], interval, executionTime, true);
+        if (id != -1)
+        {
+            result.response = "Task scheduled with ID: " + String(id);
+            result.result = true;
+        }
+        else
+        {
+            result.response = "Failed to schedule task.";
             result.result = false;
         }
     }

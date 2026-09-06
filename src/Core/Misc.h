@@ -20,6 +20,9 @@
 // Returns "HH:MM"
 #define TIME(var) timestampToDateString(var,TimeStampFormat::OnlyTime)
 #define TIME_STR(var) TIME(var).c_str()
+// Returns "HH:MM:SS"
+#define TIME_FULL(var) timestampToDateString(var,TimeStampFormat::OnlyTimeWithSeconds)
+#define TIME_FULL_STR(var) TIME_FULL(var).c_str()
 // Returns "DD-MM-YYYY"
 #define DATE(var) timestampToDateString(var,TimeStampFormat::OnlyDate)
 #define DATE_STR(var) DATE(var).c_str()
@@ -46,6 +49,7 @@ enum TimeStampFormat
   OnlyDate,
   SmallDate,
   OnlyTime,
+  OnlyTimeWithSeconds,
   OnlyTimeLive,
   DowDate,
   TimeSinceStamp,
@@ -56,5 +60,6 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format =
 String formatString(const char *format, ...);
 float ramUsagePercent();
 const char *getBootReason(int reason);
-
+// uint32_t timestampOfNextOccurrence(uint8_t hour, uint8_t minute, uint8_t second = 0);
+uint32_t timestampOfNextOccurrence(String timeString);
 #endif

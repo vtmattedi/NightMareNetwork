@@ -24,7 +24,7 @@
 #define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
 #define MQTT_PREPROCESS //Enable MQTT command preprocessing (Requires Command Resolver) (using <DEVICE_NAME>/console/in topic)
 /*---------------------*/
-#define COMPILE_LVGL //Compiles LVGL helpers code
+// #define COMPILE_LVGL //Compiles LVGL helpers code
 #define COMPILE_SERVERVARIABLES // Compile the ServerVariables template class
 /*------- ServerVariables Templates to be compiled---------*/
 #ifdef COMPILE_SERVERVARIABLES

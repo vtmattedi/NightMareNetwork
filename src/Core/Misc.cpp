@@ -1,7 +1,7 @@
 
 #include <Core/Misc.h>
 #ifdef COMPILE_MISC
-/// @brief Uses `printf` to format a String object. 
+/// @brief Uses `printf` to format a String object.
 /// @param format The string with the placeholders '%d', '%x' etc.
 /// @param args... The args to match the string passed.
 /// @return The formatted String.
@@ -39,6 +39,7 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
 
     int _hour = hour(timeObject);
     int _minute = minute(timeObject);
+    int _second = second(timeObject);
     uint8_t dow = dayOfWeek(timeObject);
 
     String dateString = "";
@@ -103,7 +104,7 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
     }
 
     // Adds Time
-    if (_format == OnlyTime || _format == DateAndTime || _format == OnlyTimeLive)
+    if (_format == OnlyTime || _format == DateAndTime || _format == OnlyTimeLive || _format == OnlyTimeWithSeconds)
     {
         dateString = String(_hour, DEC).length() == 1 ? "0" + String(_hour, DEC) : String(_hour, DEC);
         if (now() % 2 == 0 && _format == OnlyTimeLive)
@@ -111,6 +112,11 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
         else
             dateString += ":";
         dateString += String(_minute, DEC).length() == 1 ? "0" + String(_minute, DEC) : String(_minute, DEC);
+        if (_format == OnlyTimeWithSeconds)
+        {
+            dateString += ":";
+            dateString += String(_second, DEC).length() == 1 ? "0" + String(_second, DEC) : String(_second, DEC);
+        }
     }
     if (_format == DowDate)
     {
@@ -134,7 +140,6 @@ String timestampToDateString(uint32_t timestamp, const TimeStampFormat _format)
     }
     return dateString;
 }
-
 
 float ramUsagePercent()
 {
@@ -173,6 +178,36 @@ const char *getBootReason(int reason)
         return "Unknown";
     }
 }
+/// @brief Calculates the timestamp of the next occurrence of a specified time (hour, minute, second) in the future.
+/// @param timeString A string representing the time in the format "HH:MM".
+uint32_t timestampOfNextOccurrence(String timeString)
+{
+    int index = timeString.indexOf(':');
+    if (index == -1)
+    {
+        return 0;
+    }
 
+    int _hour = timeString.substring(0, index).toInt();
+    int _minute = timeString.substring(index + 1).toInt();
 
+    int currentSeconds =
+        hour() * 3600 +
+        minute() * 60 +
+        second();
+
+    int targetSeconds =
+        _hour * 3600 +
+        _minute * 60;
+
+    int delta = targetSeconds - currentSeconds;
+
+    // If target time has already passed, schedule it for tomorrow
+    if (delta < 0)
+    {
+        delta += 24 * 3600;
+    }
+
+    return now() + delta;
+}
 #endif
