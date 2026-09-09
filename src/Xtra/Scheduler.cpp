@@ -144,13 +144,13 @@ String Scheduler::listTasks(bool onlyPersistent)
     auto tasksArray = doc.createNestedArray("tasks");
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
-        if (tasks[i].armed && (!onlyPersistent || tasks[i].repeat)) 
+        if (tasks[i].armed && (!onlyPersistent || tasks[i].repeat))
         {
             JsonObject taskObj = tasksArray.createNestedObject();
             taskObj["id"] = tasks[i].id;
             taskObj["command"] = tasks[i].command;
             taskObj["executionTime"] = tasks[i].executionTime;
-            taskObj["repeat"] = tasks[i].repeat;
+            taskObj["is_task"] = tasks[i].repeat;
             taskObj["interval"] = tasks[i].interval;
         }
     }
@@ -206,7 +206,13 @@ void Scheduler::run()
         return;
     if (!this->configloaded)
     {
-        this->enable_scheduler_log = Config.getFlag("enable_scheduler_log");
+        if (!Config.exists("enable_scheduler_log"))
+        {
+            Config.setFlag("enable_scheduler_log", false);
+            this->enable_scheduler_log = false;
+        }
+        else
+            this->enable_scheduler_log = Config.getFlag("enable_scheduler_log");
         this->configloaded = true;
     }
     uint32_t nowTime = GET_TIME();
@@ -352,7 +358,6 @@ bool Scheduler::loadPersistentTasks()
         SCHEDULER_ERRORF("Failed to open file for reading: %s\n", SCHEDULER_FILE_NAME);
         return false;
     }
-    Serial.printf("Loading persistent tasks from %s\n", file.readString().c_str());
     file = LittleFS.open(SCHEDULER_FILE_NAME, FILE_READ);
     DynamicJsonDocument doc(2048);
     DeserializationError error = deserializeJson(doc, file);
