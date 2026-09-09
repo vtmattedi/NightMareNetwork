@@ -3,11 +3,32 @@
 
 void (*timeSyncCallback)(void) = nullptr;
 void _setTime(unsigned long timestamp);
-
 /// @brief Attempts to get the time synced using worldtimeapi.
 /// @return True if successful or false otherwise.
 bool autoSyncTime()
 {
+  /*Sample response:
+  {
+  "utc_iso": "2026-09-08T12:49:00Z",
+  "utc_rfc3339": "2026-09-08T12:49:00+00:00",
+  "utc_datetime": "2026-09-08T12:49:00.746867+00:00",
+  "unix": 1788871740,
+  "unix_ms": 1788871740746,
+  "day_of_week": 2,
+  "day_of_year": 251,
+  "week_number": 37,
+  "timezone": "America/Bahia",
+  "datetime": "2026-09-08T09:49:00.746867-03:00",
+  "local_iso": "2026-09-08T09:49:00-03:00",
+  "abbreviation": "UTC-03:00",
+  "utc_offset": "-03:00",
+  "utc_offset_minutes": -180,
+  "dst": false,
+  "dst_next_transition": null,
+  "dst_next_abbreviation": null,
+  "dst_next_offset": null
+}
+  */
   bool result = false;
 #ifdef COMPILE_SERIAL
   Serial.println("Syncing Time Online");
@@ -28,25 +49,26 @@ bool autoSyncTime()
       Serial.printf("[HTTP] OK... code: %d\n", httpCode);
 #endif
       String payload = http.getString();
-      int index_timestamp = payload.indexOf("unixtime: ");
-      if (index_timestamp < 0)
-        return false;
-      int index_timestamp_nl = payload.indexOf("\n", index_timestamp);
-      if (index_timestamp_nl < 0)
-        return false;
-      String timestamp = payload.substring(index_timestamp + 10, index_timestamp_nl);
-      unsigned long _timestamp = strtoul(timestamp.c_str(), NULL, 10);
-      int index_offset = payload.indexOf("raw_offset: ");
-      if (index_offset > 0)
+      DynamicJsonDocument doc(1024);
+      DeserializationError error = deserializeJson(doc, payload);
+      if (error)
       {
-        int index_offset_nl = payload.indexOf("\n", index_offset);
-        if (index_offset_nl > 0)
-        {
-          String offset = payload.substring(index_offset + 11, index_offset_nl);
-          int _offset = offset.toInt();
-          _timestamp += _offset;
-        }
+#ifdef COMPILE_SERIAL
+        Serial.printf("[HTTP] JSON deserialization failed: %s\n", error.c_str());
+#endif
+        http.end();
+        return false;
       }
+      if (!doc.containsKey("unix") || !doc["unix"].is<unsigned long>())
+      {
+#ifdef COMPILE_SERIAL
+        Serial.printf("[HTTP] JSON response missing 'unix' key: %s\n", payload.c_str());
+#endif
+        http.end();
+        return false;
+      }
+      unsigned long _timestamp = doc["unix"].as<unsigned long>();
+       _timestamp += GMT * 60 * 60;
       _setTime(_timestamp);
       result = true;
     }

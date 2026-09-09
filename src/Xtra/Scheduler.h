@@ -36,19 +36,20 @@ struct SchedulerTask
 class Scheduler
 {
 private:
-    
     uint8_t currentTasks = 0;
     uint8_t nextTaskIndex = 0;
     bool savePersistentTasks(String reason);
-
+    bool loadPersistentTasks();
+    SchedulerTask tasks[MAX_SCHEDULER_TASKS];
+    bool timeSynced = false; // Indicates if the system time has been synced at least once
+    bool enable_scheduler_log = false;
+    bool configloaded = false;
     void (*runCmd)(String cmd);
     void (*logResult)(NightMareResults result);
 
 public:
     Scheduler();
-    SchedulerTask tasks[MAX_SCHEDULER_TASKS];
-        bool timeSynced = false; // Indicates if the system time has been synced at least once
-    bool loadPersistentTasks();
+
     void onCommand(void (*runCommand)(String cmd));
     void onLogResult(void (*logResultFunc)(NightMareResults result));
     int32_t addTask(String label, String cmd, uint32_t interval_seconds, uint32_t executionTime, bool repeat = false, bool skipSave = false);
@@ -62,7 +63,7 @@ public:
     bool deleteTaskByLabel(String label);
     bool taskExists(uint16_t id);
     bool taskExists(String label);
-    String listTasks();
+    String listTasks(bool onlyPersistent = false);
     void syncTask(SchedulerTask *task, uint32_t oldTime = 0);
     void onSync(unsigned int oldTime = 0);
 };

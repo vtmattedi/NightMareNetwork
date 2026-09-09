@@ -16,7 +16,9 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Core/Configs.h>
-#define API_URL "http://worldtimeapi.org/api/timezone/America/Bahia.txt"
+#include <ArduinoJson.h>
+#include <Core/creds.h>
+#define API_URL "http://utctime.app/api/now/America/Bahia"
 
 #ifdef COMPILE_SCHEDULER
 #include <Xtra/Scheduler.h>

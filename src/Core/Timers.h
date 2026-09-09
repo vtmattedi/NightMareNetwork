@@ -22,6 +22,12 @@
 /// Max of tasks handled by the Timer Handler
 #define TIMER_MAX_TASKS 20
 
+#define BOOTSTRAP_TIMER_SYNC
+#ifdef BOOTSTRAP_TIMER_SYNC
+#include <Core/TimeSyncronization.h>
+#include <Core/Misc.h>
+#endif  
+
 /// @brief Struct to a single timer task
 struct TimerTask
 {
@@ -63,6 +69,7 @@ private:
   unsigned int timeout_index = 0;
 
 public:
+  TimersHandler();
   /// @brief Flag to print debug info
   bool debug = false;
   /// @brief Array holding all the individual tasks

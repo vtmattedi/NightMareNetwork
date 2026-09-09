@@ -124,6 +124,11 @@ void mqtt_control_task(void *arg)
         // vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
+
+bool triggerSubscription(esp_mqtt_client_handle_t client, const char *topic, int qos)
+{
+   return true;
+}
 /// @brief MQTT event handler.
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
@@ -146,12 +151,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (first_time)
         {
             MQTT_Send("console/out", "Booted");
-            MQTT_Send_Raw("Control/request", "time");
             first_time = false;
         }
         else
         {
             MQTT_Send("console/out", "Connected");
+        }
+        // If time is not synced, request time from the network
+        if (!SystemSettings.getFlag("time_synced"))
+        {
+            MQTT_Send("Control/request", "time", false, false);
         }
 #endif
         for (int i = 0; i < MAX_ASYNC_QUEUE_MESSAGES; i++)
@@ -194,10 +203,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (event->data_len > 0 && event->topic_len > 0)
         {
             String topicStr = String(event->topic, event->topic_len);
-            topicStr.toLowerCase();
             String payloadStr = String(event->data, event->data_len);
             String deviceName = String(DEVICE_NAME);
-            deviceName.toLowerCase();
             // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
             NightmareContext context = {NM_CMD_SRC_MQTT, topicStr, NULL};
@@ -306,7 +313,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     MQTT_LOGE("Time sync payload has invalid offset or timestamp: %s\n", payloadStr.c_str());
                     return;
                 }
-                
+
                 MQTT_LOG("Time sync received: timestamp=%u, offset=%d\n", timestamp, offset);
                 manualSyncTime(timestamp + (offset + GMT) * HOUR);
                 MQTT_LOG("Time synchronized to %s (timestamp: %u)\n", TIME_STR(now()), now());

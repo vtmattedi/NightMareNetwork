@@ -38,11 +38,26 @@ struct NightMareResults
     NightmareContext context; // Optional pointer for user-defined context (e.g. client object)
 };
 
+/// Arguments captured after the command word. Raising this is the only change needed to widen the
+/// grammar; parseNightMareMessage2() derives its bounds from it.
+#define NM_MAX_ARGS 5
+/// Longest command line parseNightMareMessage2() will accept. MQTT, HTTP, WS and TCP hand the
+/// parser an untrimmed, unbounded payload, so the cap is enforced here rather than at each caller.
+#define NM_MAX_MESSAGE_LEN 512
+
 struct NightMareMessage
 {
     String command;
     String subcommand;
-    String args[5] = {"", "", "", "", ""};
+    String args[NM_MAX_ARGS];
+    /// Number of arguments actually supplied, which is what separates "absent" from "empty string".
+    /// Only set by parseNightMareMessage2(); the original parser leaves it at 0.
+    uint8_t argc = 0;
+    /// False when the input was malformed. Only set by parseNightMareMessage2(), which is why it
+    /// defaults to true: a message from the original parser is always "valid" as far as callers go.
+    bool valid = true;
+    /// Why parsing failed, when valid is false.
+    String error;
 };
 
 struct NightMareAsyncParam

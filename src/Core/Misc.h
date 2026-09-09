@@ -62,4 +62,7 @@ float ramUsagePercent();
 const char *getBootReason(int reason);
 // uint32_t timestampOfNextOccurrence(uint8_t hour, uint8_t minute, uint8_t second = 0);
 uint32_t timestampOfNextOccurrence(String timeString);
+float fsUsagePercent();
+// getSystemStatus() lives in Core/SystemStatus.h: it aggregates WiFi, MQTT, HTTP and the async
+// command system, and Misc is a leaf that those modules sit above.
 #endif

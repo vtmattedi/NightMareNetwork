@@ -29,6 +29,9 @@
 #ifdef COMPILE_MISC
 #include <Core/Misc.h>
 #endif
+#ifdef COMPILE_SYSTEMSTATUS
+#include <Core/SystemStatus.h>
+#endif
 #ifdef COMPILE_TIMERS
 #include <Core/Timers.h>
 #endif
@@ -51,6 +54,23 @@ void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &mes
 /// @return The parsed NightMareMessage.
 NightMareMessage parseNightMareMessage(const String &message);
 
+/// @brief Checks a string against a length limit, saying by how much it overran. Const, so it can
+/// be pointed straight at an incoming payload: MQTT, HTTP, WS and TCP hand the parser an unbounded
+/// buffer they never sized themselves.
+/// @param str The string to check.
+/// @param maxLength The limit to enforce, e.g. NM_MAX_MESSAGE_LEN.
+/// @param error Set to the reason when this returns false; left alone on success.
+/// @return True when `str` is within the limit, false when it overran.
+bool ensureSize(const String &str, size_t maxLength, String &error);
+
+/// @brief Parses a raw command line into command / subcommand / args, reporting malformed input
+/// instead of guessing at it. Collapses runs of any whitespace, supports `\` escapes, and treats
+/// `""` as a present-but-empty argument; `argc` gives the number of arguments actually supplied.
+/// Check `valid` before using the result.
+/// @param message The command string to parse.
+/// @return The parsed message, or one with `valid` false and `error` set.
+NightMareMessage parseNightMareMessage2(const String &message);
+
 /// @brief Core synchronous command executor: parses the message, runs it through the built-in
 /// preprocessor, and falls back to the registered resolver. Always runs on the calling task.
 /// Most callers want handleNightMareCommand() instead; this is exposed for the async worker to
@@ -70,10 +90,6 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
 /// @param context Execution context; defaults to an anonymous synchronous context.
 /// @return The command result, or the dispatch outcome when queued asynchronously.
 NightMareResults handleNightMareCommand(const String &message, NightmareContext context = NightmareContext());
-
-/// @brief Generates a JSON string representing the normalized system status, including IP address, HTTP server state, OTA update status, and async command system readiness.
-/// @return A JSON string containing the system status information.
-String getSystemStatus();
 
 #ifdef COMPILE_SERIAL_COMMAND_RESOLVER
 #ifdef ESP32_C3

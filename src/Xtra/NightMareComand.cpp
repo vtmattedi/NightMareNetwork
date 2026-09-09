@@ -83,6 +83,208 @@ NightMareMessage parseNightMareMessage(const String &message)
     return parsedMsg;
 }
 
+/// @brief Checks a string against a length limit, saying by how much it overran.
+/// Takes a const reference so it can be pointed at an incoming payload directly, which is the
+/// point: MQTT, HTTP, WS and TCP hand the parser an unbounded buffer they never sized themselves.
+/// @param str The string to check.
+/// @param maxLength The limit to enforce.
+/// @param error Set to the reason when this returns false; left alone on success.
+/// @return True when `str` is within the limit, false when it overran.
+bool ensureSize(const String &str, size_t maxLength, String &error)
+{
+    if (str.length() <= maxLength)
+        return true;
+    error = "input too long: " + String((uint32_t)str.length()) + " chars, limit is " + String((uint32_t)maxLength);
+    return false;
+}
+
+/// @brief Every ASCII blank separates tokens, not just ' '. MQTT, HTTP, WS and TCP pass their
+/// payload straight through untrimmed, so a trailing \r or \n is routine on those transports.
+static inline bool isTokenSeparator(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
+
+/// @brief Files one finished token into the message. Slot 0 is the command, the rest are args.
+/// @return False when there are more tokens than slots, having marked `msg` invalid.
+static bool storeToken(NightMareMessage &msg, uint8_t slot, const String &token)
+{
+    if (slot == 0)
+    {
+        msg.command = token;
+        return true;
+    }
+    if (slot > NM_MAX_ARGS)
+    {
+        msg.valid = false;
+        msg.error = "too many arguments, limit is " + String(NM_MAX_ARGS);
+        return false;
+    }
+    msg.args[slot - 1] = token;
+    return true;
+}
+
+/// Where the scan currently is. Keeping this explicit is what lets the quoted and unquoted paths
+/// share a single flush point, so they cannot drift apart the way the original parser's two
+/// bounds checks did.
+enum NightMareParseState
+{
+    NM_PARSE_SEP,   // between tokens
+    NM_PARSE_WORD,  // inside an unquoted token
+    NM_PARSE_QUOTED // inside a "..." section
+};
+
+/// @brief Parses a raw command line into command / subcommand / args.
+///
+/// Grammar: `COMMAND ARG0 ARG1 ...`, where ARG0 doubles as the subcommand. Command and subcommand
+/// are uppercased; args keep their case.
+///   - Any run of whitespace separates tokens, so extra spaces never shift an argument's position.
+///   - A `"` toggles quoting and is removed. Adjacent sections join, so `a"b c"d` is one token
+///     `ab cd`, and `""` is an argument that is present but empty.
+///   - A `\` escapes only the two delimiters: \" is a literal " and \` a literal `. Before anything
+///     else the backslash is kept exactly as typed, so \b stays \b and paths survive a round trip.
+///     A backslash is therefore never doubled, and never removable either -- for content that must
+///     contain a literal \" use a fence, where nothing is interpreted at all.
+///   - A backtick fence takes everything up to its closing fence verbatim -- no escapes, no quote
+///     handling. An opening run of N backticks closes on a run of exactly N, so content containing
+///     a backtick just opens wider. This is what makes a nested command readable:
+///       TASK t `WS "hi"` 20        instead of        TASK t "WS \"hi\"" 20
+///     An empty literal is not expressible; use "" for that.
+///
+/// Malformed input is reported rather than guessed at: check `valid` before using the result.
+/// @param message The command string to parse.
+/// @return The parsed message, or one with `valid` false and `error` set.
+NightMareMessage parseNightMareMessage2(const String &message)
+{
+    NightMareMessage msg;
+
+    if (!ensureSize(message, NM_MAX_MESSAGE_LEN, msg.error))
+    {
+        msg.valid = false;
+        return msg;
+    }
+
+    // One allocation, reused for every token, so the scan itself never reallocates. Checked because
+    // token += c discards its own failure: on a dead heap it would truncate silently and hand back
+    // a confidently wrong parse, which is the one thing this parser exists to prevent.
+    String token;
+    if (!token.reserve(message.length()))
+    {
+        msg.valid = false;
+        msg.error = "out of memory reserving " + String((uint32_t)message.length()) + " chars";
+        return msg;
+    }
+
+    NightMareParseState state = NM_PARSE_SEP;
+    uint8_t slot = 0; // 0 is the command word; slot N lands in args[N - 1]
+
+    for (size_t i = 0; i < message.length(); i++)
+    {
+        char c = message.charAt(i);
+
+        // A backslash escapes only the two delimiters. Before anything else it is kept as typed and
+        // the next character is left to the normal rules, so /a\b.json and C:\tmp round-trip
+        // unchanged and a backslash never has to be doubled.
+        if (c == '\\')
+        {
+            char next = (i + 1 < message.length()) ? message.charAt(i + 1) : '\0';
+            if (next == '"' || next == '`')
+                token += message.charAt(++i);
+            else
+                token += '\\';
+            if (state == NM_PARSE_SEP)
+                state = NM_PARSE_WORD; // a token that opens with a backslash has still started
+            continue;
+        }
+        // A backtick fence takes its contents verbatim: no escapes, no quote handling, whitespace
+        // exactly as typed. An opening run of N backticks is closed by a run of exactly N, so a
+        // literal that must itself contain a backtick just opens with more of them -- the common
+        // case still costs one byte a side. Inside "..." a backtick is only a character.
+        if (c == '`' && state != NM_PARSE_QUOTED)
+        {
+            size_t fence = 1;
+            while (i + fence < message.length() && message.charAt(i + fence) == '`')
+                fence++;
+            size_t j = i + fence; // first content character
+            bool closed = false;
+            while (j < message.length())
+            {
+                if (message.charAt(j) != '`')
+                {
+                    token += message.charAt(j++);
+                    continue;
+                }
+                size_t run = 1;
+                while (j + run < message.length() && message.charAt(j + run) == '`')
+                    run++;
+                if (run == fence)
+                {
+                    i = j + fence - 1; // the outer i++ lands just past the closing fence
+                    closed = true;
+                    break;
+                }
+                for (size_t k = 0; k < run; k++) // a run of the wrong length is content
+                    token += '`';
+                j += run;
+            }
+            if (!closed)
+            {
+                msg.valid = false;
+                msg.error = "unterminated ` literal";
+                return msg;
+            }
+            if (state == NM_PARSE_SEP)
+                state = NM_PARSE_WORD;
+            continue;
+        }
+        if (c == '"')
+        {
+            // Entering a quote from SEP starts the token, which is what makes "" come back as an
+            // empty argument rather than being lost or turning into a literal quote.
+            state = (state == NM_PARSE_QUOTED) ? NM_PARSE_WORD : NM_PARSE_QUOTED;
+            continue;
+        }
+        if (state != NM_PARSE_QUOTED && isTokenSeparator(c))
+        {
+            // Only a WORD -> SEP transition advances the slot, so a run of blanks counts once.
+            if (state == NM_PARSE_WORD)
+            {
+                if (!storeToken(msg, slot++, token))
+                    return msg;
+                token = ""; // keeps the reserved buffer, so this costs no allocation
+                state = NM_PARSE_SEP;
+            }
+            continue;
+        }
+        token += c;
+        if (state == NM_PARSE_SEP)
+            state = NM_PARSE_WORD;
+    }
+
+    if (state == NM_PARSE_QUOTED)
+    {
+        msg.valid = false;
+        msg.error = "unterminated quote";
+        return msg;
+    }
+    if (state == NM_PARSE_WORD && !storeToken(msg, slot++, token))
+        return msg;
+    if (slot == 0)
+    {
+        // Nothing but separators. Reachable from any transport that does not trim its payload,
+        // where a bare "\r\n" would otherwise parse "successfully" into an empty command.
+        msg.valid = false;
+        msg.error = "empty command";
+        return msg;
+    }
+
+    msg.argc = slot - 1; // slot counts the command word, argc does not
+    msg.command.toUpperCase();
+    msg.subcommand = msg.args[0];
+    msg.subcommand.toUpperCase();
+    return msg;
+}
+
 #ifdef ENABLE_PREPROCESSING
 /// Maximum directory depth walked by FS LIST; bounds the recursion on a fixed-size stack.
 #define FS_LIST_MAX_DEPTH 4
@@ -136,7 +338,28 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
     result.response = "No command resolved";
     result.result = true;
     result.context = context;
-    NightMareMessage parsedMsg = parseNightMareMessage(message);
+    if (message.length() == 0)
+    {
+        result.result = false;
+        result.response = "Empty command";
+        return result;
+    }
+    // ensureSize returns true when the message fits, so the rejection is the negated case.
+    if (!ensureSize(message, NM_MAX_MESSAGE_LEN, result.response))
+    {
+        result.result = false;
+        return result;
+    }
+
+    NightMareMessage parsedMsg = parseNightMareMessage2(message);
+    if (!parsedMsg.valid)
+    {
+        // Without this the whole point of the new parser is lost: a malformed line would fall
+        // through every branch and come back as "unrecognized" instead of saying what was wrong.
+        result.result = false;
+        result.response = "Parse error: " + parsedMsg.error;
+        return result;
+    }
     COMMAND_RESOLVER_LOGF("Received: '%s'", message.c_str());
 #ifdef ENABLE_PREPROCESSING
     bool prehandled = true;
@@ -294,9 +517,32 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
                 }
             }
         }
+        else if (parsedMsg.subcommand == "FORMAT")
+        {
+            if (parsedMsg.args[1] != "-p")
+            {
+                result.response = "Filesystem format denied.";
+                result.result = false;
+            }
+            else if (!SystemSettings.getFlag("LittleFS_mounted"))
+            {
+                result.response = "Filesystem not mounted.";
+                result.result = false;
+            }
+            else if (LittleFS.format())
+            {
+                result.response = "Filesystem formatted successfully.";
+                result.result = true;
+            }
+            else
+            {
+                result.response = "To format the filesystem, use: FS FORMAT CONFIRM";
+                result.result = false;
+            }
+        }
         else
         {
-            result.response = "Unknown FS subcommand available: [LIST, DELETE <filename>].";
+            result.response = "Unknown FS subcommand available: [LIST, DELETE <filename>, READ <filename>, FORMAT].";
             result.result = false;
         }
     }
@@ -678,39 +924,14 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
 #endif
 
 #ifdef SCHEDULER_AWARE
-    /// Format SCHEDULE <command> <delta seconds> [interval]
     /// Schedules a command to be run after a specific delay (in seconds).
-    else if (parsedMsg.command == "SCHEDULE")
-    {
-        uint32_t executionTime = strtoul(parsedMsg.args[1].c_str(), nullptr, 10);
-        String label = "TASK_" + String(millis());
-        int id = scheduler.addTask(label, parsedMsg.args[0], 0, executionTime, false);
-        if (id != -1)
-        {
-            if (parsedMsg.args[2].toInt() > 0)
-            {
-                SchedulerTask *task = scheduler.getByID(id);
-                if (task)
-                {
-                    task->repeat = true;
-                    task->interval = parsedMsg.args[2].toInt();
-                }
-            }
-            result.response = "Task scheduled with ID: " + String(id);
-            result.result = true;
-        }
-        else
-        {
-            result.response = "Failed to schedule task.";
-            result.result = false;
-        }
-    }
     // Format: SCHEDULER <subcommand> : LIST, CLEAR
     else if (parsedMsg.command == "SCHEDULER")
     {
         if (parsedMsg.subcommand == "LIST")
         {
-            result.response = scheduler.listTasks();
+            bool onlyTasks = parsedMsg.args[1] == "1" || parsedMsg.args[1] == "-p" || parsedMsg.args[1] == "-t";
+            result.response = scheduler.listTasks(onlyTasks);
         }
         else if (parsedMsg.subcommand == "CLEAR")
         {
@@ -736,6 +957,12 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
                     result.response = "Task ID " + String(id) + " not found.";
                 }
             }
+        }
+        else if (parsedMsg.subcommand == "ADD")
+        {
+        }
+        else if (parsedMsg.subcommand == "EDIT")
+        {
         }
         else
         {
@@ -915,33 +1142,3 @@ void NightMareCommand_SerialResolver(SERIALTYPE *_Serial, char readUntilChar)
 }
 
 #endif
-
-String getSystemStatus()
-{
-    DynamicJsonDocument doc(1024);
-#ifdef COMPILE_HTTP_SERVER
-    bool httpDirect = getHttpState() > 0;
-#else
-    bool httpDirect = false; // TODO: implement direct http and set this to true when it's implemented and enabled.
-#endif
-
-    JsonObject system = doc.createNestedObject("System");
-    system["Uptime"] = millis() / 1000;
-    system["FreeHeap"] = ramUsagePercent();
-    system["boot_time"] = SystemSettings.get("boot_time");
-    system["time_synced"] = SystemSettings.getFlag("time_synced");
-    system["reset_reason"] = esp_reset_reason();
-    system["wifi_rssi"] = WiFi.RSSI();
-    system["mqtt_connection"] = MQTT_isLocal() ? "Local" : "Remote";
-    system["ip_address"] = WiFi.localIP().toString();
-    system["direct_http"] = httpDirect;
-    system["OTA_enabled"] = SystemSettings.getFlag("ota_enabled");
-#ifdef COMPILE_ASYNC_COMMANDS
-    system["ASYNC_enabled"] = isAsyncCommandSystemReady();
-#else
-    system["ASYNC_enabled"] = false;
-#endif
-    String msg;
-    serializeJson(doc, msg);
-    return msg;
-}

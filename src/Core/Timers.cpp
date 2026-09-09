@@ -1,15 +1,17 @@
 #include <Core/Timers.h>
+#include <Core/SystemStatus.h> // getSystemStatus(), used by the telemetry timer
 #ifdef COMPILE_TIMERS
 /// @brief Creates the Timerhandler
 TimersHandler Timers = TimersHandler();
-
+#define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
-#define TIMER_LOGF(fmt, ...) Serial.printf("%s%s " fmt "\n", MILLIS_LOG, TIMER_LOG, ##__VA_ARGS__)
-#define TIMER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt "\n", ERR_LOG, TIMER_LOG, ##__VA_ARGS__)
+#define TIMER_LOGF(fmt, ...) Serial.printf("%s%s " fmt "\n", MILLIS_LOG, TIMER_TAG, ##__VA_ARGS__)
+#define TIMER_ERRORF(fmt, ...) Serial.printf("%s%s " fmt "\n", ERR_TAG, TIMER_TAG, ##__VA_ARGS__)
 #else
 #define TIMER_LOGF(fmt, ...)
 #define TIMER_ERRORF(fmt, ...)
 #endif
+extern void MQTT_Send(String topic, String message, bool insertOwner = true, bool retained = false);
 
 /// @brief Runs the task, should be called periodically.
 void TimerTask::run()
@@ -53,9 +55,34 @@ uint16_t TimerTask::timeLeft()
     if (use_millis)
         _now = millis();
 
-    return  interval - (_now - last_time);
+    return interval - (_now - last_time);
 }
 
+TimersHandler::TimersHandler()
+{
+#ifdef BOOTSTRAP_TIMER_SYNC
+    TIMER_LOGF("Bootstrapping Time Sync Timer");
+    this->create("sync_timer", 60, []()
+                 {
+        bool finished = SystemSettings.getFlag("time_synced");
+        if (!finished)
+        {
+          finished = autoSyncTime();
+        }
+        if (!finished)
+        {
+            MQTT_Send("Control/request", "time",false,false);
+        }
+        if (finished)
+        {
+            Timers.deleteTask("sync_timer");
+            TIMER_LOGF("Time Sync Finished, Timer Deleted");
+        } }, false);
+    this->create("telemetry", 15, []()
+                 { MQTT_Send("/telemetry", getSystemStatus()); });
+
+#endif
+}
 /// @brief Create a task to be run and adds it to the array of the Handler
 /// @param label The label of the task
 /// @param interval The interval to run the
@@ -208,4 +235,6 @@ bool TimersHandler::deleteTask(String label)
 
     return false;
 }
+
+
 #endif

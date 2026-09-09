@@ -26,8 +26,6 @@ Scheduler::Scheduler()
     currentTasks = 0;
     runCmd = nullptr;
     logResult = nullptr;
-    bool res = loadPersistentTasks(); // Load tasks from persistent storage on initialization
-    res ? SCHEDULER_LOGF("Scheduler initialized with %d tasks loaded from persistent storage\n", currentTasks) : SCHEDULER_LOGF("Scheduler initialized with no tasks loaded from persistent storage\n");
 }
 
 /// @brief Sets the function to be called when a scheduled command is executed.
@@ -47,17 +45,27 @@ void Scheduler::onCommand(void (*runCommand)(String cmd))
 int32_t Scheduler::addTask(String label, String cmd, uint32_t interval_seconds, uint32_t executionTime, bool repeat, bool skipSave)
 {
 
+    SchedulerTask *existingTask = getByLabel(label);
+    if (existingTask)
+    {
+        SCHEDULER_ERRORF("Task with label '%s' already exists. Use a unique label.\n", label.c_str());
+        return -1; // Indicate failure to add task due to duplicate label
+    }
     // Check if there's space for a new task
     // Assign the task to the next available slot
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
         if (!tasks[i].armed)
         {
+            uint32_t _exectime = executionTime > 0 ? executionTime : GET_TIME() + interval_seconds;
+            while (_exectime <= GET_TIME())
+            {
+                _exectime += interval_seconds; // Ensure the execution time is in the future
+            }
             tasks[i].armed = true;
             tasks[i].command = cmd;
             tasks[i].label = label;
-            tasks[i].executionTime = executionTime > 0 ? executionTime : GET_TIME() + interval_seconds;
-            Serial.printf("[%lu(%s)]et: %lu (%s)\n", executionTime, TIME_FULL_STR(executionTime), tasks[i].executionTime, TIME_FULL_STR(tasks[i].executionTime));
+            tasks[i].executionTime = _exectime;
             tasks[i].id = taskID++;
             tasks[i].repeat = repeat;
 #ifdef SCHEDULER_USE_MILLIS
@@ -69,8 +77,8 @@ int32_t Scheduler::addTask(String label, String cmd, uint32_t interval_seconds, 
             SCHEDULER_LOGF("Added task ID %d: '%s' at %lu (%s), every %u s \n",
                            tasks[i].id,
                            cmd.c_str(),
-                           executionTime,
-                           TIME_FULL_STR(executionTime),
+                           tasks[i].executionTime,
+                           TIME_FULL_STR(tasks[i].executionTime),
                            tasks[i].interval);
             if (repeat && !skipSave)
             {
@@ -127,15 +135,16 @@ int32_t Scheduler::getTaskIdByLabel(String label)
 }
 
 /// @brief Lists all scheduled tasks in JSON format.
+/// @param onlyPersistent If true, only lists tasks that are persistent.
 /// @return A String containing the JSON representation of all scheduled tasks.
-String Scheduler::listTasks()
+String Scheduler::listTasks(bool onlyPersistent)
 {
     DynamicJsonDocument doc(1024);
     doc["count"] = currentTasks;
     auto tasksArray = doc.createNestedArray("tasks");
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
-        if (tasks[i].armed)
+        if (tasks[i].armed && (!onlyPersistent || tasks[i].repeat)) 
         {
             JsonObject taskObj = tasksArray.createNestedObject();
             taskObj["id"] = tasks[i].id;
@@ -195,7 +204,11 @@ void Scheduler::run()
 {
     if (currentTasks == 0)
         return;
-
+    if (!this->configloaded)
+    {
+        this->enable_scheduler_log = Config.getFlag("enable_scheduler_log");
+        this->configloaded = true;
+    }
     uint32_t nowTime = GET_TIME();
     for (uint8_t i = 0; i < MAX_SCHEDULER_TASKS; i++)
     {
@@ -215,7 +228,21 @@ void Scheduler::run()
             {
                 logResult(res);
             }
-            SCHEDULER_LOGF("Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
+            SCHEDULER_LOGF("[%s]Task ID %d executed:\n\t<\x1b[90m%s\x1b[0m>%s\n\t\t%s\n", this->enable_scheduler_log ? "ON" : "OFF", tasks[i].id, tasks[i].command.c_str(), OK_LOG(res.result), res.response.c_str());
+            if (this->enable_scheduler_log)
+            {
+                auto doc = DynamicJsonDocument(1024);
+                doc["label"] = tasks[i].label;
+                doc["command"] = tasks[i].command;
+                doc["task_id"] = tasks[i].id;
+                doc["execution_time"] = tasks[i].executionTime;
+                doc["is_task"] = tasks[i].repeat;
+                doc["interval"] = tasks[i].interval;
+                doc["result"] = res.result;
+                doc["response"] = res.response;
+                String topic = String("/scheduler/logs/") + String(tasks[i].label) + String("/") + tasks[i].id;
+                MQTT_Send(topic, doc.as<String>(), true, false);
+            }
 #endif
             // Execute the command
             if (runCmd)
@@ -359,7 +386,6 @@ bool Scheduler::loadPersistentTasks()
             }
             Serial.printf("Loaded task: %s (ID: %d) adjusted: %s\n", label.c_str(), newTaskId, task->executionTimeSynced ? "true" : "false");
         }
-
     }
     SCHEDULER_LOGF("Loaded persistent tasks from %s\n", SCHEDULER_FILE_NAME);
     return true;

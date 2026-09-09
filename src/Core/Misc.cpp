@@ -1,6 +1,8 @@
 
 #include <Core/Misc.h>
 #ifdef COMPILE_MISC
+#include <Core/Configs.h> // SystemSettings, used by fsUsagePercent()
+#include <LittleFS.h>
 /// @brief Uses `printf` to format a String object.
 /// @param format The string with the placeholders '%d', '%x' etc.
 /// @param args... The args to match the string passed.
@@ -150,6 +152,21 @@ float ramUsagePercent()
     return percentUsed;
 }
 
+/// @brief Calculates the percentage of used filesystem space on LittleFS.
+/// @return The percentage of used filesystem space, or -1.0 if an error occurs.
+float fsUsagePercent()
+{
+    if (!SystemSettings.getFlag("LittleFS_mounted"))
+    {
+        Serial.println("Failed to mount LittleFS");
+        return -1.0; // Indicate an error
+    }
+    size_t totalFS = LittleFS.totalBytes();   // Total filesystem size
+    size_t usedFS = LittleFS.usedBytes();     // Used filesystem size
+    float percentUsed = ((float)usedFS / (float)totalFS) * 100.0;
+    return percentUsed;
+}
+
 const char *getBootReason(int reason)
 {
     switch (reason)
@@ -210,4 +227,5 @@ uint32_t timestampOfNextOccurrence(String timeString)
 
     return now() + delta;
 }
+
 #endif
