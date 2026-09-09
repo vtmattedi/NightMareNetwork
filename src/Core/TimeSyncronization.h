@@ -17,7 +17,7 @@
 #include <HTTPClient.h>
 #include <Core/Configs.h>
 #include <ArduinoJson.h>
-#include <Core/creds.h>
+#include <creds.h> // supplied by the consuming project, not by this library
 #define API_URL "http://utctime.app/api/now/America/Bahia"
 
 #ifdef COMPILE_SCHEDULER

@@ -20,14 +20,17 @@
 #define COMPILE_WIFI_MODULE // Compile the WiFi module 
 #define COMPILE_MQTT //Compiles MQTT module
 /*--- MQTT configs */
-#define DEVICE_NAME "Turing" //Default device name, used in MQTT and other places
-#define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
+// #define DEVICE_NAME "Adler" //Default device name, used in MQTT and other places
+// #define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
+#ifndef DEVICE_NAME
+#define DEVICE_NAME_MAX 48
+extern char DEVICE_NAME[DEVICE_NAME_MAX]; // Declare DEVICE_NAME as an external variable
+extern const char* getDeviceName(); // Declare a function to get the device name
+#endif
 #define MQTT_PREPROCESS //Enable MQTT command preprocessing (Requires Command Resolver) (using <DEVICE_NAME>/console/in topic)
 /*---------------------*/
-// #define COMPILE_LVGL //Compiles LVGL helpers code
-#define COMPILE_SERVERVARIABLES // Compile the ServerVariables template class
-/*------- ServerVariables Templates to be compiled---------*/
-#ifdef COMPILE_SERVERVARIABLES
+//  #define COMPILE_LVGL //Compiles LVGL helpers code
+ #define COMPILE_SERVERVARIABLES // Compile the ServerVariables template class
 /*------- ServerVariables Templates to be compiled---------*/
 // #define  USE_BYTE_TEMPLATE //Compile Byte Template
 #define USE_INT_TEMPLATE // Compile int Template
@@ -38,11 +41,10 @@
 // #define  USE_STRING_TEMPLATE //Complie String template
 /*---------------------------------------*/
 /*---Services Dependent on ServerVariables*/
-#define COMPILE_SERVICES // Compile encapsulation for services AC, LIGHT, LIGHTCOLOR
-#define COMPILE_LIGHTCONTROLLER // Compile the LightController service
-#define COMPILE_ACCONTROLLER    // Compile the AcController service
-#define COMPILE_LIGHTCOLORCONTROLLER // Compile the LightColorController service
-#endif
+// #define COMPILE_SERVICES // Compile encapsulation for services AC, LIGHT, LIGHTCOLOR
+// #define COMPILE_LIGHTCONTROLLER // Compile the LightController service
+// #define COMPILE_ACCONTROLLER    // Compile the AcController service
+// #define COMPILE_LIGHTCOLORCONTROLLER // Compile the LightColorController service
 /*----------------------------------------------------------*/
 #define COMPILE_MISC // Compile miscellaneous functions
 #define COMPILE_SYSTEMSTATUS // Compile getSystemStatus(); aggregates WiFi, MQTT, HTTP, Configs
@@ -60,15 +62,18 @@
 #define COMPILE_COMMAND_RESOLVER // Compile the command resolver module
 #ifdef COMPILE_COMMAND_RESOLVER
 /*--- Command Resolver configs */
-#define COMPILE_ASYNC_COMMANDS // Compile support for asynchronous commands (commands that run in a separate task and do not block the main loop)
 #define COMPILE_SERIAL_COMMAND_RESOLVER // Compile the serial command resolver
+#define COMPILE_ASYNC_COMMANDS // Compile Async Command Solver.
+#define ASYNC_COMMANDS_SINGLE_TASK // If defined, all async commands will run in the same task, queued. Otherwise, a new task will be created for each command (not recommended).
 #define ENABLE_PREPROCESSING // Enable command pre processing
 #define SCHEDULER_AWARE // Compile the command resolver module with scheduler support on the PREPROCESSING
+#define COMPILE_WIFI_MODULE //Compile the WiFi module for the command resolver to be able to use the WiFi functions in the commands
+#define COMPILE_MISC //Compile the Misc module for the command resolver to be able to use the formatString function in the commands
+#define COMPILE_MQTT //Compile the MQTT module for the command resolver to be able to use the MQTT functions in the commands
+#define COMPILE_OTA //Compile the OTA module for the command resolver to be able to use the OTA functions in the commands
+#define COMPILE_CONFIGS
 /*---------------------*/
 #endif
 #pragma endregion
-// Pulls the logging macros (ERR_TAG, MILLIS_LOG, the per-module *_TAG names) in for every module
-// that includes this file. Angle form: this header is copied into the consuming project's
-// include/ folder, while LOGS.h stays in the library.
-#include <LOGS.h>
+#include "LOGS.h"
 #endif

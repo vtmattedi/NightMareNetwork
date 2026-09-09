@@ -12,7 +12,7 @@
 #include <ArduinoJson.h>
 #define MQTT_SKIP_PUBLISH_IF_DISCONNECTED
 #include "mqtt_client.h"
-#include "creds.h"
+#include <creds.h> // supplied by the consuming project, not by this library
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>

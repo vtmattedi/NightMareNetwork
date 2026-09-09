@@ -16,7 +16,7 @@
 
 #ifdef COMPILE_CONFIGS
 #include <Core/Configs.h>
-#include <Core/creds.h>
+#include <creds.h> // supplied by the consuming project, not by this library
 #if !defined(DEFAULT_SSID) || !defined(DEFAULT_PASSWORD)
 #error "Please define DEFAULT_SSID and DEFAULT_PASSWORD in creds.h"
 #endif
