@@ -127,7 +127,7 @@ void mqtt_control_task(void *arg)
 
 bool triggerSubscription(esp_mqtt_client_handle_t client, const char *topic, int qos)
 {
-   return true;
+    return true;
 }
 /// @brief MQTT event handler.
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -208,6 +208,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
             NightmareContext context = {NM_CMD_SRC_MQTT, topicStr, NULL};
+            // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+
             if (topicStr == deviceName + "/console/in" || topicStr == "all/console/in")
             {
                 context.sourceIdentifier = deviceName + "/console/out";
@@ -272,7 +274,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 return; // Do not pass to external handler
             }
-            else if (topicStr == "control/time")
+            else if (topicStr == "Control/time")
             {
                 MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 
