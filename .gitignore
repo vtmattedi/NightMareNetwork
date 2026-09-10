@@ -1,3 +1,5 @@
 .vscode/*
 src/Core/creds.h
+src/Core/creds.h.bak
 src/Modules.config.h
+src/Modules.config.h.bak
