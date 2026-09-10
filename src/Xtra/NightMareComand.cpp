@@ -481,6 +481,7 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
             auto doc = DynamicJsonDocument(512);
             doc["totalBytes"] = LittleFS.totalBytes();
             doc["usedBytes"] = LittleFS.usedBytes();
+            doc["usedPercentage"] = (double)(LittleFS.usedBytes() * 100) / (double)LittleFS.totalBytes();
             doc["initialized"] = SystemSettings.getFlag("LittleFS_mounted");
             String resStr = "";
             serializeJson(doc, resStr);
