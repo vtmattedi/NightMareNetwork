@@ -15,7 +15,7 @@ static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 
 static bool local_initialized = false; // True if initialized as local, false if remote
 #define MAX_MQTT_RETRIES 1
 static int8_t mqtt_retries = 0;
-#define COMPILE_SERIAL
+// #define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -24,6 +24,9 @@ const char *CLIENT[2] = {
     Serial.printf("%s" fmt, client_str, ##__VA_ARGS__);
 #define MQTT_LOGE(fmt, ...) \
     Serial.printf("%s %s" fmt "\n", OK_LOG(false), client_str, ##__VA_ARGS__);
+#define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
+#define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
+
 #else
 #define MQTT_LOG(...)
 #define MQTT_LOGE(...)
@@ -52,8 +55,6 @@ struct MQTTAsyncMessage
     bool retained;
 };
 static MQTTAsyncMessage mqtt_async_message_queue[MAX_ASYNC_QUEUE_MESSAGES]; // Simple fixed-size queue for async messages
-#define printc Serial.print(local_initialized ? CLIENT[0] : CLIENT[1])
-#define client_str (local_initialized ? CLIENT[0] : CLIENT[1])
 
 /*Forward Declarations for private functions*/
 /// @brief MQTT configuration and initialization
