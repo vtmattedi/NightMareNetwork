@@ -25,12 +25,14 @@ void OTA_EventHandler(OTA_INFO info, int data = -1)
 void startOTA()
 {
     OTA_LOGF("Start updating %s", ArduinoOTA.getCommand() == 0 ? "flash" : "filesystem");
+    SystemSettings.setFlag("ota_running", true);
     OTA_EventHandler(OTA_START, ArduinoOTA.getCommand());
 }
 
 void endOTA()
 {
     OTA_LOGF("Ended");
+    SystemSettings.setFlag("ota_running", false);
     OTA_EventHandler(OTA_END);
 }
 
@@ -55,6 +57,7 @@ void errorOTA(ota_error_t error)
     else if (error == OTA_END_ERROR)
         OTA_ERRORF("End Failed");
 #endif
+    SystemSettings.setFlag("ota_running", false);
 
     OTA_EventHandler(OTA_ERROR, error);
 }
@@ -65,7 +68,8 @@ void otaTask(void *param)
     while (true)
     {
         ArduinoOTA.handle();
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        int taskDealay = SystemSettings.getFlag("ota_running") ? 5 : 1000;
+        vTaskDelay(taskDealay / portTICK_PERIOD_MS);
         yield();
     }
     // should never reach here, but if it does, we should clean up and disable OTA

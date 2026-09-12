@@ -5,7 +5,7 @@
 const char *root_ca PROGMEM = ROOT_CA;
 /// @brief Callback function to handle incoming MQTT messages.
 void (*handleMqttMessage)(String topic, String message) = NULL;
-
+bool onlyDeviceMessages = true; // If true, only messages starting with DEVICE_NAME are processed (DEVICE_NAME/ is stripped). If false, all messages are passed to the callback.
 void (*handleMqttConnected)(void) = NULL;
 void (*handleMqttDisconnected)(bool) = NULL;
 static bool mqtt_connected = false;
@@ -324,7 +324,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             }
 #endif
             if (handleMqttMessage)
-                handleMqttMessage(topicStr, payloadStr);
+            {
+                if (onlyDeviceMessages)
+                {
+                    if (topicStr.startsWith(deviceName + "/"))
+                    {
+                        String strippedTopic = topicStr.substring(deviceName.length() + 1); // Remove DEVICE_NAME/
+                        handleMqttMessage(strippedTopic, payloadStr);
+                    }
+                }
+                else
+                {
+                    handleMqttMessage(topicStr, payloadStr);
+                }
+            }
         }
         break;
     }
@@ -413,12 +426,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 }
 
 /// @brief Sets the callback function to be called when a new MQTT message is received.
-void MQTT_onMessage(void (*cb)(String topic, String message))
+void MQTT_onMessage(void (*cb)(String topic, String message), bool onlyDeviceMsgs)
 {
     if (cb)
     {
         handleMqttMessage = cb;
     }
+    onlyDeviceMessages = onlyDeviceMsgs;
 }
 
 /// @brief Sets the callback function to be called when the MQTT client is connected.
