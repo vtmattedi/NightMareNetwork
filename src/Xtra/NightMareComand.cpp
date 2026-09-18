@@ -749,6 +749,11 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
                     doc["control"] = "scan_start_failed";
                 }
                 // if we are on an async context we can wait for the scan to complete and send the results in one go, otherwise user must pool.
+                // Guarded: asyncSend() is declared only with COMPILE_ASYNC_COMMANDS, and
+                // without it this call left the library unbuildable. Nothing is lost when
+                // it is off -- context.async is never set in that build, so the whole
+                // block was already unreachable; callers poll for the result instead.
+#ifdef COMPILE_ASYNC_COMMANDS
                 if (context.async)
                 {
                     result.context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after scan is complete
@@ -783,6 +788,7 @@ NightMareResults executeNightMareCommand(const String &message, NightmareContext
                     serializeJson(doc, resStr);
                     asyncSend(resStr, context);
                 }
+#endif
             }
             else
             {

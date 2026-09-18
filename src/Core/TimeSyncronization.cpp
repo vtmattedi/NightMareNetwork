@@ -3,6 +3,8 @@
 
 void (*timeSyncCallback)(void) = nullptr;
 void _setTime(unsigned long timestamp);
+
+#ifdef COMPILE_AUTOTIMESYNC
 /// @brief Attempts to get the time synced using worldtimeapi.
 /// @return True if successful or false otherwise.
 bool autoSyncTime()
@@ -82,6 +84,7 @@ bool autoSyncTime()
   http.end();
   return result;
 }
+#endif /* COMPILE_AUTOTIMESYNC */
 
 /// @brief Manually syncs the time to a specific timestamp.
 /// @param timestamp The timestamp to set the time to.

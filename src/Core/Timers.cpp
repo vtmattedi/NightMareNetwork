@@ -65,10 +65,14 @@ TimersHandler::TimersHandler()
     this->create("sync_timer", 60, []()
                  {
         bool finished = SystemSettings.getFlag("time_synced");
+#ifdef COMPILE_AUTOTIMESYNC
         if (!finished)
         {
           finished = autoSyncTime();
         }
+#endif
+        // Without the online sync this is the only path, and the reply lands on
+        // Control/time for the consuming project to pass to manualSyncTime().
         if (!finished)
         {
             MQTT_Send("Control/request", "time",false,false);

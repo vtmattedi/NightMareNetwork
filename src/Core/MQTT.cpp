@@ -15,7 +15,7 @@ static int8_t mqtt_state = -1;         //  3 = connecting -1 = not initialized, 
 static bool local_initialized = false; // True if initialized as local, false if remote
 #define MAX_MQTT_RETRIES 1
 static int8_t mqtt_retries = 0;
-// #define COMPILE_SERIAL
+#define COMPILE_SERIAL
 #ifdef COMPILE_SERIAL
 const char *CLIENT[2] = {
     "\x1b[93;1m[Local]\x1b[0m",
@@ -140,6 +140,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
     {
         mqtt_state = local_initialized ? 1 : 2;
+        // Failover is meant to trigger on consecutive failures. Without this
+        // reset a single failure from any time in the past counted towards the
+        // next one, so after the first-ever hiccup every failure switched brokers.
+        mqtt_retries = 0;
         MQTT_LOG(" MQTT connected successfully!\n");
         // Subscribe to all topics
         int rc = esp_mqtt_client_subscribe(mqttClient, "#", 0);
@@ -206,7 +210,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             String topicStr = String(event->topic, event->topic_len);
             String payloadStr = String(event->data, event->data_len);
             String deviceName = String(DEVICE_NAME);
-            // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
+            MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
 #ifdef MQTT_PREPROCESS
             NightmareContext context = {NM_CMD_SRC_MQTT, topicStr, NULL};
             // MQTT_LOG("\x1b[97;1m>>>\x1b[0m[%s]:%s\n", topicStr.c_str(), payloadStr.c_str());
@@ -407,6 +411,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
         if (connection_failed)
         {
+#ifdef MQTT_DISABLE_BROKER_FAILOVER
+            // Stay on the configured broker: esp-mqtt's own auto-reconnect keeps
+            // retrying it. For devices with only one broker to reach, where
+            // failing over means stopping, destroying and rebuilding the whole
+            // client against a host that is not there, then back again -- a
+            // cycle that never connects and churns the heap on every pass.
+#else
             if (mqtt_retries >= MAX_MQTT_RETRIES)
             {
                 MQTT_LOG("Max MQTT retries reached. Giving up on connection attempts. (switchin)\n");
@@ -416,6 +427,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             {
                 mqtt_retries++;
             }
+#endif
         }
         break;
     }
@@ -640,6 +652,30 @@ void MQTT_Send(String topic, String message, bool insertOwner, bool retained)
 void MQTT_Send_Raw(String topic, String message)
 {
     MQTT_Send(topic, message, false, false);
+}
+
+/// @brief Deletes a retained message by publishing a zero-length retained payload.
+///
+/// This is MQTT's own idiom for clearing a retained topic, and it cannot go
+/// through MQTT_Send(): that returns early on an empty message, so the one
+/// payload that does the job is the one it will not send. Hence the direct
+/// publish here.
+///
+/// The topic is used exactly as given -- no owner prefix is inserted -- because
+/// what usually needs clearing is another device's retained announcement.
+/// @param topic The exact topic to clear.
+/// @return True if the publish was accepted by the client.
+bool MQTT_ClearRetained(String topic)
+{
+    if (!mqttClient || mqtt_state <= 0)
+    {
+        MQTT_LOG("MQTT client not initialized. Cannot clear retained topic.\n");
+        return false;
+    }
+
+    int msg_id = esp_mqtt_client_publish(mqttClient, topic.c_str(), "", 0, 0, true);
+    MQTT_LOG("\x1b[90;1m<<<\x1b[0m[%s]:<cleared retained>\n", topic.c_str());
+    return msg_id >= 0;
 }
 
 void MQTT_force_change_to(bool local)

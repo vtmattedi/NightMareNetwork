@@ -26,7 +26,10 @@ void wifiConnectedInternal()
 #ifdef COMPILE_OTA
         initOTA();
 #endif
-#ifdef COMPILE_TIMESYNC
+#ifdef COMPILE_AUTOTIMESYNC
+        // Blocking HTTP GET on the WiFi task. Devices that take their time from
+        // the network instead leave COMPILE_AUTOTIMESYNC undefined and call
+        // manualSyncTime() when the answer arrives.
         bool syncres = autoSyncTime();
         WIFI_TAGF("Time sync result: %s", OK_LOG(syncres));
 #endif

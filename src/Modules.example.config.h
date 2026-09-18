@@ -22,6 +22,11 @@
 /*--- MQTT configs */
 #define DEVICE_NAME "Turing" //Default device name, used in MQTT and other places
 #define USING_DEFAULT_DEVICE_NAME //Comment this line if you have changed the default device name
+// Define to stop the client switching between the local and remote broker after
+// repeated connection failures. Leave undefined (the default) on devices that
+// can reach both; define it on a device with only one broker available, where
+// failover just ping-pongs to a host that is not there.
+// #define MQTT_DISABLE_BROKER_FAILOVER
 #define MQTT_PREPROCESS //Enable MQTT command preprocessing (Requires Command Resolver) (using <DEVICE_NAME>/console/in topic)
 /*---------------------*/
 // #define COMPILE_LVGL //Compiles LVGL helpers code
@@ -47,7 +52,15 @@
 #define COMPILE_MISC // Compile miscellaneous functions
 #define COMPILE_SYSTEMSTATUS // Compile getSystemStatus(); aggregates WiFi, MQTT, HTTP, Configs
 #define COMPILE_TIMERS // Compile the Timers handler
-#define COMPILE_TIMESYNC // Compile the time sync function
+#define COMPILE_TIMESYNC // Compile the time sync function (manualSyncTime, onTimeSync)
+/*--- Time sync configs */
+// Compile autoSyncTime() and call it automatically on the first WiFi connect.
+// It is a blocking HTTP GET to an online time API, run on the WiFi task, and it
+// pulls in HTTPClient. Leave it undefined on devices that get their time from
+// the network instead -- they publish "time" to Control/request and hand the
+// reply to manualSyncTime(). Requires COMPILE_TIMESYNC.
+#define COMPILE_AUTOTIMESYNC
+/*---------------------*/
 #pragma endregion
 
 #pragma region "Xtra Modules"

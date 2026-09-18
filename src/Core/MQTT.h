@@ -49,6 +49,7 @@ void MQTT_change_to(bool local);
 bool MQTT_isLocal();
 void MQTT_Send_Raw(String topic, String message);
 void MQTT_Send(String topic, String message, bool insertOwner = true, bool retained = false);
+bool MQTT_ClearRetained(String topic);
 void MQTT_onMessage(void (*cb)(String topic, String message), bool onlyDeviceMessages = true);
 void MQTT_onConnected(void (*cb)(void));
 void MQTT_onDisconnected(void (*cb)(bool));
