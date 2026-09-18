@@ -3,3 +3,13 @@ src/Core/creds.h
 src/Core/creds.h.bak
 src/Modules.config.h
 src/Modules.config.h.bak
+
+# website / mcp (Node)
+node_modules/
+website/dist/
+website/.vite/
+mcp/dist/
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,73 @@
+# NightMare Network -- website + MCP, deployed through Stackport.
+#
+# Two services behind one domain:
+#   web   nginx serving the static site at /, proxying /mcp to the mcp service
+#   mcp   the MCP server, reachable only on the compose network
+#
+# Stackport routes  nightmarenetwork.mattediworks.com -> web:80  and terminates
+# TLS. Nothing publishes a host port: Stackport rejects `ports:` for managed
+# projects and reaches the service by name over its own proxy network.
+#
+# Local check (no host port to curl; validate on the container network):
+#   docker compose build
+#   docker compose up -d
+#   docker compose exec web wget -qO- http://localhost/health
+#   docker compose exec web wget -qO- http://mcp:3000/health
+#   docker compose down
+
+name: nightmarenetwork
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: website/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      mcp:
+        condition: service_started
+    networks:
+      edge:
+        priority: 1000
+      internal: {}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  mcp:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NM_REPO_ROOT: /app
+      # The public URL the server reports in its own metadata; nothing binds to it.
+      NM_PUBLIC_URL: ${NM_PUBLIC_URL:-https://nightmarenetwork.mattediworks.com/mcp}
+    expose:
+      - "3000"
+    networks:
+      - internal
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true

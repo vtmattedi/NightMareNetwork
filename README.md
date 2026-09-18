@@ -148,3 +148,56 @@ bool ensureSize(const String &str, size_t maxLength, String &error);
 > `parseNightMareMessage()` (no `2`) is the original parser, kept for now. It has no error
 > reporting, treats only `' '` as a separator, cannot express a literal quote, and drops a quoted
 > value in the last argument slot. New code should use `parseNightMareMessage2()`.
+
+## Repository layout
+
+The PlatformIO library is `src/` and `library.json`; nothing else is part of the
+C++ build. The rest of the repository is the knowledge around it, kept in the
+same place so a change to a module and the paragraph describing it land in
+the same commit.
+
+```
+src/                  the C++ library (what lib_deps pulls in)
+library.json
+docs/                 documentation, Markdown with front-matter -- one source for the website and the MCP
+examples/             runnable PlatformIO projects
+website/              React + Vite + vite-react-ssg; renders docs/ to static files
+mcp/                  MCP server (Streamable HTTP at /mcp, and stdio) over docs/, src/ and examples/
+docker-compose.yml    both services, deployed through Stackport
+```
+
+Published at <https://nightmarenetwork.mattediworks.com/> with the MCP endpoint at
+`/mcp`. `docs/mcp.md` is the setup guide; `docs/mcp-design.md` is the design.
+
+### Website
+
+```sh
+cd website && npm install
+npm run dev        # dev server with the docs live-reloading
+npm run build      # static site in website/dist
+```
+
+### MCP server
+
+```sh
+cd mcp && npm install && npm run build
+npm start          # Streamable HTTP on :3000/mcp, health on /health
+npm run stdio      # stdio transport, for a local MCP client
+```
+
+The server reads `docs/`, `src/` and `examples/` relative to the repository root
+(or `NM_REPO_ROOT`), so a local instance serves the checkout as it is,
+uncommitted changes included. Every tool result ends with the library version
+and Git revision it came from.
+
+### Deployment
+
+`docker-compose.yml` builds two images from the repository root -- `web`
+(nginx: the static site, proxying `/mcp`) and `mcp` -- and publishes no host
+port; Stackport routes the domain to `web:80`. Health is `/health` on both.
+
+```sh
+docker compose build && docker compose up -d
+docker compose exec web wget -qO- http://localhost/health
+docker compose exec web wget -qO- http://mcp:3000/health
+```

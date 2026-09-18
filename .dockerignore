@@ -1,0 +1,12 @@
+# Build contexts are the repository root (both Dockerfiles need docs/ and src/).
+# Keep .git: the MCP image records the revision it was built from.
+node_modules/
+**/node_modules/
+website/dist/
+website/.vite/
+mcp/dist/
+.pio/
+.vscode/
+*.log
+.env
+.env.*
