@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Head } from "vite-react-ssg";
 import { Logo } from "../components/Logo";
 
-const MCP_URL = "https://nightmarenetwork.mattediworks.com/mcp";
+const MCP_URL = "https://nightmare.mattediworks.com/mcp";
 
 export function Home() {
   return (

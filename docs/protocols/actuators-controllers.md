@@ -96,7 +96,8 @@ implements exactly this.
 | `manualsync <on> <temp>` | `0\|1`, 18–30 | correct the controller's belief about the unit; sends no IR |
 | `SLEEP-IN <0\|1>` | | defer tomorrow's morning shutdown |
 | `SENDIR <name>` | code name | raw IR code |
-| `PAUSEDOORSENSOR <0\|1>` | | suspend door logic |
+| `PAUSEDOORSENSOR <0\|1>` | | suspend door logic; pausing while the door holds the unit off releases it |
+| `SLEEP <minutes>` | 0 cancels | device-side addition: turn off after that long, reported as `Ssleep` |
 | `reboot` | | library |
 
 The parser uppercases the command word, so `manualsync` and `MANUALSYNC` are

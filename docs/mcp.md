@@ -22,7 +22,7 @@ from the repository, with the library version and Git revision it came from.
 ## The endpoint
 
 ```
-https://nightmarenetwork.mattediworks.com/mcp
+https://nightmare.mattediworks.com/mcp
 ```
 
 Transport: **Streamable HTTP**. No authentication — everything it serves is
@@ -33,7 +33,7 @@ public. The same server also runs over stdio for local use (below).
 ### Claude Code
 
 ```sh
-claude mcp add --transport http nightmare https://nightmarenetwork.mattediworks.com/mcp
+claude mcp add --transport http nightmare https://nightmare.mattediworks.com/mcp
 ```
 
 Then in a session: `/mcp` shows it connected, and any question about the
@@ -48,7 +48,7 @@ add `--scope project`, which writes `.mcp.json` in the repository.
 {
   "mcpServers": {
     "nightmare": {
-      "url": "https://nightmarenetwork.mattediworks.com/mcp"
+      "url": "https://nightmare.mattediworks.com/mcp"
     }
   }
 }
@@ -63,7 +63,7 @@ add `--scope project`, which writes `.mcp.json` in the repository.
   "servers": {
     "nightmare": {
       "type": "http",
-      "url": "https://nightmarenetwork.mattediworks.com/mcp"
+      "url": "https://nightmare.mattediworks.com/mcp"
     }
   }
 }
@@ -80,7 +80,7 @@ to run it through the stdio bridge, `claude_desktop_config.json`:
   "mcpServers": {
     "nightmare": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://nightmarenetwork.mattediworks.com/mcp"]
+      "args": ["-y", "mcp-remote", "https://nightmare.mattediworks.com/mcp"]
     }
   }
 }

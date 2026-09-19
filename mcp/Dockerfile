@@ -1,6 +1,6 @@
 # NightMare MCP server. Build context is the repository root: the server reads
 # docs/, src/, examples/ and library.json at runtime, and records the git
-# revision it was built from.
+# revision it was built from when the context carries a .git.
 #
 #   docker build -f mcp/Dockerfile -t nightmare-mcp .
 
@@ -11,11 +11,14 @@ COPY mcp/package.json mcp/package-lock.json mcp/
 RUN cd mcp && npm ci --no-audit --no-fund
 COPY mcp mcp
 RUN cd mcp && npm run build && npm prune --omit=dev
-# The revision file is what get_version reports; .git itself stays out of the
-# final image.
-COPY .git .git
-RUN (git -C /repo rev-parse --short HEAD 2>/dev/null || echo unknown) > /repo/REVISION \
- && (git -C /repo rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown) > /repo/BRANCH
+# The whole context, so the revision is read when a .git is present and its
+# absence (an exported or shallow checkout) is not a build failure. The clone
+# is owned by another uid than the build runs as, which git refuses by default.
+COPY . /ctx
+RUN git config --global --add safe.directory '*' \
+ && (git -C /ctx rev-parse --short HEAD 2>/dev/null || echo unknown) > /repo/REVISION \
+ && (git -C /ctx rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown) > /repo/BRANCH \
+ && echo "revision $(cat /repo/REVISION) on $(cat /repo/BRANCH)"
 
 FROM node:24-alpine
 ENV NODE_ENV=production \

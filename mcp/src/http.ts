@@ -45,7 +45,7 @@ app.get("/", (_req, res) => {
       versionLine(repo.version),
       "",
       `MCP endpoint (Streamable HTTP): ${PUBLIC_URL}`,
-      "Docs: https://nightmarenetwork.mattediworks.com/docs/mcp",
+      "Docs: https://nightmare.mattediworks.com/docs/mcp",
     ].join("\n")
   );
 });

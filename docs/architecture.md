@@ -474,22 +474,23 @@ removed, and it is what Adler's door needs.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **Mycroft-headless** | yes | `include/`+`src/`, one file per component | `sensors` JSON object + `sensorsinfo` | — (light is a sensor reading) | `IOXP DS18 LIGHT SENSORS HELP`, listed on error | `HwInfo.h`, `#ifdef ESP32_C3` | components on tasks; MQTT callback pokes IoXpander (mutexed) |
 | **Dashboard** | yes | `src/App/` + `src/UI/` | none (no hardware) | none | `TARGET FORECAST HEAP` | n/a | ring buffer, loop-only routing — **the reference** |
-| **Adler** | yes | `lib/components/` | `sensors/temperature` bare scalar | **none** | `SENSORS AC IR DS18 SETPIN BOARDINFO` | `board.h` registry — **the reference** | Timers-based, no MQTT input at all |
+| **Adler** (after §8) | yes | `include/`+`src/`, one file per component | `sensors` JSON object (`temperature`, `ir`) + `info`; answers bare `sensors` | `state` per Appendix A, on change + 60 s | Service words at the root, `AC DOOR IR DS18 SENSORS INFO` groups | `board.h` registry — **the reference** | fixed inbox drained on `loop()`; door via a network sensor |
 | **Mycroft** | yes | `lib/MyComponents/` headers with bodies | — | `state` `{State, Automation}` via own `MqttSend` | stub | `pins.h` | — |
 | **Sherlock** | no (own PubSubClient) | `lib/Components/` | — | `state` `{Automation, State, Color, Brightness}` | own | literals in headers | — |
 | *Turing* | *separate namespace; not retrofitted here. On-disk sensor code predates the lost rewrite; the rewrite's contract survives in the backend and frontend — Appendix B.* | | | | | | |
 
 Four findings from the survey that shape the retrofit:
 
-**Adler no longer speaks the AC contract.** The Dashboard's `AcController`
+**Adler had stopped speaking the AC contract.** The Dashboard's `AcController`
 Service — and, per its README, the backend — drive an AC device by publishing
 `SETTEMP`, `TARGET`, `POWER`, `manualsync`, `SLEEP-IN` to its console and
 reading `{AcState, DoorState, Temp, Hsleep, Ssleep, Settemp, SleepIn, Door,
 CurrTemp}` from its `state`. That is what the *previous* Adler firmware
-(`git show HEAD:src/older.main.cpp.text`) implemented. The current Adler
-publishes no `state` and accepts `AC POWER|TEMP|STATE` instead. Binding the
-Dashboard's AC card to Adler today yields a greyed card and commands that go
-nowhere.
+(`git show HEAD:src/older.main.cpp.text`) implemented; the rewrite that
+followed published no `state` and accepted `AC POWER|TEMP|STATE` instead, so
+binding the Dashboard's AC card to it gave a greyed card and commands that
+went nowhere. The §8 retrofit restored the contract — Appendix A is now what
+Adler implements.
 
 **The AC contract itself has two loose ends.** The Service defines a `DOOR`
 message that is never emitted (no `on_send_with_info` is assigned to
@@ -497,23 +498,25 @@ message that is never emitted (no `on_send_with_info` is assigned to
 Service sends `PAUSEDOORSENSOR`, which the old device does not handle. Neither
 has ever worked; both get settled in Appendix A.
 
-**Adler's door has no source.** `AcController::setDoorOpen()` exists and the
-pause/stop logic around it is sound, but nothing calls it — there is no local
-sensor and no network input. Mycroft-headless publishes a `door` field in its
-`sensors` object from a reed switch on its PCF8574. That is the sensor; §6.4 is
-the plumbing.
+**Adler's door had no source.** The pause/stop logic was sound, but nothing
+fed it — there was no local sensor and no network input. Mycroft-headless
+publishes a `door` field in its `sensors` object from a reed switch on its
+PCF8574. That is the sensor; §6.4 is the plumbing, and Adler now binds to it
+with `DOOR BIND <device> door`, persisted as `door_device` / `door_key` /
+`door_invert`.
 
-**No library device answers `sensors`.** The backend asks it of every device on
-discovery (§2). Mycroft-headless replies "Unknown SENSORS subcommand"; Adler
-replies with its `SENSORS INFO` shape only when asked with the subcommand;
-neither answers the bare word. The backend stores whatever came back as the
-device's declaration, `parseDeclaredSensors()` finds no object in it, and every
-sensor on the network is running on inferred metadata — labels like
-`Adler/sensors/temperature`, units guessed from the key. One handler for the
-bare `sensors` command (§3.1) fixes it for the backend and gives the Dashboard
-`info` at the same time.
+**Only Adler answers `sensors`.** The backend asks it of every device on
+discovery (§2). Mycroft-headless replies "Unknown SENSORS subcommand", so the
+backend stores that string as its declaration, `parseDeclaredSensors()` finds
+no object in it, and that device's sensors run on inferred metadata — labels
+like `Mycroft/sensors/door`, units guessed from the key. Adler answers the bare
+word with the §3.1 declaration since the retrofit; the same one-handler change
+is what each remaining device needs, which is why D7 puts it in the library.
 
 ## 8. Adler: the retrofit
+
+Implemented in September 2026; this section is the plan it followed, kept as
+the record of why each piece is where it is.
 
 Adler is a device with three components and one controller:
 
@@ -647,7 +650,8 @@ contract Adler's controller implements. Source: `Services/AcController.cpp`,
 | `manualsync <on> <temp>` | `0\|1`, 18–30 | correct the controller's belief about the unit; sends no IR |
 | `SLEEP-IN <0\|1>` | | defer tomorrow's morning shutdown |
 | `SENDIR <name>` | code name | raw IR code |
-| `PAUSEDOORSENSOR <0\|1>` | | suspend door logic — **never handled by any device; implement** |
+| `PAUSEDOORSENSOR <0\|1>` | | suspend door logic; pausing while the door holds the unit off releases it. Adler implements it since the retrofit. |
+| `SLEEP <minutes>` | 0 cancels | device-side addition, not sent by the Service yet: turn off after that long, reported as `Ssleep` — the timer the Dashboard's sleep dialog currently mocks |
 | `DOOR <v>` | | **defined in the Service, never emitted** (no `on_send` on `DoorState`); the old device's `DOOROPEN` is likewise dead. Drop both; the door is a network sensor. |
 | `reboot` | | library |
 

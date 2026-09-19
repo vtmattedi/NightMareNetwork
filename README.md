@@ -166,7 +166,7 @@ mcp/                  MCP server (Streamable HTTP at /mcp, and stdio) over docs/
 docker-compose.yml    both services, deployed through Stackport
 ```
 
-Published at <https://nightmarenetwork.mattediworks.com/> with the MCP endpoint at
+Published at <https://nightmare.mattediworks.com/> with the MCP endpoint at
 `/mcp`. `docs/mcp.md` is the setup guide; `docs/mcp-design.md` is the design.
 
 ### Website
