@@ -1,28 +1,12 @@
-# temp-sensor
+# DS18B20 Resource device
 
-One DS18B20, done the way the protocol pages describe. What a sensor device
-looks like when the backend and the Dashboard can both read it without being
-told anything.
+This example exposes a DS18B20 reading as a read-only `NetValue<float>` named `temperature`. It also exposes `connected` and `sensorAddress` Values, a `rescan` Action, and a `sensorLost` Event. Registration handles discovery, state publication, reconnect and a 60-second temperature heartbeat.
 
-```sh
-cp include/creds.example.h include/creds.h
-pio run -e esp32c3-supermini -t upload -t monitor
-```
+The sensor driver is a pollable state machine. It starts a 1-Wire conversion, returns to Runtime, then reads the result after the conversion interval. It creates no sensor task and sends no manual sensor JSON. The DS18B20 data line needs an external 4.7 kΩ pull-up to 3.3 V; many breakout boards already include one.
 
-What it does:
+1. Copy `include/creds.example.h` to `include/creds.h` and set WiFi and local MQTT values.
+2. Set `DEVICE_ID` and the board/pin selection for your hardware.
+3. Run `pio run -e esp32c3-supermini` or `pio run -e esp32doit-devkit-v1`.
+4. Upload and monitor with `pio run -e esp32c3-supermini -t upload -t monitor`.
 
-- Samples the sensor on its own FreeRTOS task, sleeping through the 750 ms
-  conversion, so `loop()` is never blocked. A missing sensor is retried every
-  5 s; a lost one is written off after three failed reads and searched for
-  again.
-- Publishes `<Device>/sensors` as one JSON object -- `{"temperature": 23.44}`,
-  or `{"temperature": null}` while there is no reading -- on a change of
-  0.25 C or more and every 60 s regardless.
-- Answers the bare `sensors` command with the declaration the backend reads on
-  discovery: `id`, `label`, `unit`, `type`, `disable`, `critical`, plus the
-  hardware details the Dashboard shows.
-- Publishes `<Device>/info` on every MQTT connect.
-- `DS18 READ` and `DS18 STATUS` return the last sample; neither touches the bus.
-
-The board pins come from `include/board.h`, an append-only revision registry
-selected with `-D BOARD_C3_V1` or `-D BOARD_ESP32_V1` in `platformio.ini`.
+The build uses the repository checkout through `symlink://../..`. The temperature Value has no retained state until the first valid reading. Consumers can use the `connected` Value to distinguish current readings from the last known temperature after a sensor loss.

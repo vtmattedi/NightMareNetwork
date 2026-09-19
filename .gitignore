@@ -1,6 +1,8 @@
 .vscode/*
 src/Core/creds.h
 src/Core/creds.h.bak
+examples/*/include/creds.h
+examples/*/.pio/
 src/Modules.config.h
 src/Modules.config.h.bak
 
