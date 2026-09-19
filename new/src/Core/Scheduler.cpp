@@ -1,4 +1,4 @@
-#include "Jobs.h"
+#include "Scheduler.h"
 
 #include "NightMareCommand.h"
 #include "StateStore.h"
@@ -54,9 +54,9 @@ bool wallTimeReady()
 }
 }
 
-JobManager gScheduler;
+Scheduler gScheduler;
 
-bool JobManager::begin()
+bool Scheduler::begin()
 {
     JobGuard guard;
     if (begun_)
@@ -82,7 +82,7 @@ bool JobManager::begin()
     return storageReady_;
 }
 
-bool JobManager::startScheduler(uint8_t priority, uint32_t stackSize)
+bool Scheduler::startScheduler(uint8_t priority, uint32_t stackSize)
 {
     if (schedulerTask_ != nullptr)
         return true;
@@ -96,9 +96,9 @@ bool JobManager::startScheduler(uint8_t priority, uint32_t stackSize)
     return true;
 }
 
-void JobManager::task(void *context)
+void Scheduler::task(void *context)
 {
-    JobManager *manager = static_cast<JobManager *>(context);
+    Scheduler *manager = static_cast<Scheduler *>(context);
     const TickType_t interval = pdMS_TO_TICKS(SchedulerPollMs) > 0
                                     ? pdMS_TO_TICKS(SchedulerPollMs)
                                     : 1;
@@ -109,16 +109,16 @@ void JobManager::task(void *context)
     }
 }
 
-int32_t JobManager::add(const String &label, const String &command, JobClock clock,
+int32_t Scheduler::add(const String &label, const String &command, SchedulerClock clock,
                         uint32_t due, uint32_t interval)
 {
     JobGuard guard;
-    if (!begun_ || (clock == JobClock::Wall && !storageReady_))
+    if (!begun_ || (clock == SchedulerClock::Wall && !storageReady_))
         begin();
     if (label.length() == 0 || label.length() > MaxLabelLength ||
         command.length() == 0 || command.length() > NM_MAX_MESSAGE_LEN)
         return -1;
-    if (clock == JobClock::Wall && !storageReady_)
+    if (clock == SchedulerClock::Wall && !storageReady_)
         return -1;
     if (nextId_ == 0 || nextId_ > INT32_MAX)
         return -1;
@@ -138,7 +138,7 @@ int32_t JobManager::add(const String &label, const String &command, JobClock clo
         job.clock = clock;
         job.due = due;
         job.interval = interval;
-        if (clock == JobClock::Wall && !save())
+        if (clock == SchedulerClock::Wall && !save())
         {
             job = Job{};
             --nextId_;
@@ -149,24 +149,24 @@ int32_t JobManager::add(const String &label, const String &command, JobClock clo
     return -1;
 }
 
-int32_t JobManager::atWall(const String &label, const String &command, uint32_t epochSeconds)
+int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds)
 {
     if (epochSeconds == 0)
         return -1;
-    return add(label, command, JobClock::Wall, epochSeconds, 0);
+    return add(label, command, SchedulerClock::Wall, epochSeconds, 0);
 }
 
-int32_t JobManager::after(const String &label, const String &command, uint32_t delayMs)
+int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs)
 {
     JobGuard guard;
     if (delayMs > MaxInterval)
         return -1;
     if (!begun_)
         begin();
-    return add(label, command, JobClock::Monotonic, millis() + delayMs, 0);
+    return add(label, command, SchedulerClock::Monotonic, millis() + delayMs, 0);
 }
 
-int32_t JobManager::everyWall(const String &label, const String &command, uint32_t intervalSeconds)
+int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds)
 {
     JobGuard guard;
     if (intervalSeconds == 0 || intervalSeconds > MaxInterval)
@@ -175,20 +175,20 @@ int32_t JobManager::everyWall(const String &label, const String &command, uint32
         begin();
     // A zero due time starts the interval when the wall clock first becomes valid.
     uint32_t due = wallTimeReady() ? now() + intervalSeconds : 0;
-    return add(label, command, JobClock::Wall, due, intervalSeconds);
+    return add(label, command, SchedulerClock::Wall, due, intervalSeconds);
 }
 
-int32_t JobManager::everyMonotonic(const String &label, const String &command, uint32_t intervalMs)
+int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs)
 {
     JobGuard guard;
     if (intervalMs == 0 || intervalMs > MaxInterval)
         return -1;
     if (!begun_)
         begin();
-    return add(label, command, JobClock::Monotonic, millis() + intervalMs, intervalMs);
+    return add(label, command, SchedulerClock::Monotonic, millis() + intervalMs, intervalMs);
 }
 
-bool JobManager::remove(const String &label)
+bool Scheduler::remove(const String &label)
 {
     JobGuard guard;
     if (!begun_ || !storageReady_)
@@ -197,7 +197,7 @@ bool JobManager::remove(const String &label)
     {
         if (!job.active || job.label != label)
             continue;
-        bool persisted = job.clock == JobClock::Wall;
+        bool persisted = job.clock == SchedulerClock::Wall;
         Job previous = job;
         job = Job{};
         if (persisted && !save())
@@ -210,7 +210,7 @@ bool JobManager::remove(const String &label)
     return false;
 }
 
-bool JobManager::remove(uint32_t id)
+bool Scheduler::remove(uint32_t id)
 {
     JobGuard guard;
     if (!begun_ || !storageReady_)
@@ -219,7 +219,7 @@ bool JobManager::remove(uint32_t id)
     {
         if (!job.active || job.id != id)
             continue;
-        bool persisted = job.clock == JobClock::Wall;
+        bool persisted = job.clock == SchedulerClock::Wall;
         Job previous = job;
         job = Job{};
         if (persisted && !save())
@@ -232,7 +232,7 @@ bool JobManager::remove(uint32_t id)
     return false;
 }
 
-bool JobManager::clear()
+bool Scheduler::clear()
 {
     JobGuard guard;
     if (!begun_ || !storageReady_)
@@ -253,7 +253,7 @@ bool JobManager::clear()
     return true;
 }
 
-String JobManager::list()
+String Scheduler::list()
 {
     JobGuard guard;
     if (!begun_ || !storageReady_)
@@ -271,7 +271,7 @@ String JobManager::list()
         item["id"] = job.id;
         item["label"] = job.label;
         item["command"] = job.command;
-        item["clock"] = job.clock == JobClock::Wall ? "wall" : "monotonic";
+        item["clock"] = job.clock == SchedulerClock::Wall ? "wall" : "monotonic";
         item["due"] = job.due;
         item["interval"] = job.interval;
         item["repeat"] = job.interval != 0;
@@ -288,7 +288,7 @@ String JobManager::list()
     return output;
 }
 
-void JobManager::tick()
+void Scheduler::tick()
 {
     JobGuard guard;
     if (dispatching_)
@@ -306,7 +306,7 @@ void JobManager::tick()
         if (!job.active || job.id > lastExistingId)
             continue;
 
-        if (job.clock == JobClock::Wall)
+        if (job.clock == SchedulerClock::Wall)
         {
             if (!wallReady)
                 continue;
@@ -323,11 +323,11 @@ void JobManager::tick()
             continue;
         }
 
-        const bool persistRemoval = job.clock == JobClock::Wall && job.interval == 0;
+        const bool persistRemoval = job.clock == SchedulerClock::Wall && job.interval == 0;
         const Job previous = job;
         if (job.interval == 0)
             job = Job{};
-        else if (job.clock == JobClock::Wall)
+        else if (job.clock == SchedulerClock::Wall)
             job.due = wallNow + job.interval;
         else
             job.due = monotonicNow + job.interval;
@@ -346,7 +346,7 @@ void JobManager::tick()
     dispatching_ = false;
 }
 
-bool JobManager::save()
+bool Scheduler::save()
 {
     if (!storageReady_)
         return false;
@@ -355,7 +355,7 @@ bool JobManager::save()
     JsonArray array = doc.createNestedArray("jobs");
     for (const Job &job : jobs_)
     {
-        if (!job.active || job.clock != JobClock::Wall)
+        if (!job.active || job.clock != SchedulerClock::Wall)
             continue;
         JsonObject item = array.createNestedObject();
         item["id"] = job.id;
@@ -374,7 +374,7 @@ bool JobManager::save()
     return written != 0;
 }
 
-bool JobManager::load()
+bool Scheduler::load()
 {
     if (!LittleFS.exists(JobsFile))
         return importLegacy();
@@ -419,7 +419,7 @@ bool JobManager::load()
             job.id = id;
             job.label = label;
             job.command = command;
-            job.clock = JobClock::Wall;
+            job.clock = SchedulerClock::Wall;
             job.due = due;
             job.interval = interval;
             if (nextId_ <= id)
@@ -430,7 +430,7 @@ bool JobManager::load()
     return true;
 }
 
-bool JobManager::importLegacy()
+bool Scheduler::importLegacy()
 {
     if (!LittleFS.exists(LegacySchedulerFile))
         return true;
@@ -473,7 +473,7 @@ bool JobManager::importLegacy()
             job.id = nextId_++;
             job.label = label;
             job.command = command;
-            job.clock = JobClock::Wall;
+            job.clock = SchedulerClock::Wall;
             job.due = due;
             job.interval = interval;
             break;

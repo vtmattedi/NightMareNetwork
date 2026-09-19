@@ -8,7 +8,7 @@
 #define SCHEDULER_DEFAULT_PRIORITY 1 // same as loopTaskPriority
 
 // Wall deadlines are Unix seconds. Monotonic deadlines and intervals are milliseconds.
-enum class JobClock : uint8_t
+enum class SchedulerClock : uint8_t
 {
     Wall,
     Monotonic
@@ -20,12 +20,12 @@ struct Job
     uint32_t id = 0;
     String label;
     String command;
-    JobClock clock = JobClock::Monotonic;
+    SchedulerClock clock = SchedulerClock::Monotonic;
     uint32_t due = 0;
     uint32_t interval = 0; // Zero means run once.
 };
 
-class JobManager
+class Scheduler
 {
 public:
     static constexpr uint8_t MaxJobs = 30;
@@ -55,7 +55,7 @@ private:
     uint32_t nextStorageRetry_ = 0;
     TaskHandle_t schedulerTask_ = nullptr;
 
-    int32_t add(const String &label, const String &command, JobClock clock,
+    int32_t add(const String &label, const String &command, SchedulerClock clock,
                 uint32_t due, uint32_t interval);
     bool save();
     bool load();
@@ -64,4 +64,4 @@ private:
     static void task(void *context);
 };
 
-extern JobManager gScheduler;
+extern Scheduler gScheduler;

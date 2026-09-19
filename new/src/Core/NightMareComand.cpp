@@ -1,5 +1,5 @@
 #include "NightMareCommand.h"
-#include "Jobs.h"
+#include "Scheduler.h"
 
 /// @brief  Global function pointer to the command resolver function. This function should be set by the user of the library to handle incoming commands.
 NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
