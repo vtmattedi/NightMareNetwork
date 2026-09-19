@@ -17,10 +17,12 @@ class ResourceRegistry {
 public:
     struct Entry {
         NetResource* resource = nullptr;
-        ResourceRole role = ResourceRole::LOCAL;
         const char* owner = nullptr; // Caller-owned, only used for remote resources.
         PublishPolicy policy;
-        uint32_t lastPublishedMs = 0;
+        // Local: last publication. Remote Value: last valid state reception.
+        uint32_t lastActivityMs = 0;
+        ResourceRole role = ResourceRole::LOCAL;
+        bool hasReceivedState = false;
     };
 
     bool add(NetResource& resource, ResourceRole role = ResourceRole::LOCAL,
@@ -35,7 +37,8 @@ public:
                 entry.role = role;
                 entry.owner = role == ResourceRole::REMOTE ? owner : nullptr;
                 entry.policy = policy;
-                entry.lastPublishedMs = 0;
+                entry.lastActivityMs = 0;
+                entry.hasReceivedState = false;
                 return true;
             }
         }
@@ -50,6 +53,10 @@ public:
     }
     Entry* find(const NetResource& resource) {
         for (auto& entry : _entries) if (entry.resource == &resource) return &entry;
+        return nullptr;
+    }
+    const Entry* find(const NetResource& resource) const {
+        for (const auto& entry : _entries) if (entry.resource == &resource) return &entry;
         return nullptr;
     }
     Entry (&entries())[NIGHTMARE_MAX_RESOURCES] { return _entries; }

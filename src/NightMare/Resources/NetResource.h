@@ -11,6 +11,7 @@ enum class NetValueType : uint8_t {
 };
 enum class NetAccess : uint8_t { READ, READ_WRITE };
 enum class ResourceRole : uint8_t { LOCAL, REMOTE };
+enum class ResourceFreshness : uint8_t { UNKNOWN, FRESH, STALE };
 enum class ActionResponse : uint8_t { NONE, ACK, RESULT };
 enum class ActionStatus : uint8_t { OK, REJECTED, INVALID_ARGUMENT, BUSY, ERROR };
 

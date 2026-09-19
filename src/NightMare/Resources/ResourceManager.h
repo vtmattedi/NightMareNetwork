@@ -49,7 +49,12 @@ public:
     template<typename Payload> bool emit(NetEvent<Payload>& event, const Payload& payload) {
         return emit(event, event.encode(payload));
     }
-    void receive(const String& owner, const String& id, Operation operation, const String& payload);
+    // UINT32_MAX means no valid remote state has been received, or this is not a remote Value.
+    uint32_t ageMs(const NetResource& resource, uint32_t nowMs = millis()) const;
+    ResourceFreshness freshness(const NetResource& resource, uint32_t maxAgeMs,
+                                uint32_t nowMs = millis()) const;
+    void receive(const String& owner, const String& id, Operation operation, const String& payload,
+                 uint32_t receivedAtMs = millis());
     void receiveReply(const String& payload);
     void connected();
     void tick(uint32_t nowMs);

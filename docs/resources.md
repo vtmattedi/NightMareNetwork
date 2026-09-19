@@ -37,6 +37,20 @@ The remote owner's ID passed to `mirror` is caller-owned and must outlive the re
 
 A remote state update changes `otherTemperature` without echoing it back. `resources.request(writableMirror, desired)` sends a write request to the owner; the mirror waits for an authoritative state update.
 
+### Remote Value freshness
+
+The Value holds the last known state. Freshness tells a consumer how recently this runtime received a valid remote `VALUE_STATE`:
+
+```cpp
+if (resources.freshness(otherTemperature, 30000) == ResourceFreshness::FRESH) {
+    use(otherTemperature.get());
+}
+```
+
+`UNKNOWN` means no valid remote state has ever arrived, `FRESH` means the last one arrived within the requested age, and `STALE` means it arrived earlier. The last known value remains available when stale. Every valid state refreshes the reception time, including a repeat of the same value. `ageMs(value)` returns the elapsed monotonic milliseconds, or `UINT32_MAX` if there is no received remote Value state; local Values, Actions and Events have `UNKNOWN` freshness. These queries do not scan resources or publish messages.
+
+Freshness is local runtime knowledge and is not transmitted over NM-NW. It is meaningful when the owner has an expected update cadence. A Value published only on change can legitimately stay unchanged for a long time. For example, publish temperature on change with a 10-second periodic heartbeat and let consumers consider it stale after 30 seconds. Explicit resource availability is deferred.
+
 ## Actions
 
 ```cpp
@@ -62,6 +76,6 @@ Events are not retained and have no current value. `NetEvent<T>` can encode a ty
 
 ## Publication policy and metadata
 
-`PublishPolicy{onChange, periodMs}` is stored in the registry. A `periodMs` of zero disables periodic publication. Each Value has a last publication timestamp in its registry entry; no per-resource FreeRTOS task or timer is created.
+`PublishPolicy{onChange, periodMs}` is stored in the registry. A `periodMs` of zero disables periodic publication. A local Value's registry entry stores its last publication time; a remote Value uses the same timestamp slot for its last valid state reception. No per-resource FreeRTOS task or timer is created.
 
 The registry is fixed at `NIGHTMARE_MAX_RESOURCES` entries (32 by default). Override that macro at build time to fit the device's RAM budget. A Resource has only its ID String, enums, virtual table pointer and optional metadata pointer; metadata storage belongs to the caller.

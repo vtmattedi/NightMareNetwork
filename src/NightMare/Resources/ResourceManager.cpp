@@ -55,7 +55,7 @@ void ResourceManager::publishState(ResourceRegistry::Entry& entry) {
     if (!_transport.connected() || entry.resource->kind() != NetResourceKind::VALUE || entry.role != ResourceRole::LOCAL ||
         !static_cast<NetValueBase*>(entry.resource)->hasValue()) return;
     if (publish(entry, "state", static_cast<NetValueBase*>(entry.resource)->encode(), true))
-        entry.lastPublishedMs = millis();
+        entry.lastActivityMs = millis();
 }
 
 void ResourceManager::publishSchema(const ResourceRegistry::Entry& entry) {
@@ -110,7 +110,7 @@ void ResourceManager::tick(uint32_t nowMs) {
     for (auto& entry : _registry.entries()) {
         if (!entry.resource || entry.role != ResourceRole::LOCAL ||
             entry.resource->kind() != NetResourceKind::VALUE || !entry.policy.periodMs) continue;
-        if (static_cast<uint32_t>(nowMs - entry.lastPublishedMs) >= entry.policy.periodMs)
+        if (static_cast<uint32_t>(nowMs - entry.lastActivityMs) >= entry.policy.periodMs)
             publishState(entry);
     }
 }
@@ -171,8 +171,26 @@ bool ResourceManager::invokeLocal(const String& id, const String& arguments) {
     return true;
 }
 
+uint32_t ResourceManager::ageMs(const NetResource& resource, uint32_t nowMs) const {
+    const auto* entry = _registry.find(resource);
+    if (!entry || entry->role != ResourceRole::REMOTE ||
+        resource.kind() != NetResourceKind::VALUE || !entry->hasReceivedState)
+        return UINT32_MAX;
+    return static_cast<uint32_t>(nowMs - entry->lastActivityMs);
+}
+
+ResourceFreshness ResourceManager::freshness(const NetResource& resource, uint32_t maxAgeMs,
+                                             uint32_t nowMs) const {
+    const auto* entry = _registry.find(resource);
+    if (!entry || entry->role != ResourceRole::REMOTE ||
+        resource.kind() != NetResourceKind::VALUE || !entry->hasReceivedState)
+        return ResourceFreshness::UNKNOWN;
+    return static_cast<uint32_t>(nowMs - entry->lastActivityMs) <= maxAgeMs
+        ? ResourceFreshness::FRESH : ResourceFreshness::STALE;
+}
+
 void ResourceManager::receive(const String& owner, const String& id, Operation operation,
-                              const String& payload) {
+                              const String& payload, uint32_t receivedAtMs) {
     const bool isLocal = owner == _device;
     auto* entry = _registry.find(isLocal ? ResourceRole::LOCAL : ResourceRole::REMOTE,
                                  owner.c_str(), id);
@@ -188,8 +206,11 @@ void ResourceManager::receive(const String& owner, const String& id, Operation o
         return;
     }
     if (operation == Operation::VALUE_STATE && resource.kind() == NetResourceKind::VALUE) {
-        if (static_cast<NetValueBase&>(resource).decodeAndSet(payload) && item && item->update)
-            item->update(item->updateContext, resource);
+        if (static_cast<NetValueBase&>(resource).decodeAndSet(payload)) {
+            entry->lastActivityMs = receivedAtMs;
+            entry->hasReceivedState = true;
+            if (item && item->update) item->update(item->updateContext, resource);
+        }
     } else if (operation == Operation::EVENT_EMIT && resource.kind() == NetResourceKind::EVENT &&
                item && item->event) {
         item->event(item->eventContext, resource, payload);
