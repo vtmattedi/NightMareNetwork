@@ -32,7 +32,7 @@ An initialized `STRING` Value prefixes its wire payload with `~`: empty string i
 
 Structured Action and Event payloads use a compact JSON array in the order listed by schema `fields`. A color Action with `red`, `green` and `blue` fields can send `[255,120,0]`. This format keeps field names in discovery rather than repeating them in each invocation.
 
-MQTT subscribes to `nm/#`, `Control/time`, and the device's optional `<device>/console/in` adapter. `console/in` parses a first token as a registered local Action ID and passes the rest as its argument text. It is a human input format, not the Action protocol. Serial `Console::tick` uses the same Action registration.
+MQTT subscribes to `nm/#`, `Control/time`, and the device's optional `<device>/console/in` adapter. Commands received there are parsed by CommandRouter and answered on `<device>/console/out`. `>` invokes registered Actions; `< owner [value]` inspects locally known Values; `config`, `system`, `network` and `resources` are operator commands. Serial Console uses the same router. Console text is an adapter format, not the NM-NW Action protocol. See [command grammar](qol-restoration.md#command-grammar).
 
 ## Time source
 

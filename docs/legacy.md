@@ -15,7 +15,7 @@ order: 2
 | `ServerVariable` optimistic synchronization | Local authoritative Value plus remote mirror and write request |
 | Special UI and controller command topics | Writable Values and Actions registered by a Service |
 | `Xtra` command resolver and MQTT preprocessing | `Network/Dispatcher` routes typed operations to `ResourceManager` |
-| `console/in` command resolver | Optional Console adapter invokes registered Actions |
+| `console/in` command resolver | Console and CommandRouter answer operator commands and invoke registered Actions |
 | `Timers` and persisted command Scheduler | Runtime Scheduler Jobs using monotonic or wall-clock time |
 | Direct TimeLib use | `Core/Time` uses the system epoch clock |
 | OTA under Core | Pollable `Platform/OtaService` |

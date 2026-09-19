@@ -36,23 +36,24 @@ A **Cluster** describes local topology. A **Namespace** describes logical addres
 A **Service** runs application behavior. Its **Resources** form the network interface:
 
 ```text
-LightController service
+GpioLightService example
   ├─ lightEnabled: Value<bool>, read/write
   └─ toggleLight: Action<void>
 ```
 
-A generic consumer uses those resources without depending on `LightController`. Sensors and information are read-only Values. Transient notifications are Events. Scheduled work is a Job that can use Resources, rather than another Resource kind.
+A generic consumer uses those resources without depending on `GpioLightService`. Sensors and information are read-only Values. Transient notifications are Events. Scheduled work is a Job that can use Resources, rather than another Resource kind.
 
 ## Code boundaries
 
 | Folder | Responsibility |
 | --- | --- |
-| `Core` | System epoch time adapter |
+| `Core` | System epoch time adapter and stable device identity |
 | `Resources` | Model, registry, authority and runtime manager |
-| `Network` | Transport, MQTT mapping, dispatcher and console ingress |
+| `Network` | Transport, MQTT mapping, dispatcher, command router and console ingress |
 | `Runtime` | Scheduler Jobs and manual or managed execution |
-| `Services` | Device behavior exposed through Resources |
-| `Platform` | ESP32 WiFi and OTA adapters |
+| `Services` | Common telemetry exposed through Resources |
+| `Storage` | Generic typed settings and persistence contract |
+| `Platform` | ESP32 information, persistence, facade, WiFi and OTA adapters; optional GPIO example |
 | `Legacy/src` | Predecessor implementations kept outside the active build |
 
 [TCP](legacy.md) preceded this resource protocol. The active library uses the Resource model for network-visible behavior.

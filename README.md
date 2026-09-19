@@ -17,8 +17,9 @@ In a larger deployment, devices communicate through a cluster's local broker. Br
 3. [Resources](docs/resources.md) covers registration, authority, discovery, metadata and callbacks.
 4. [Protocol](docs/protocol.md) specifies the current MQTT mapping.
 5. [Runtime and time](docs/runtime.md) covers Jobs, execution modes and clock synchronization.
-6. [Services and platform](docs/services.md) covers the light service, WiFi and OTA.
+6. [Services and platform](docs/services.md) covers telemetry, ESP32 platform helpers, WiFi and OTA.
 7. [API reference](docs/reference.md) lists public entry points and limits.
+8. [Device infrastructure and Console](docs/qol-restoration.md) covers settings, identity, operator commands and the standard facade.
 
 The [basic](examples/basic) and [temperature sensor](examples/temp-sensor) projects are buildable PlatformIO examples. Both use `symlink://../..` so their builds test the current checkout.
 
