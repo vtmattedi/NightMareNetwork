@@ -1,4 +1,5 @@
 #include "ResourcesManager.h"
+#include "DeviceIdentity.h"
 
 #include <ArduinoJson.h>
 
@@ -35,22 +36,6 @@ bool ResourcesManager::validSegment(const String &segment)
     return true;
 }
 
-bool ResourcesManager::setDeviceName(const String &deviceName)
-{
-    if (!validSegment(deviceName))
-        return false;
-    if (deviceName == deviceName_)
-        return true;
-    for (int i = 0; i < resourceCount_; ++i)
-        if (resources_[i]->authority == ResourceAuthority::THIS_DEVICE ||
-            resources_[i]->ownerDevice.deviceName == deviceName)
-            return false;
-    deviceName_ = deviceName;
-    if (publisher_ != nullptr)
-        publishManifest();
-    return true;
-}
-
 void ResourcesManager::setPublisher(ResourcePublisher *publisher)
 {
     publisher_ = publisher;
@@ -75,14 +60,15 @@ bool ResourcesManager::bindResource(NetResource *resource)
         resourceCount_ >= MaxResources || !validSegment(resource->name))
         return false;
 
+    const String &thisDevice = gDeviceIdentity.getDeviceName();
     String ownerName = resource->ownerDevice.deviceName;
     if (resource->authority == ResourceAuthority::THIS_DEVICE)
     {
-        if (!validSegment(deviceName_) || (ownerName.length() != 0 && ownerName != deviceName_))
+        if (!validSegment(thisDevice) || (ownerName.length() != 0 && ownerName != thisDevice))
             return false;
-        ownerName = deviceName_;
+        ownerName = thisDevice;
     }
-    else if (!validSegment(ownerName) || ownerName == deviceName_)
+    else if (!validSegment(ownerName) || ownerName == thisDevice || ownerName == "all")
     {
         return false;
     }
@@ -90,6 +76,7 @@ bool ResourcesManager::bindResource(NetResource *resource)
         return false;
 
     resource->ownerDevice.deviceName = ownerName;
+    gDeviceIdentity.lockAddress();
     resource->resourceManager = this;
     resources_[resourceCount_++] = resource;
     if (resource->authority == ResourceAuthority::THIS_DEVICE)
@@ -139,7 +126,8 @@ String ResourcesManager::topicFor(const NetResource &resource, const char *suffi
 
 bool ResourcesManager::publishManifest()
 {
-    if (publisher_ == nullptr || !validSegment(deviceName_))
+    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    if (publisher_ == nullptr || !validSegment(thisDevice))
         return false;
 
     DynamicJsonDocument doc(MaxManifestLength);
@@ -161,7 +149,7 @@ bool ResourcesManager::publishManifest()
     String payload;
     if (serializeJson(doc, payload) == 0)
         return false;
-    return publisher_->publish(deviceName_ + ResourcesPath, payload, true);
+    return publisher_->publish(thisDevice + ResourcesPath, payload, true);
 }
 
 bool ResourcesManager::publishState(const NetValueResource &resource)
@@ -230,8 +218,25 @@ bool ResourcesManager::invoke(NetActionResource &resource, const String &payload
 
 bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const String &message)
 {
-    if (deviceName == deviceName_ || message.length() > MaxManifestLength)
+    if (deviceName == gDeviceIdentity.getDeviceName() || message.length() > MaxManifestLength)
         return false;
+    if (message.length() == 0)
+    {
+        bool matched = false;
+        for (int i = 0; i < resourceCount_; ++i)
+        {
+            NetResource *resource = resources_[i];
+            if (resource->authority != ResourceAuthority::OTHER_DEVICE ||
+                resource->ownerDevice.deviceName != deviceName)
+                continue;
+            matched = true;
+            if (resource->kind == NetResourceKind::ACTION)
+                static_cast<NetActionResource *>(resource)->freshness = ResourceFreshness::STALE;
+            else
+                static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
+        }
+        return matched;
+    }
     DynamicJsonDocument doc(MaxManifestLength);
     if (deserializeJson(doc, message) || !doc["resources"].is<JsonArray>())
         return false;
@@ -299,6 +304,11 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     if (operation == "state" && resource->kind == NetResourceKind::VALUE &&
         resource->authority == ResourceAuthority::OTHER_DEVICE)
     {
+        if (message.length() == 0)
+        {
+            static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
+            return true;
+        }
         if (message.length() > MaxValueLength + 128)
             return false;
         DynamicJsonDocument doc(message.length() + 128);

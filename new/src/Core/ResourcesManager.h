@@ -16,8 +16,7 @@ class ResourcesManager
 public:
     static constexpr int MaxResources = 100;
 
-    // Framework setup: configure this device's topic prefix before binding resources.
-    bool setDeviceName(const String &deviceName);
+    // Framework setup: publishing is injected by the MQTT facade.
     void setPublisher(ResourcePublisher *publisher);
 
     // Project API: resources remain owned by the project and must outlive their binding.
@@ -42,7 +41,6 @@ private:
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;
-    String deviceName_;
     ResourcePublisher *publisher_ = nullptr; // Non-owning.
     NetValueResource::WriteHandler valueHandler_ = nullptr;
     NetActionResource::InvokeHandler actionHandler_ = nullptr;

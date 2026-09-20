@@ -47,6 +47,3 @@ extern StateStore PersistentSettings;
 
 /// Runtime system status, held only in memory.
 extern StateStore SystemState;
-
-/// Returns the current runtime device name.
-const char *getDeviceName();

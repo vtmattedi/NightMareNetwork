@@ -1,29 +1,30 @@
-/*
- * Device Name,
- * Device NameSpace,
- * ChangeDeviceName,
- * IsDevice(Topic)
- * IsNamespace(Topic)
- */
-
 #pragma once
+
 #include <Arduino.h>
-#include <StateStore.h>
 
-struct DeviceIdentity
+// Owns this device's MQTT address. Namespaces are not part of the current topic format.
+class DeviceIdentity
 {
-private:
-    String deviceName;
-    String deviceNamespace;
-
 public:
-    DeviceIdentity();
-    bool isDevice(const String &topic) const;
-    bool isNamespace(const String &topic) const;
-    void changeDeviceName(const String &newName);
-    void changeDeviceNamespace(const String &newNamespace);
-    const String &getDeviceName() const { return deviceName; }
-    const String &getDeviceNamespace() const { return deviceNamespace; }
+    bool begin();
+    const String &getDeviceName();
+    const String &getDeviceId();
+    bool isDevice(const String &topic);
+    bool relativeTopic(const String &topic, String &relative);
+    String topic(const String &relative);
+
+    // Persists a new name. Once a resource or transport uses the address, the
+    // change takes effect on the next boot so existing topics and the MQTT will
+    // keep the same address for the current session.
+    bool changeDeviceName(const String &newName);
+    void lockAddress() { addressLocked_ = true; }
+
+private:
+    static bool validName(const String &name);
+    String deviceName_;
+    String deviceId_;
+    bool initialized_ = false;
+    bool addressLocked_ = false;
 };
 
 extern DeviceIdentity gDeviceIdentity;

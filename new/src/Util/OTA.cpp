@@ -1,4 +1,5 @@
 #include "OTA.h"
+#include <Core/DeviceIdentity.h>
 
 ota_callback_t ota_user_callback = nullptr;
 TaskHandle_t otaTaskHandle = NULL;
@@ -51,7 +52,7 @@ void otaTask(void *param)
 void initOTA()
 {
 
-    ArduinoOTA.setHostname(getDeviceName());
+    ArduinoOTA.setHostname(gDeviceIdentity.getDeviceName().c_str());
     ArduinoOTA.onStart(startOTA);
     ArduinoOTA.onEnd(endOTA);
     ArduinoOTA.onProgress(progressOTA);

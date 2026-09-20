@@ -1,4 +1,8 @@
 #include "NightMareWIFI.h"
+#include <Core/DeviceIdentity.h>
+#ifdef COMPILE_MQTT
+#include <Network/MQTT.h>
+#endif
 
 static WiFiConnectedCallback wifiConnectedCallback = nullptr;
 static TaskHandle_t WiFiTaskHandle = nullptr;
@@ -74,7 +78,8 @@ void WiFi_Task(void *pvParameters)
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *waitCallback(unsigned int))
 {
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(getDeviceName());
+    WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
+    gDeviceIdentity.lockAddress();
     WiFi.begin(ssid, password);
     unsigned int start = millis();
     while (WiFi.status() != WL_CONNECTED)
@@ -96,7 +101,8 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
 {
 
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(getDeviceName());
+    WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
+    gDeviceIdentity.lockAddress();
     WiFi.begin(ssid, password);
 
     if (WiFiTaskHandle)

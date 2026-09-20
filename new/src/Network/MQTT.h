@@ -1,52 +1,34 @@
-#pragma Once
-//* MQTT Wrapper for expressif ESP32 mqtt client
-// * Supports local and remote MQTT brokers with TLS
-// * Automatically prepends device name to topics
-// * Handles connection, disconnection, and message callbacks
-// Fixed crashes by not using PubSubClient 
+#pragma once
+
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#define MQTT_SKIP_PUBLISH_IF_DISCONNECTED
-#include "mqtt_client.h"
-#include <creds.h> // supplied by the consuming project, not by this library
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <freertos/queue.h>
 
-#ifndef MQTT_CREDS_H
-#error "Please create a creds.h file with the necessary definitions."
-#endif
-// #ifndef DEVICE_NAME
-// #warning "DEVICE_NAME not defined, using default name."
-// #define DEVICE_NAME "NightMare Device"
-// #endif
-// #ifdef USING_DEFAULT_DEVICE_NAME
-// #endif
-#define LOCAL_MQTT true
-#define REMOTE_MQTT false
+// Project-facing MQTT conveniences. The ESP client and credentials stay private.
+// The broker choice is unrelated to resource ownership.
+constexpr bool LOCAL_MQTT = true;
+constexpr bool REMOTE_MQTT = false;
 
-//Automatically include the command resolver if MQTT_PREPROCESS is defined
-//This will make the MQTT client handle commands sent to the topic <DEVICE_NAME>/console/in
-#ifdef MQTT_PREPROCESS
-#include <Xtra/NightMareCommand.h>
-#include <Core/TimeSyncronization.h>
-
-#endif
-
-#define MQTT_CONTROL_TASK_PRIORITY 5
-#define MQTT_TASK_PRIORITY 5
-#define MAX_ASYNC_QUEUE_MESSAGES 5
-void MQTT_Init(bool local = false);
+void MQTT_Init(bool localBroker = REMOTE_MQTT);
 void MQTT_End();
+// Stops the client and control task asynchronously; call MQTT_Init after it finishes.
 void MQTT_Finish();
-void MQTT_change_to(bool local);
+void MQTT_change_to(bool localBroker);
 bool MQTT_isLocal();
-void MQTT_Send_Raw(String topic, String message);
+bool MQTT_Connected();
+int8_t MQTT_State();
+String MQTTStateJson();
+
+// MQTT_Publish returns whether the ESP client accepted the complete message.
+// insertOwner prefixes the current device name; false uses the exact topic.
+// An empty retained payload clears a retained topic.
+bool MQTT_Publish(const String &topic, const String &message,
+                  bool insertOwner = true, bool retained = false);
 void MQTT_Send(String topic, String message, bool insertOwner = true, bool retained = false);
+void MQTT_Send_Raw(String topic, String message);
+bool MQTT_Queue_Async_Message(String topic, String message,
+                              bool insertOwner = false, bool retained = false);
+
+// Optional project hooks. Automatic console, time and resource routing runs first.
+// The default message hook receives only this device's topics without its prefix.
 void MQTT_onMessage(void (*cb)(String topic, String message), bool onlyDeviceMessages = true);
 void MQTT_onConnected(void (*cb)(void));
-void MQTT_onDisconnected(void (*cb)(bool));
-bool MQTT_Connected();
-void Send_to_MQTT(String topic, String message);
-int8_t MQTT_State();
-bool MQTT_Queue_Async_Message(String topic, String message, bool insertOwner = false, bool retained = false);
+void MQTT_onDisconnected(void (*cb)(bool localBroker));

@@ -9,10 +9,10 @@
 #include <ArduinoJson.h>
 
 #ifdef COMPILE_MQTT
-#include <Core/MQTT.h>
+#include <Network/MQTT.h>
 #endif
 #ifdef COMPILE_WIFI_MODULE
-#include <Core/bWIFI.h>
+#include <Plataform/ESP32/NightMareWIFI.h>
 #endif
 #ifdef COMPILE_HTTP_SERVER
 #include <HTTP/http.h>

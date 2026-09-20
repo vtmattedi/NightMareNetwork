@@ -34,11 +34,10 @@ enum class ResourceFreshness : uint8_t
     STALE
 };
 
-// Names are owned by the resource. Namespaces are reserved for a later topic format.
+// The owner is identified by its device name in the current topic format.
 struct NetDeviceIdentity
 {
     String deviceName;
-    String deviceNamespace;
 };
 
 struct NetResource

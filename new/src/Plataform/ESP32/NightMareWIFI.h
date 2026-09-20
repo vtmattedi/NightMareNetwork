@@ -6,7 +6,7 @@
 #include <freertos/queue.h>
 
 #ifdef COMPILE_OTA
-#include <Core/OTA.h>
+#include <Util/OTA.h>
 #endif
 
 #include <Core/StateStore.h>
@@ -16,7 +16,7 @@
 #endif
 
 #ifdef COMPILE_TIMESYNC
-#include <Core/TimeSyncronization.h>
+#include <Util/TimeSyncronization.h>
 #endif
 
 typedef void (*WiFiConnectedCallback)(bool firstConnection);

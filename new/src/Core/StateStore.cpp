@@ -1,6 +1,4 @@
 #include "StateStore.h"
-char DEVICE_NAME[DEVICE_NAME_MAX] = "Esp32-nm-"; // Default device name used by MQTT and other modules
-void initPersistentSettings(StateStore &settings);
 StateStore PersistentSettings(true); // Global instance of StateStore with auto-save enabled
 
 StateStore SystemState(false); // Global instance of StateStore for non-persistent system settings with auto-save disabled
@@ -31,7 +29,6 @@ bool StateStore::begin()
     SystemState.setFlag("LittleFS_mounted", true);
     load();
     initialized = true;
-    initPersistentSettings(*this);
 
     return true;
 }
@@ -215,27 +212,6 @@ bool StateStore::setFlag(const String &key, bool value)
 bool StateStore::getFlag(const String &key)
 {
     return get(key, "0") == "1";
-}
-
-void initPersistentSettings(StateStore &settings)
-{
-    if (!settings.exists("_device_name"))
-    {
-        String defaultName = String(DEVICE_NAME) + String((uint32_t)ESP.getEfuseMac(), HEX);
-        settings.set("_device_name", defaultName);
-    }
-    String name = settings.get("_device_name");
-    strncpy(DEVICE_NAME, name.c_str(), DEVICE_NAME_MAX - 1);
-    DEVICE_NAME[DEVICE_NAME_MAX - 1] = '\0';
-}
-
-const char *getDeviceName()
-{
-    if (DEVICE_NAME[0] == '\0')
-    {
-        return "ESP32-Device";
-    }
-    return DEVICE_NAME;
 }
 
 // ---- Returns all settings as JSON ----
