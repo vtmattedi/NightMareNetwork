@@ -4,7 +4,7 @@
 #include "ResourcesManager.h"
 #endif
 
-#include <Core/Time.h>
+#include <Core/DeviceIdentity.h>
 
 // Safely Change Device Identity.
 //  This will change the ownership/topic reference and notify the resource manager .
@@ -15,77 +15,50 @@ bool NetResource::setDeviceIdentity(const String &resourceName, const String &re
     bool isOwner = gDeviceIdentity.isDevice(newOwner.deviceName);
     this->ownerDevice = newOwner;
     this->isOwned_ = isOwner;
+#if NM_ENABLE_RESOURCES
     if (resourceManager != nullptr)
     {
         resourceManager->notifyOwnershipChanged(*this);
     }
-    return true;
-}
-
-NetSensor::NetSensor(const String &resourceName, const NetDeviceIdentity &owner, const ResourceAuthority resourceAuthority, const AccessPolicy resourceAccess)
-    : NetValueResource(resourceName, owner, resourceAuthority, resourceAccess) {
-      };
-
-bool NetValueResource::setValue(const String &newValue, bool skipManager)
-{
-    if (!this->isOwned() && this->access != AccessPolicy::READ_WRITE)
-    {
-        LOG_WARNING("NET", "Attempt to set value of read-only resource '%s' owned by '%s'", name.c_str(), ownerDevice.deviceName.c_str());
-        return false;
-    }
-    // LOG("NET", "%sSetting value of resource '%s' to '%s'",OK_LOG(resourceManager != nullptr), name.c_str(), newValue.c_str());
-#if NM_ENABLE_RESOURCES
-    if (resourceManager != nullptr && !skipManager)
-        return resourceManager->setValue(*this, newValue);
 #endif
-    value = newValue;
-    freshness = ResourceFreshness::FRESH;
     return true;
-};
+}
 
-bool NetSensor::setValue(const String &newValue, bool isFromOwner)
+// Timing uses millis() rather than epoch time: it is monotonic, available
+// before any time sync, and unsigned subtraction already handles rollover.
+bool NetValueResource::optimisticActive() const
 {
-    bool ok = NetValueResource::setValue(newValue); // this already triggers the resource manager.
-    if (!ok)
+    if (syncStrategy != NetSyncStrategy::OPTIMISTIC || !optimisticPending_)
         return false;
-    unsigned long timestamp = now();
-    if (isFromOwner)
-    {
-        this->lastUpdateTimestamp = timestamp;
-        this->freshness = ResourceFreshness::FRESH;
-    }
-    else
-    {
-        if (this->syncStrategy == NetSensorSyncStrategy::OPTMISTIC)
-        {
-            this->optimisticValue = newValue;
-        }
-        this->lastWriteTimestamp = timestamp;
-    }
-    return true;
+    return (uint32_t)(millis() - lastWriteMs_) < optimisticWindowMs;
 }
 
-String NetSensor::getValue()
+void NetValueResource::noteLocalWrite()
 {
-    if (this->syncStrategy == NetSensorSyncStrategy::OPTMISTIC)
-    {
-        bool use_optimistic_value = now() - this->lastWriteTimestamp < NM_NET_SENSOR_OPTIMISTIC_ADJUST_TIME;
-        return use_optimistic_value ? this->optimisticValue : this->getValue();
-    }
-    else
-    {
-        return this->getValue();
-    }
+    lastWriteMs_ = (uint32_t)millis();
+    optimisticPending_ = true;
 }
 
-bool NetActionResource::invoke(const String &payload)
+void NetValueResource::noteOwnerUpdate()
 {
+    lastUpdateMs_ = (uint32_t)millis();
+    freshness = ResourceFreshness::FRESH;
+}
+
+bool NetValueResource::dispatchLocalWrite(const String &encoded)
+{
+    if (!isOwned() && access != AccessPolicy::READ_WRITE)
+    {
+        LOG_WARNING("NET", "Attempt to set value of read-only resource '%s' owned by '%s'",
+                    name.c_str(), ownerDevice.deviceName.c_str());
+        return false;
+    }
 #if NM_ENABLE_RESOURCES
     if (resourceManager != nullptr)
-        return resourceManager->invoke(*this, payload);
+        return resourceManager->setValue(*this, encoded);
+#else
+    (void)encoded;
 #endif
-
-    if (authority != ResourceAuthority::HAS_AUTHORITY || access != AccessPolicy::READ_WRITE || onInvoke == nullptr)
-        return false;
-    return onInvoke(*this, payload);
+    // Unbound resources stay usable as plain local state.
+    return true;
 }

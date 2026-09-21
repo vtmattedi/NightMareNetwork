@@ -1,7 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Core/DeviceIdentity.h>
+#include "NetCodec.h"
+
 class ResourcesManager;
 
 constexpr size_t NetResourceMaxPayloadLength = 2048;
@@ -27,14 +28,7 @@ enum class ResourceFreshness : uint8_t
     STALE
 };
 
-enum class NetValueType : uint8_t
-{
-    STRING,
-    BOOLEAN,
-    INTEGER,
-    FLOAT,
-    STRUCT
-};
+// NetValueType lives in NetCodec.h, beside the T -> NetValueType mapping.
 
 // The owner is identified by its device name in the current topic format.
 struct NetDeviceIdentity
@@ -51,14 +45,15 @@ struct NetDeviceIdentity
 /// @return A full topic string in the format "<device>/resources[/<name>/{state,set,invoke}]" based on the provided parameters.
 String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resourceName, NetResourceType resourceType, const String &action = String());
 
-/* Now we will have:
- * NetResource: base class for all resources, with common properties like name, owner, access policy, and authority.
- * NetValue: a resource that represents a value.
- * NetAction: a resource that represents an action.
- * OwnedNetValue: a value resource that is owned by the current device.
- * NetWork netValue: a value resource that is not owned by the current device.
- * OwnedNetAction: an action resource that is owned by the current device.
- * NetWork netAction: an action resource that is not owned by the current device.
+/* Value resources are layered as:
+ *
+ *   application            T
+ *                          |  NetValue<T>
+ *                          v  NetCodec<T>
+ *   ResourcesManager / MQTT   String
+ *
+ * NetResource and NetValueResource are non-template on purpose: routing,
+ * manifests, subscriptions and the transport never see T.
  */
 
 struct NetResource
@@ -71,71 +66,164 @@ struct NetResource
     bool isOwned() const { return isOwned_; }
     bool setDeviceIdentity(const String &resourceName, const String &resoruceOwner);
 
-    NetResource(const String &resourceName, const String &identity, const NetResourceType resourceType) : kind(resourceType),
-                                                                                                          name(resourceName),
-                                                                                                          ownerDevice(identity) {};
+    // An empty owner means "this device". The real device name is filled in at
+    // bind time, so a globally declared resource never has to resolve the local
+    // identity from its constructor.
+    NetResource(const String &resourceName, const String &identity, const NetResourceType resourceType)
+        : kind(resourceType),
+          name(resourceName),
+          ownerDevice(identity),
+          isOwned_(identity.length() == 0) {};
 
 private:
     bool isOwned_ = false;
     ResourcesManager *resourceManager = nullptr; // Non-owning; set by bindResource().
     friend class ResourcesManager;
     friend struct NetValueResource;
-    friend struct NetActionResource;
 };
 
+enum class NetSyncStrategy : uint8_t
+{
+    OPTIMISTIC, // A local write shadows owner state for a short window.
+    STRICT,     // Always report the owner's state, even mid-change.
+};
+
+/// @brief Manager-facing half of a value resource: everything that does not
+/// depend on the value's C++ type, including the optimistic/authoritative state
+/// machine. The typed container is NetValue<T>.
 struct NetValueResource : public NetResource
 {
+    // The wire format is String, so these never need to know T.
     using WriteHandler = bool (*)(NetValueResource &resource, const String &requestedValue);
-    using StateHandler = void (*)(NetValueResource &resource);
+    using UpdateHandler = void (*)(NetValueResource &resource);
 
-    NetValueResource(const String &resourceName, const String &resourceOwner, AccessPolicy access = AccessPolicy::READ, NetValueType valueType = NetValueType::STRING) : NetResource(resourceName, resourceOwner, NetResourceType::VALUE), valueType(valueType), access(access) {}
-    bool setValue(const String &newValue, bool skipManager = false);
-    String getValue() const { return value; }
-    bool asBool() const { return getValue() == "true" || getValue() == "1"; }
-    int asInt() const { return getValue().toInt(); }
-    float asFloat() const { return getValue().toFloat(); }
-    AccessPolicy access = AccessPolicy::READ; // Access policy of the sensor resource, indicating whether it is read-only or read-write.
-    NetValueType valueType = NetValueType::STRING; // just metadata for now.
+    NetValueResource(const String &resourceName, const String &resourceOwner,
+                     AccessPolicy resourceAccess, NetValueType resourceValueType)
+        : NetResource(resourceName, resourceOwner, NetResourceType::VALUE),
+          access(resourceAccess),
+          valueType(resourceValueType) {}
+    virtual ~NetValueResource() = default;
 
-private:
-    String value;
+    AccessPolicy access = AccessPolicy::READ;
+    NetValueType valueType = NetValueType::STRING; // Manifest metadata, from NetCodec<T>::Type.
+
+    WriteHandler onWrite = nullptr; // Owner side: accept or reject a /set request.
+    UpdateHandler onUpdate = nullptr; // Owner side: local state bookkeeping.
+
+    NetSyncStrategy syncStrategy = NetSyncStrategy::OPTIMISTIC;
+    uint32_t optimisticWindowMs = 5000; // How long a local write shadows owner state.
+
+    ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
+    bool isStale() const { return freshness == ResourceFreshness::STALE; }
+    bool hasAuthoritativeValue() const { return hasAuthoritativeValue_; }
+    uint32_t lastUpdateMs() const { return lastUpdateMs_; }
+    uint32_t lastWriteMs() const { return lastWriteMs_; }
+
+    // Type-erasure boundary. These are the only value operations the transport
+    // layer needs, and both speak the encoded wire format.
+    virtual String encodedValue() const = 0;
+    virtual bool applyEncodedOwnerValue(const String &encoded) = 0;
+
+protected:
+    // True while a local write should still shadow owner state.
+    bool optimisticActive() const;
+    // Access check plus manager dispatch for an application-initiated write.
+    bool dispatchLocalWrite(const String &encoded);
+    void noteLocalWrite();
+    void noteOwnerUpdate();
+
+    bool hasAuthoritativeValue_ = false;
+    bool optimisticPending_ = false;
+    uint32_t lastUpdateMs_ = 0;
+    uint32_t lastWriteMs_ = 0;
+
     friend class ResourcesManager;
 };
 
-// Owned NetValueResource: a value resource that is owned by the current device.
-struct ManagedSensor : public NetValueResource
+/// @brief The typed value container. Holds the owner's truth and the last
+/// locally requested value, and converts at the wire boundary through
+/// NetCodec<T>. Deliberately thin: the framework logic lives in the base.
+template <typename T>
+struct NetValue : public NetValueResource
 {
-    ManagedSensor(const String &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ, NetValueType valueType = NetValueType::STRING)
-        : NetValueResource(resourceName, gDeviceIdentity.getDeviceName(), resourceAccess, valueType) {};
-    using WriteHandler = bool (*)(ManagedSensor &resource, const String &requestedValue);
-    using StateHandler = void (*)(ManagedSensor &resource);
+    using UpdateHandler = void (*)(NetValue<T> &resource, const T &value);
 
-    WriteHandler onWrite = nullptr; // Owner-side handler for /set requests.
-    StateHandler onState = nullptr; // Owner-side handler for state changes.
-};
+    /// @brief A value owned by this device.
+    NetValue(const String &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ)
+        : NetValueResource(resourceName, String(), resourceAccess, NetCodec<T>::Type) {}
 
-enum class NetSensorSyncStrategy : uint8_t
-{
-    OPTMISTIC, // Assume that data we wrote is correct until stale or ack.
-    STRICT,    // Always show the actual data reported by the sensor, even if it is middle change.
-};
+    /// @brief A value owned by another device.
+    NetValue(const String &resourceName, const NetDeviceIdentity &owner,
+             AccessPolicy resourceAccess = AccessPolicy::READ)
+        : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type) {}
 
-/// @brief Represents a sensor resource that is not owned by the current device. It can be used to read values from external sensors and handle changes in their state.
-struct NetSensor : public NetValueResource
-{
-    //Time Allowed for the sensor to adjust its value after a write operation before it is considered stale. This is used in the optimistic sync strategy.
-    #define NM_NET_SENSOR_OPTIMISTIC_ADJUST_TIME 5000
-    NetSensor(const String &resourceName, const NetDeviceIdentity &owner,
-              AccessPolicy resourceAccess = AccessPolicy::READ, NetValueType valueType = NetValueType::STRING) : NetValueResource(resourceName, owner.deviceName, resourceAccess, valueType) {}
+    // Fires when the effective value changes, not on every owner packet.
+    UpdateHandler onUpdate = nullptr;
 
-    using changeHandler = void (*)(NetSensor &resource, const String &newValue);
-    NetSensorSyncStrategy syncStrategy = NetSensorSyncStrategy::OPTMISTIC;
-    changeHandler onChange = nullptr;                                      // Handler for value changes detected.
-    uint32_t lastUpdateTimestamp = 0;                                      // Timestamp of the last update received from the sensor.
-    uint32_t lastWriteTimestamp = 0;                                       // Timestamp of the last write operation performed on the sensor.
-    ResourceFreshness freshness = ResourceFreshness::UNKNOWN;              // Freshness state of the sensor's value.
-    String optimisticValue;                                                // Holds the last written value when using optimistic sync strategy.
-    bool isStale() const { return freshness == ResourceFreshness::STALE; } // Check if the sensor's value is stale.
-    bool setValue(const String &newValue, bool isFromOwner = false); // Called by the owner to set the sensor's value and update the timestamp.
-    String getValue();
+    /// @brief The value the application should act on: the optimistic value
+    /// while its window is open, the owner's value otherwise.
+    const T &getValue() const
+    {
+        return optimisticActive() ? optimisticValue_ : authoritativeValue_;
+    }
+
+    /// @brief The owner's last reported value, ignoring any optimistic window.
+    const T &authoritativeValue() const { return authoritativeValue_; }
+
+    /// @brief Application intent: a local change when owned, a /set request otherwise.
+    bool setValue(const T &value)
+    {
+        const T previous = getValue();
+        if (!dispatchLocalWrite(NetCodec<T>::encode(value)))
+            return false;
+
+        if (isOwned())
+        {
+            // This device is the owner, so the request is the new truth.
+            authoritativeValue_ = value;
+            hasAuthoritativeValue_ = true;
+            noteOwnerUpdate();
+        }
+        else
+        {
+            optimisticValue_ = value;
+            noteLocalWrite();
+        }
+        notifyIfEffectiveChanged(previous);
+        return true;
+    }
+
+    /// @brief Framework ingress: the owner reported this value. Refreshes
+    /// authoritative state without cancelling an open optimistic window, so a
+    /// delayed packet cannot make the application flicker back.
+    /// Becomes ResourcesManager-only once the manager pass lands.
+    bool applyOwnerValue(const T &value)
+    {
+        const T previous = getValue();
+        authoritativeValue_ = value;
+        hasAuthoritativeValue_ = true;
+        noteOwnerUpdate();
+        notifyIfEffectiveChanged(previous);
+        return true;
+    }
+
+    String encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
+
+    bool applyEncodedOwnerValue(const String &encoded) override
+    {
+        T decoded;
+        if (!NetCodec<T>::decode(encoded, decoded))
+            return false;
+        return applyOwnerValue(decoded);
+    }
+
+private:
+    void notifyIfEffectiveChanged(const T &previous)
+    {
+        if (onUpdate != nullptr && !(getValue() == previous))
+            onUpdate(*this, getValue());
+    }
+
+    T authoritativeValue_ = T();
+    T optimisticValue_ = T();
 };
