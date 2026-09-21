@@ -71,6 +71,15 @@ String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resour
  * has no single T and is not templated.
  */
 
+/// @brief Whether this device implements the resource or merely points at one.
+/// Fixed when the resource is declared: retargeting a Remote resource changes
+/// what it points at, never what it is.
+enum class ResourceRole : uint8_t
+{
+    MANAGED, // Implemented here.
+    REMOTE   // Implemented by another device.
+};
+
 struct NetResource
 {
     const NetResourceType kind;
@@ -78,20 +87,30 @@ struct NetResource
     NetDeviceIdentity ownerDevice;
 
     bool isBound() const { return resourceManager != nullptr; }
-    bool isOwned() const { return isOwned_; }
-    bool setDeviceIdentity(const String &resourceName, const String &resoruceOwner);
+    bool isOwned() const { return role_ == ResourceRole::MANAGED; }
 
-    // An empty owner means "this device". The real device name is filled in at
-    // bind time, so a globally declared resource never has to resolve the local
-    // identity from its constructor.
-    NetResource(const String &resourceName, const String &identity, const NetResourceType resourceType)
+    // A MANAGED resource leaves the owner empty: the real device name is filled
+    // in at bind time, so a globally declared resource never has to resolve the
+    // local identity from its constructor. A REMOTE one may also start empty and
+    // be pointed at a source later with setSource().
+    NetResource(const String &resourceName, const String &identity,
+                const NetResourceType resourceType, const ResourceRole resourceRole)
         : kind(resourceType),
           name(resourceName),
           ownerDevice(identity),
-          isOwned_(identity.length() == 0) {};
+          role_(resourceRole) {};
+    virtual ~NetResource() = default;
+
+protected:
+    /// @brief Points a REMOTE resource at a different source. Updates the target
+    /// only: the role is permanent, so ownership is never recalculated here.
+    void setRemoteSource(const String &deviceName, const String &resourceName);
+
+    /// @brief Drops whatever was learned from the previous source.
+    virtual void resetRemoteState() {}
 
 private:
-    bool isOwned_ = false;
+    const ResourceRole role_;
     ResourcesManager *resourceManager = nullptr; // Non-owning; set by bindResource().
     friend class ResourcesManager;
     friend struct NetValueResource;
@@ -114,11 +133,11 @@ struct NetValueResource : public NetResource
     using WriteHandler = bool (*)(NetValueResource &resource, const String &requestedValue);
 
     NetValueResource(const String &resourceName, const String &resourceOwner,
-                     AccessPolicy resourceAccess, NetValueType resourceValueType)
-        : NetResource(resourceName, resourceOwner, NetResourceType::VALUE),
+                     AccessPolicy resourceAccess, NetValueType resourceValueType,
+                     ResourceRole resourceRole)
+        : NetResource(resourceName, resourceOwner, NetResourceType::VALUE, resourceRole),
           access(resourceAccess),
           valueType(resourceValueType) {}
-    virtual ~NetValueResource() = default;
 
     AccessPolicy access = AccessPolicy::READ;
     NetValueType valueType = NetValueType::STRING; // Manifest metadata, from NetCodec<T>::Type.
@@ -143,6 +162,9 @@ struct NetValueResource : public NetResource
     virtual bool applyEncodedWrite(const String &encoded) = 0;
 
 protected:
+    // Everything learned from a source is per-source, so retargeting clears it.
+    void resetRemoteState() override;
+
     // True while a local write should still shadow owner state.
     bool optimisticActive() const;
     // Access check plus manager dispatch for an application-initiated write.
@@ -170,12 +192,14 @@ struct NetValue : public NetValueResource
 
     /// @brief A value owned by this device.
     NetValue(const String &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ)
-        : NetValueResource(resourceName, String(), resourceAccess, NetCodec<T>::Type) {}
+        : NetValueResource(resourceName, String(), resourceAccess, NetCodec<T>::Type,
+                           ResourceRole::MANAGED) {}
 
     /// @brief A value owned by another device.
     NetValue(const String &resourceName, const NetDeviceIdentity &owner,
              AccessPolicy resourceAccess = AccessPolicy::READ)
-        : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type) {}
+        : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type,
+                           ResourceRole::REMOTE) {}
 
     /// @brief Fires when the *effective* value changes, which is what the
     /// application reads. It is not a "packet received" hook: an owner packet
@@ -258,6 +282,15 @@ protected:
         return false;
     }
 
+    /// @brief The stored values belong to the old source too, so they go with
+    /// it rather than lingering as a readable reading from the wrong device.
+    void resetRemoteState() override
+    {
+        NetValueResource::resetRemoteState();
+        authoritativeValue_ = T();
+        optimisticValue_ = T();
+    }
+
 private:
     void notifyIfEffectiveChanged(const T &previous)
     {
@@ -286,10 +319,23 @@ struct ManagedSensor : public NetValue<T>
 template <typename T>
 struct RemoteSensor : public NetValue<T>
 {
+    /// @brief Declared without a source yet; point it at one with setSource().
+    RemoteSensor() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ)
+    {
+        this->syncStrategy = NetSyncStrategy::STRICT;
+    }
+
     RemoteSensor(const String &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ)
     {
         this->syncStrategy = NetSyncStrategy::STRICT;
+    }
+
+    /// @brief Points this at a different remote resource. Stays REMOTE whatever
+    /// device is named, and drops everything learned from the old source.
+    void setSource(const String &deviceName, const String &resourceName)
+    {
+        this->setRemoteSource(deviceName, resourceName);
     }
 };
 
@@ -323,10 +369,24 @@ protected:
 template <typename T>
 struct RemoteState : public NetValue<T>
 {
+    /// @brief Declared without a source yet; point it at one with setSource().
+    RemoteState() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ_WRITE)
+    {
+        this->syncStrategy = NetSyncStrategy::OPTIMISTIC;
+    }
+
     RemoteState(const String &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ_WRITE)
     {
         this->syncStrategy = NetSyncStrategy::OPTIMISTIC;
+    }
+
+    /// @brief Points this at a different remote resource. Stays REMOTE whatever
+    /// device is named, and drops everything learned from the old source,
+    /// including any optimistic window still open against it.
+    void setSource(const String &deviceName, const String &resourceName)
+    {
+        this->setRemoteSource(deviceName, resourceName);
     }
 };
 
@@ -359,22 +419,24 @@ struct NetActionResource : public NetResource
     /// @param args Not copied. The schema has to outlive the action, so a static
     /// or global array is the expected source.
     NetActionResource(const String &resourceName, const String &resourceOwner,
-                      const ActionArgMetadata *args, size_t argCount)
-        : NetResource(resourceName, resourceOwner, NetResourceType::ACTION),
+                      const ActionArgMetadata *args, size_t argCount,
+                      ResourceRole resourceRole)
+        : NetResource(resourceName, resourceOwner, NetResourceType::ACTION, resourceRole),
           arguments_(args),
           argumentCount_(argCount) {}
-    virtual ~NetActionResource() = default;
 
     size_t argumentCount() const { return argumentCount_; }
     const ActionArgMetadata *arguments() const { return arguments_; }
     const ActionArgMetadata &argument(size_t index) const { return arguments_[index]; }
 
-    /// @brief Manager -> an action this device implements. A normalized payload
-    /// can replace the String later without touching metadata or ownership.
-    virtual bool executeEncoded(const String &payload)
+    /// @brief Manager -> an action this device implements. The result survives
+    /// this non-template boundary, so a correlated caller can return it while an
+    /// ordinary MQTT /invoke simply drops it. A normalized payload can replace
+    /// the String later without touching metadata or ownership.
+    virtual ActionResult execute(const String &payload)
     {
         (void)payload;
-        return false;
+        return {false, String()};
     }
 
 protected:
@@ -393,38 +455,51 @@ struct ManagedAction : public NetActionResource
     using Handler = ActionResult (*)(ManagedAction &action, const String &payload);
 
     ManagedAction(const String &resourceName)
-        : NetActionResource(resourceName, String(), nullptr, 0) {}
+        : NetActionResource(resourceName, String(), nullptr, 0, ResourceRole::MANAGED) {}
 
     /// @brief The argument count comes from the array, so only the constructor
     /// is generated per size and the class itself stays non-template.
     template <size_t N>
     ManagedAction(const String &resourceName, const ActionArgMetadata (&args)[N])
-        : NetActionResource(resourceName, String(), args, N) {}
+        : NetActionResource(resourceName, String(), args, N, ResourceRole::MANAGED) {}
 
     Handler onInvoke = nullptr;
 
     /// @brief Runs the local implementation and reports what it returned.
-    ActionResult execute(const String &payload)
+    ActionResult execute(const String &payload) override
     {
         if (onInvoke == nullptr)
-            return ActionResult{false, String()};
+            return {false, String()};
         return onInvoke(*this, payload);
     }
-
-    bool executeEncoded(const String &payload) override { return execute(payload).success; }
 };
 
 /// @brief Another device implements the action; invoke() sends the request.
 struct RemoteAction : public NetActionResource
 {
+    /// @brief Declared without a source yet; point it at one with setSource().
+    RemoteAction()
+        : NetActionResource(String(), String(), nullptr, 0, ResourceRole::REMOTE) {}
+
     RemoteAction(const String &resourceName, const NetDeviceIdentity &owner)
-        : NetActionResource(resourceName, owner.deviceName, nullptr, 0) {}
+        : NetActionResource(resourceName, owner.deviceName, nullptr, 0, ResourceRole::REMOTE) {}
 
     template <size_t N>
     RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
                  const ActionArgMetadata (&args)[N])
-        : NetActionResource(resourceName, owner.deviceName, args, N) {}
+        : NetActionResource(resourceName, owner.deviceName, args, N, ResourceRole::REMOTE) {}
 
-    /// @brief Application intent. Fails when unbound, because nothing was sent.
+    /// @brief Points this at a different remote action. Stays REMOTE whatever
+    /// device is named. The argument schema is a property of this declaration,
+    /// so it is left alone.
+    void setSource(const String &deviceName, const String &resourceName)
+    {
+        this->setRemoteSource(deviceName, resourceName);
+    }
+
+    /// @brief Application intent. True means the invocation was accepted for
+    /// transport, not that the remote action ran or succeeded; use the
+    /// controlled console or MQTTP path when the result matters. Fails when
+    /// unbound, because nothing was sent.
     bool invoke(const String &payload = String()) { return dispatchInvoke(payload); }
 };

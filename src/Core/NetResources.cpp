@@ -4,24 +4,30 @@
 #include "ResourcesManager.h"
 #endif
 
-#include <Core/DeviceIdentity.h>
-
-// Safely Change Device Identity.
-//  This will change the ownership/topic reference and notify the resource manager .
-bool NetResource::setDeviceIdentity(const String &resourceName, const String &resoruceOwner)
+// Retargets a REMOTE resource. The role is fixed at declaration, so ownership
+// is deliberately not recalculated from the new device name: what this object
+// is and what it currently points at are separate questions.
+void NetResource::setRemoteSource(const String &deviceName, const String &resourceName)
 {
+    this->ownerDevice = NetDeviceIdentity(deviceName);
     this->name = resourceName;
-    NetDeviceIdentity newOwner(resoruceOwner);
-    bool isOwner = gDeviceIdentity.isDevice(newOwner.deviceName);
-    this->ownerDevice = newOwner;
-    this->isOwned_ = isOwner;
+    resetRemoteState();
 #if NM_ENABLE_RESOURCES
     if (resourceManager != nullptr)
     {
-        resourceManager->notifyOwnershipChanged(*this);
+        // The Manager still has the old source subscribed.
+        resourceManager->notifySourceChanged(*this);
     }
 #endif
-    return true;
+}
+
+void NetValueResource::resetRemoteState()
+{
+    freshness = ResourceFreshness::UNKNOWN;
+    hasAuthoritativeValue_ = false;
+    hasOptimisticValue_ = false;
+    lastUpdateMs_ = 0;
+    lastWriteMs_ = 0;
 }
 
 // Timing uses millis() rather than epoch time: it is monotonic, available
