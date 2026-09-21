@@ -48,7 +48,7 @@ String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resour
 /* Resources are layered as:
  *
  *   application            T
- *                          |  NetValue<T> / NetAction<T>
+ *                          |  NetValue<T>
  *                          v  NetCodec<T>
  *   ResourcesManager / MQTT   String
  *
@@ -62,10 +62,13 @@ String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resour
  *   |     |- RemoteSensor<T>       remote, READ, STRICT
  *   |     |- ManagedState<T>       local, READ_WRITE
  *   |     '- RemoteState<T>        remote, READ_WRITE, OPTIMISTIC
- *   '- NetActionResource           non-template boundary
- *      '- NetAction<T>             typed payload implementation
- *         |- ManagedAction<T>      this device implements it
- *         '- RemoteAction<T>       another device implements it
+ *   '- NetActionResource           non-template, runtime argument metadata
+ *      |- ManagedAction            local implementation + arg schema
+ *      '- RemoteAction             remote invocation + arg schema
+ *
+ * Sensor<T> observes T. State<T> observes T and can request it become another
+ * value. An action performs an operation described by runtime metadata, so it
+ * has no single T and is not templated.
  */
 
 struct NetResource
@@ -120,9 +123,9 @@ struct NetValueResource : public NetResource
     AccessPolicy access = AccessPolicy::READ;
     NetValueType valueType = NetValueType::STRING; // Manifest metadata, from NetCodec<T>::Type.
 
-    WriteHandler onWrite = nullptr; // Owner side: accept or reject a /set request.
-
-    NetSyncStrategy syncStrategy = NetSyncStrategy::OPTIMISTIC;
+    // Optimism is opt-in: only RemoteState<T> selects it, because only a write
+    // that has to travel to another device has a gap worth papering over.
+    NetSyncStrategy syncStrategy = NetSyncStrategy::STRICT;
     uint32_t optimisticWindowMs = 5000; // How long a local write shadows owner state.
 
     ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
@@ -132,9 +135,12 @@ struct NetValueResource : public NetResource
     uint32_t lastWriteMs() const { return lastWriteMs_; }
 
     // Type-erasure boundary. These are the only value operations the transport
-    // layer needs, and both speak the encoded wire format.
+    // layer needs, and all three speak the encoded wire format.
     virtual String encodedValue() const = 0;
+    // Ingress of owner state: this value is now the truth.
     virtual bool applyEncodedOwnerValue(const String &encoded) = 0;
+    // Ingress of a /set request aimed at a value this device owns.
+    virtual bool applyEncodedWrite(const String &encoded) = 0;
 
 protected:
     // True while a local write should still shadow owner state.
@@ -234,6 +240,24 @@ struct NetValue : public NetValueResource
         return applyOwnerValue(decoded);
     }
 
+    bool applyEncodedWrite(const String &encoded) override
+    {
+        T requested = T();
+        if (!NetCodec<T>::decode(encoded, requested))
+            return false;
+        return handleDecodedWrite(requested);
+    }
+
+protected:
+    /// @brief Where a decoded /set request lands. Only a device that owns the
+    /// value and offers a handler has something to decide, so the default
+    /// refuses. ManagedState<T> overrides this.
+    virtual bool handleDecodedWrite(const T &requested)
+    {
+        (void)requested;
+        return false;
+    }
+
 private:
     void notifyIfEffectiveChanged(const T &previous)
     {
@@ -269,12 +293,29 @@ struct RemoteSensor : public NetValue<T>
     }
 };
 
-/// @brief Owned by this device and writable by others.
+/// @brief Owned by this device and writable by others. The handler receives the
+/// already-decoded value: String conversion stops at the resource boundary.
 template <typename T>
 struct ManagedState : public NetValue<T>
 {
+    /// @brief Returns true to accept the request, which then becomes the
+    /// authoritative value, or false to reject it and leave state untouched.
+    using WriteRequestHandler = bool (*)(ManagedState<T> &state, const T &requested);
+
     ManagedState(const String &resourceName)
         : NetValue<T>(resourceName, AccessPolicy::READ_WRITE) {}
+
+    WriteRequestHandler onWrite = nullptr;
+
+protected:
+    bool handleDecodedWrite(const T &requested) override
+    {
+        if (onWrite == nullptr || !onWrite(*this, requested))
+            return false;
+        // Accepted by the owner, so the request is the new truth.
+        this->applyOwnerValue(requested);
+        return true;
+    }
 };
 
 /// @brief Owned by another device and writable from here. A local write shows
@@ -289,92 +330,101 @@ struct RemoteState : public NetValue<T>
     }
 };
 
-/// @brief Manager-facing half of an action. v1 is fire-and-forget: no results,
-/// no correlation ids, no retries. Those belong with the protocol rewrite.
+/// @brief Describes one action argument. Actions carry a runtime schema rather
+/// than a single payload type: an operation's arguments have nothing to do with
+/// each other, so there is no one T to template on.
+struct ActionArgMetadata
+{
+    const char *name;
+    NetValueType type;
+};
+
+/// @brief What a local implementation reports back. An ordinary MQTT /invoke
+/// discards it; a controlled console or MQTTP path can surface it. There is
+/// deliberately no result topic, request id or retained execution state.
+struct ActionResult
+{
+    bool success;
+    String result;
+};
+
+/// @brief Manager-facing action. Holds the argument schema and nothing else: no
+/// payload syntax, no freshness, no value semantics. Turning MQTT JSON or
+/// positional console input into arguments is the Manager's job, so the
+/// execution boundary here stays a plain encoded String.
 struct NetActionResource : public NetResource
 {
     using InvokeHandler = bool (*)(NetActionResource &resource, const String &payload);
 
+    /// @param args Not copied. The schema has to outlive the action, so a static
+    /// or global array is the expected source.
     NetActionResource(const String &resourceName, const String &resourceOwner,
-                      NetValueType actionPayloadType)
+                      const ActionArgMetadata *args, size_t argCount)
         : NetResource(resourceName, resourceOwner, NetResourceType::ACTION),
-          payloadType(actionPayloadType) {}
+          arguments_(args),
+          argumentCount_(argCount) {}
     virtual ~NetActionResource() = default;
 
-    // An action exists to be invoked, so READ_WRITE is the meaningful default.
-    AccessPolicy access = AccessPolicy::READ_WRITE;
-    NetValueType payloadType = NetValueType::NONE; // Manifest metadata, from NetCodec<T>::Type.
+    size_t argumentCount() const { return argumentCount_; }
+    const ActionArgMetadata *arguments() const { return arguments_; }
+    const ActionArgMetadata &argument(size_t index) const { return arguments_[index]; }
 
-    ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
-    bool isStale() const { return freshness == ResourceFreshness::STALE; }
-
-    // Type-erasure boundary: Manager -> locally owned action.
-    virtual bool applyEncodedInvoke(const String &encoded) = 0;
-
-protected:
-    // Application -> remote owner.
-    bool dispatchInvoke(const String &encoded);
-
-    friend class ResourcesManager;
-};
-
-/// @brief The typed action. Converts the payload through NetCodec<T> and leaves
-/// the handler to ManagedAction<T>.
-template <typename T>
-struct NetAction : public NetActionResource
-{
-    /// @brief An action implemented by this device.
-    NetAction(const String &resourceName)
-        : NetActionResource(resourceName, String(), NetCodec<T>::Type) {}
-
-    /// @brief An action implemented by another device.
-    NetAction(const String &resourceName, const NetDeviceIdentity &owner)
-        : NetActionResource(resourceName, owner.deviceName, NetCodec<T>::Type) {}
-
-    /// @brief Application intent: encode the payload and hand it to the transport.
-    bool invoke(const T &payload) { return dispatchInvoke(NetCodec<T>::encode(payload)); }
-
-    bool applyEncodedInvoke(const String &encoded) override
-    {
-        T payload = T();
-        if (!NetCodec<T>::decode(encoded, payload))
-            return false;
-        return handleDecodedInvoke(payload);
-    }
-
-protected:
-    /// @brief Where a decoded invoke lands. Only an implementing device has
-    /// something to run, so the default refuses.
-    virtual bool handleDecodedInvoke(const T &payload)
+    /// @brief Manager -> an action this device implements. A normalized payload
+    /// can replace the String later without touching metadata or ownership.
+    virtual bool executeEncoded(const String &payload)
     {
         (void)payload;
         return false;
     }
+
+protected:
+    // Application -> remote owner.
+    bool dispatchInvoke(const String &payload);
+
+    const ActionArgMetadata *arguments_ = nullptr;
+    size_t argumentCount_ = 0;
+
+    friend class ResourcesManager;
 };
 
 /// @brief This device implements the action and runs it when invoked.
-template <typename T>
-struct ManagedAction : public NetAction<T>
+struct ManagedAction : public NetActionResource
 {
-    using Handler = bool (*)(ManagedAction<T> &action, const T &payload);
+    using Handler = ActionResult (*)(ManagedAction &action, const String &payload);
 
-    ManagedAction(const String &resourceName) : NetAction<T>(resourceName) {}
+    ManagedAction(const String &resourceName)
+        : NetActionResource(resourceName, String(), nullptr, 0) {}
+
+    /// @brief The argument count comes from the array, so only the constructor
+    /// is generated per size and the class itself stays non-template.
+    template <size_t N>
+    ManagedAction(const String &resourceName, const ActionArgMetadata (&args)[N])
+        : NetActionResource(resourceName, String(), args, N) {}
 
     Handler onInvoke = nullptr;
 
-protected:
-    bool handleDecodedInvoke(const T &payload) override
+    /// @brief Runs the local implementation and reports what it returned.
+    ActionResult execute(const String &payload)
     {
         if (onInvoke == nullptr)
-            return false;
+            return ActionResult{false, String()};
         return onInvoke(*this, payload);
     }
+
+    bool executeEncoded(const String &payload) override { return execute(payload).success; }
 };
 
 /// @brief Another device implements the action; invoke() sends the request.
-template <typename T>
-struct RemoteAction : public NetAction<T>
+struct RemoteAction : public NetActionResource
 {
     RemoteAction(const String &resourceName, const NetDeviceIdentity &owner)
-        : NetAction<T>(resourceName, owner) {}
+        : NetActionResource(resourceName, owner.deviceName, nullptr, 0) {}
+
+    template <size_t N>
+    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
+                 const ActionArgMetadata (&args)[N])
+        : NetActionResource(resourceName, owner.deviceName, args, N) {}
+
+    /// @brief Application intent. Fails when unbound, because nothing was sent.
+    bool invoke(const String &payload = String()) { return dispatchInvoke(payload); }
 };

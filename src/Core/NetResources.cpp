@@ -59,25 +59,29 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
 #else
     (void)encoded;
 #endif
-    // Unbound resources stay usable as plain local state.
-    return true;
-}
-
-bool NetActionResource::dispatchInvoke(const String &encoded)
-{
-    if (!isOwned() && access != AccessPolicy::READ_WRITE)
+    // An unbound local value is just local state and the write succeeded. A
+    // write aimed at another device did not: reporting success here would let
+    // the optimistic window show a value that was never transported.
+    if (!isOwned())
     {
-        LOG_WARNING("NET", "Attempt to invoke read-only action '%s' owned by '%s'",
+        LOG_WARNING("NET", "Cannot set unbound remote value '%s' owned by '%s'",
                     name.c_str(), ownerDevice.deviceName.c_str());
         return false;
     }
+    return true;
+}
+
+bool NetActionResource::dispatchInvoke(const String &payload)
+{
 #if NM_ENABLE_RESOURCES
     if (resourceManager != nullptr)
-        return resourceManager->invoke(*this, encoded);
+        return resourceManager->invoke(*this, payload);
 #else
-    (void)encoded;
+    (void)payload;
 #endif
-    // Nothing to dispatch to yet. Routing an invoke on an unbound or locally
-    // owned action is the Manager's call, so this pass does not decide it.
-    return true;
+    // Invoking always means reaching the implementing device, so without a
+    // transport there is nothing to report success about.
+    LOG_WARNING("NET", "Cannot invoke unbound action '%s' owned by '%s'",
+                name.c_str(), ownerDevice.deviceName.c_str());
+    return false;
 }

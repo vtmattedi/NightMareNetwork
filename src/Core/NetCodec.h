@@ -9,24 +9,20 @@
 #include <type_traits>
 
 // Wire taxonomy for values. It lives here, next to the T -> NetValueType
-// mapping, so NetResources.h can include this header without a cycle.
+// mapping, so NetResources.h can include this header without a cycle. Actions
+// reuse it to describe their argument types at runtime.
 enum class NetValueType : uint8_t
 {
     STRING,
     BOOLEAN,
     INTEGER,
     FLOAT,
-    STRUCT,
-    NONE // Appended last so the existing values keep their numbers.
+    STRUCT
 };
 
-/// @brief Payload marker for resources that carry nothing, so "no payload" is a
-/// type the codec understands rather than a String special case at every call site.
-struct NetNoArgs
-{
-};
-
-/// @brief Translates a value between its C++ type and the String used on the wire.
+/// @brief Translates a value between its C++ type and the String used on the
+/// wire. This is the typed boundary for NetValue<T> only: actions describe their
+/// arguments with runtime metadata instead of a single T.
 /// Left undefined on purpose: an unsupported T fails to compile at the codec
 /// rather than silently degrading to a String somewhere deeper in the stack.
 template <typename T, typename Enable = void>
@@ -193,15 +189,4 @@ struct NetCodec<String>
         out = encoded;
         return true;
     }
-};
-
-template <>
-struct NetCodec<NetNoArgs>
-{
-    static constexpr NetValueType Type = NetValueType::NONE;
-
-    static String encode(const NetNoArgs &) { return String(); }
-
-    // Any payload decodes, including an empty one: there is nothing to read.
-    static bool decode(const String &, NetNoArgs &) { return true; }
 };
