@@ -11,6 +11,7 @@ constexpr size_t MaxSegmentLength = 64;
 constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
 constexpr size_t MaxManifestLength = 16384;
 constexpr char ResourcesPath[] = "/resources";
+constexpr int ManifestVersion = 2;
 
 const char *kindName(NetResourceType kind)
 {
@@ -20,6 +21,52 @@ const char *kindName(NetResourceType kind)
 const char *accessName(AccessPolicy access)
 {
     return access == AccessPolicy::READ_WRITE ? "read_write" : "read";
+}
+
+const char *valueTypeName(NetValueType type)
+{
+    switch (type)
+    {
+    case NetValueType::BOOLEAN:
+        return "boolean";
+    case NetValueType::INTEGER:
+        return "integer";
+    case NetValueType::FLOAT:
+        return "float";
+    case NetValueType::STRUCT:
+        return "struct";
+    case NetValueType::STRING:
+    default:
+        return "string";
+    }
+}
+
+// JSON is the canonical machine payload for action arguments. Positional human
+// syntax is a command-layer concern and never reaches this file.
+bool argumentTypeMatches(NetValueType type, JsonVariantConst value)
+{
+    switch (type)
+    {
+    case NetValueType::BOOLEAN:
+        return value.is<bool>();
+    case NetValueType::INTEGER:
+        return value.is<long long>();
+    case NetValueType::FLOAT:
+        return value.is<double>() || value.is<long long>();
+    case NetValueType::STRING:
+        return value.is<const char *>();
+    case NetValueType::STRUCT:
+        return value.is<JsonObjectConst>() || value.is<JsonArrayConst>();
+    }
+    return false;
+}
+
+bool schemaHasArgument(const NetActionResource &action, const char *name)
+{
+    for (size_t i = 0; i < action.argumentCount(); ++i)
+        if (strcmp(action.argument(i).name, name) == 0)
+            return true;
+    return false;
 }
 }
 
@@ -38,6 +85,20 @@ bool ResourcesManager::validSegment(const String &segment)
     return true;
 }
 
+bool ResourcesManager::validActionSchema(const NetActionResource &action)
+{
+    for (size_t i = 0; i < action.argumentCount(); ++i)
+    {
+        const ActionArgMetadata &arg = action.argument(i);
+        if (arg.name == nullptr || !validSegment(String(arg.name)))
+            return false;
+        for (size_t j = 0; j < i; ++j)
+            if (strcmp(action.argument(j).name, arg.name) == 0)
+                return false;
+    }
+    return true;
+}
+
 void ResourcesManager::setPublisher(ResourcePublisher *publisher)
 {
     publisher_ = publisher;
@@ -50,49 +111,95 @@ void ResourcesManager::setSubscriber(ResourceSubscriber *subscriber)
     subscriber_ = subscriber;
 }
 
-bool ResourcesManager::hasOtherDeviceResource(const String &deviceName) const
+bool ResourcesManager::hasResolvedSource(const NetResource &resource)
+{
+    return validSegment(resource.ownerDevice.deviceName) && validSegment(resource.name);
+}
+
+bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const
 {
     for (int i = 0; i < resourceCount_; ++i)
-        if (resources_[i]->authority == ResourceAuthority::EXTERNAL_AUTHORITY &&
-            resources_[i]->ownerDevice.deviceName == deviceName)
+    {
+        const NetResource *resource = resources_[i];
+        if (resource == exclude || resource->isOwned())
+            continue;
+        if (hasResolvedSource(*resource) && resource->ownerDevice.deviceName == deviceName)
             return true;
+    }
     return false;
+}
+
+String ResourcesManager::topicFor(const String &deviceName, const String &resourceName,
+                                  const char *suffix) const
+{
+    String topic = deviceName + ResourcesPath + "/" + resourceName;
+    if (suffix != nullptr && suffix[0] != '\0')
+    {
+        topic += '/';
+        topic += suffix;
+    }
+    return topic;
+}
+
+String ResourcesManager::topicFor(const NetResource &resource, const char *suffix) const
+{
+    return topicFor(resource.ownerDevice.deviceName, resource.name, suffix);
+}
+
+String ResourcesManager::manifestTopicFor(const String &deviceName) const
+{
+    return deviceName + ResourcesPath;
+}
+
+String ResourcesManager::ingressTopicFor(const NetResource &resource, const String &deviceName,
+                                         const String &resourceName) const
+{
+    if (!validSegment(deviceName) || !validSegment(resourceName))
+        return String();
+
+    if (resource.kind == NetResourceType::VALUE)
+    {
+        // Remote values listen to their owner. Managed values only listen when
+        // somebody else is allowed to write them.
+        if (!resource.isOwned())
+            return topicFor(deviceName, resourceName, "state");
+        const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+        if (value.access == AccessPolicy::READ_WRITE)
+            return topicFor(deviceName, resourceName, "set");
+        return String();
+    }
+
+    // Only the implementing device listens for invocations.
+    if (resource.isOwned())
+        return topicFor(deviceName, resourceName, "invoke");
+    return String();
+}
+
+String ResourcesManager::ingressTopicFor(const NetResource &resource) const
+{
+    return ingressTopicFor(resource, resource.ownerDevice.deviceName, resource.name);
 }
 
 void ResourcesManager::subscribeResource(const NetResource &resource, bool includeManifest)
 {
     if (subscriber_ == nullptr)
         return;
-    if (resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY)
-    {
-        if (includeManifest)
-            subscriber_->subscribe(resource.ownerDevice.deviceName + ResourcesPath);
-        if (resource.kind == NetResourceType::VALUE)
-            subscriber_->subscribe(topicFor(resource, "state"));
-    }
-    else if (resource.access == AccessPolicy::READ_WRITE)
-    {
-        subscriber_->subscribe(topicFor(resource,
-            resource.kind == NetResourceType::VALUE ? "set" : "invoke"));
-    }
+    if (includeManifest && !resource.isOwned() && hasResolvedSource(resource))
+        subscriber_->subscribe(manifestTopicFor(resource.ownerDevice.deviceName));
+    const String ingress = ingressTopicFor(resource);
+    if (ingress.length() != 0)
+        subscriber_->subscribe(ingress);
 }
 
 void ResourcesManager::unsubscribeResource(const NetResource &resource, bool removeManifest)
 {
     if (subscriber_ == nullptr)
         return;
-    if (resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY)
-    {
-        if (resource.kind == NetResourceType::VALUE)
-            subscriber_->unsubscribe(topicFor(resource, "state"));
-        if (removeManifest)
-            subscriber_->unsubscribe(resource.ownerDevice.deviceName + ResourcesPath);
-    }
-    else if (resource.access == AccessPolicy::READ_WRITE)
-    {
-        subscriber_->unsubscribe(topicFor(resource,
-            resource.kind == NetResourceType::VALUE ? "set" : "invoke"));
-    }
+    const String ingress = ingressTopicFor(resource);
+    if (ingress.length() != 0)
+        subscriber_->unsubscribe(ingress);
+    if (removeManifest && !resource.isOwned() && hasResolvedSource(resource))
+        subscriber_->unsubscribe(manifestTopicFor(resource.ownerDevice.deviceName));
 }
 
 void ResourcesManager::subscribeAll()
@@ -100,9 +207,11 @@ void ResourcesManager::subscribeAll()
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
-        bool includeManifest = resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY;
+        // One manifest subscription per remote device: claim it for the first
+        // resource that names that owner.
+        bool includeManifest = !resource.isOwned() && hasResolvedSource(resource);
         for (int j = 0; includeManifest && j < i; ++j)
-            if (resources_[j]->authority == ResourceAuthority::EXTERNAL_AUTHORITY &&
+            if (!resources_[j]->isOwned() && hasResolvedSource(*resources_[j]) &&
                 resources_[j]->ownerDevice.deviceName == resource.ownerDevice.deviceName)
                 includeManifest = false;
         subscribeResource(resource, includeManifest);
@@ -114,19 +223,11 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
-        if (resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY)
-        {
-            if (topicFilter == resource.ownerDevice.deviceName + ResourcesPath ||
-                (resource.kind == NetResourceType::VALUE &&
-                 topicFilter == topicFor(resource, "state")))
-                return true;
-        }
-        else if (resource.access == AccessPolicy::READ_WRITE &&
-                 topicFilter == topicFor(resource,
-                     resource.kind == NetResourceType::VALUE ? "set" : "invoke"))
-        {
+        if (ingressTopicFor(resource) == topicFilter && topicFilter.length() != 0)
             return true;
-        }
+        if (!resource.isOwned() && hasResolvedSource(resource) &&
+            manifestTopicFor(resource.ownerDevice.deviceName) == topicFilter)
+            return true;
     }
     return false;
 }
@@ -142,49 +243,88 @@ NetResource *ResourcesManager::findResource(const String &deviceName, const Stri
     return nullptr;
 }
 
+// Unlike findResource(), this cannot be fooled by `self` appearing first.
+bool ResourcesManager::addressTakenByOther(const String &deviceName, const String &name,
+                                           const NetResource *self) const
+{
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource *resource = resources_[i];
+        if (resource != self && resource->ownerDevice.deviceName == deviceName &&
+            resource->name == name)
+            return true;
+    }
+    return false;
+}
+
 bool ResourcesManager::bindResource(NetResource *resource)
 {
-    LOG("RM", "Binding resource '%s' for device '%s'", resource->name.c_str(),
-        resource->ownerDevice.deviceName.c_str());
     if (resource == nullptr || resource->resourceManager != nullptr ||
-        resourceCount_ >= MaxResources || !validSegment(resource->name))
+        resourceCount_ >= MaxResources)
         return false;
+    if (!validSegment(resource->name) && !(!resource->isOwned() && resource->name.length() == 0))
+    {
+        LOG_ERROR("RM", "Cannot bind resource '%s': invalid name", resource->name.c_str());
+        return false;
+    }
+    if (resource->kind == NetResourceType::ACTION &&
+        !validActionSchema(*static_cast<NetActionResource *>(resource)))
+    {
+        LOG_ERROR("RM", "Cannot bind action '%s': invalid argument schema", resource->name.c_str());
+        return false;
+    }
 
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
-    String ownerName = resource->ownerDevice.deviceName;
-    if (resource->authority == ResourceAuthority::HAS_AUTHORITY)
+    if (resource->isOwned())
     {
-        if (!validSegment(thisDevice) || (ownerName.length() != 0 && ownerName != thisDevice))
-           {
-            LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': invalid owner name.",
-                resource->name.c_str(), ownerName.c_str());
-           }
-        ownerName = thisDevice;
+        // A managed resource is declared without an owner and adopts this
+        // device at bind time.
+        const String &thisDevice = gDeviceIdentity.getDeviceName();
+        if (!validSegment(thisDevice))
+        {
+            LOG_ERROR("RM", "Cannot bind resource '%s': invalid local device name",
+                      resource->name.c_str());
+            return false;
+        }
+        const String &declaredOwner = resource->ownerDevice.deviceName;
+        if (declaredOwner.length() != 0 && declaredOwner != thisDevice)
+        {
+            LOG_ERROR("RM", "Cannot bind managed resource '%s': declared owner '%s' is not this device",
+                      resource->name.c_str(), declaredOwner.c_str());
+            return false;
+        }
+        resource->ownerDevice.deviceName = thisDevice;
+        gDeviceIdentity.lockAddress();
     }
-    else if (!validSegment(ownerName) || ownerName == thisDevice || ownerName == "all")
+    else if (hasResolvedSource(*resource) &&
+             resource->ownerDevice.deviceName == gDeviceIdentity.getDeviceName())
     {
-        {
-            LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': invalid owner name.",
-                resource->name.c_str(), ownerName.c_str());
-        }
+        LOG_ERROR("RM", "Cannot bind remote resource '%s': it points at this device",
+                  resource->name.c_str());
+        return false;
     }
-    if (findResource(ownerName, resource->name) != nullptr)
-        {
-            LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': duplicate name.",
-                resource->name.c_str(), ownerName.c_str());
-        }
-    const bool firstFromOwner = resource->authority == ResourceAuthority::EXTERNAL_AUTHORITY &&
-                                !hasOtherDeviceResource(ownerName);
-    resource->ownerDevice.deviceName = ownerName;
-    gDeviceIdentity.lockAddress();
+
+    // An unconfigured remote resource has no logical address yet, so it cannot
+    // collide with anything.
+    if (hasResolvedSource(*resource) &&
+        findResource(resource->ownerDevice.deviceName, resource->name) != nullptr)
+    {
+        LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': already bound",
+                  resource->name.c_str(), resource->ownerDevice.deviceName.c_str());
+        return false;
+    }
+
+    const bool firstFromOwner = !resource->isOwned() && hasResolvedSource(*resource) &&
+                                !remoteOwnerInUse(resource->ownerDevice.deviceName, resource);
     resource->resourceManager = this;
     resources_[resourceCount_++] = resource;
-    LOG("RM", "Resource '%s' bound to device '%s'", resource->name.c_str(), ownerName.c_str());
+    LOG("RM", "Bound %s '%s' (%s) for device '%s'", kindName(resource->kind),
+        resource->name.c_str(), resource->isOwned() ? "managed" : "remote",
+        resource->ownerDevice.deviceName.c_str());
+
     subscribeResource(*resource, firstFromOwner);
-    if (resource->authority == ResourceAuthority::HAS_AUTHORITY)
+
+    if (resource->isOwned())
     {
-        if (resource->kind == NetResourceType::ACTION)
-            static_cast<NetActionResource *>(resource)->freshness = ResourceFreshness::FRESH;
         publishManifest();
         if (resource->kind == NetResourceType::VALUE)
             publishState(*static_cast<NetValueResource *>(resource));
@@ -201,30 +341,78 @@ void ResourcesManager::unbindResource(NetResource *resource)
         if (resources_[i] != resource)
             continue;
 
-        const bool owned = resource->authority == ResourceAuthority::HAS_AUTHORITY;
-        if (owned && resource->kind == NetResourceType::VALUE && publisher_ != nullptr)
+        const bool managed = resource->isOwned();
+        // Drop the retained state this device put on the broker.
+        if (managed && resource->kind == NetResourceType::VALUE && publisher_ != nullptr &&
+            static_cast<NetValueResource *>(resource)->hasAuthoritativeValue() &&
+            hasResolvedSource(*resource))
             publisher_->publish(topicFor(*resource, "state"), String(), true);
 
         for (int j = i; j < resourceCount_ - 1; ++j)
             resources_[j] = resources_[j + 1];
         resources_[--resourceCount_] = nullptr;
         resource->resourceManager = nullptr;
-        unsubscribeResource(*resource, !hasOtherDeviceResource(resource->ownerDevice.deviceName));
-        if (owned)
+
+        // Now that it is out of the registry, "last one for this owner" is an
+        // honest question to ask.
+        unsubscribeResource(*resource,
+                            !remoteOwnerInUse(resource->ownerDevice.deviceName, resource));
+        if (managed)
             publishManifest();
         return;
     }
 }
 
-String ResourcesManager::topicFor(const NetResource &resource, const char *suffix) const
+void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
+                                           const String &oldName)
 {
-    String topic = resource.ownerDevice.deviceName + ResourcesPath + "/" + resource.name;
-    if (suffix != nullptr && suffix[0] != '\0')
+    if (resource.resourceManager != this || resource.isOwned())
+        return;
+
+    const String &newOwner = resource.ownerDevice.deviceName;
+    const bool ownerChanged = oldOwner.deviceName != newOwner;
+
+    if (subscriber_ != nullptr)
     {
-        topic += '/';
-        topic += suffix;
+        const String oldIngress = ingressTopicFor(resource, oldOwner.deviceName, oldName);
+        if (oldIngress.length() != 0)
+            subscriber_->unsubscribe(oldIngress);
+        // The resource already carries the new owner, so it no longer counts
+        // towards the old one.
+        if (ownerChanged && validSegment(oldOwner.deviceName) &&
+            !remoteOwnerInUse(oldOwner.deviceName, nullptr))
+            subscriber_->unsubscribe(manifestTopicFor(oldOwner.deviceName));
     }
-    return topic;
+
+    if (!hasResolvedSource(resource))
+        return; // Registered, but pointed at nothing subscribable.
+
+    // setSource() cannot fail, so a target that would make routing ambiguous is
+    // refused by detaching the resource instead: with no owner it matches no
+    // topic, stays registered, and can be pointed somewhere valid later. Left
+    // addressable, it could shadow the resource that legitimately holds that
+    // address, since ingress routes to the first match.
+    const char *refusal = nullptr;
+    if (newOwner == gDeviceIdentity.getDeviceName())
+        refusal = "it names this device";
+    else if (addressTakenByOther(newOwner, resource.name, &resource))
+        refusal = "another bound resource already represents it";
+    if (refusal != nullptr)
+    {
+        LOG_ERROR("RM", "Refused source '%s/%s' for remote resource: %s",
+                  newOwner.c_str(), resource.name.c_str(), refusal);
+        resource.ownerDevice.deviceName = String();
+        return;
+    }
+
+    if (subscriber_ != nullptr)
+    {
+        if (ownerChanged && !remoteOwnerInUse(newOwner, &resource))
+            subscriber_->subscribe(manifestTopicFor(newOwner));
+        const String ingress = ingressTopicFor(resource);
+        if (ingress.length() != 0)
+            subscriber_->subscribe(ingress);
+    }
 }
 
 bool ResourcesManager::publishManifest()
@@ -234,17 +422,33 @@ bool ResourcesManager::publishManifest()
         return false;
 
     DynamicJsonDocument doc(MaxManifestLength);
-    doc["version"] = 1;
+    doc["version"] = ManifestVersion;
     JsonArray items = doc.createNestedArray("resources");
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
-        if (resource.authority != ResourceAuthority::HAS_AUTHORITY)
-            continue;
+        if (!resource.isOwned())
+            continue; // Only what this device implements.
         JsonObject item = items.createNestedObject();
         item["name"] = resource.name;
         item["kind"] = kindName(resource.kind);
-        item["access"] = accessName(resource.access);
+        if (resource.kind == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item["access"] = accessName(value.access);
+            item["type"] = valueTypeName(value.valueType);
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item.createNestedArray("arguments");
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonObject argument = args.createNestedObject();
+                argument["name"] = action.argument(a).name;
+                argument["type"] = valueTypeName(action.argument(a).type);
+            }
+        }
     }
     if (doc.overflowed())
         return false;
@@ -257,18 +461,12 @@ bool ResourcesManager::publishManifest()
 
 bool ResourcesManager::publishState(const NetValueResource &resource)
 {
-    if (publisher_ == nullptr || resource.authority != ResourceAuthority::HAS_AUTHORITY ||
-        resource.freshness != ResourceFreshness::FRESH)
+    if (publisher_ == nullptr || !resource.isOwned() || !resource.hasAuthoritativeValue() ||
+        !hasResolvedSource(resource))
         return false;
-
-    DynamicJsonDocument doc(resource.value.length() + 128);
-    doc["value"] = resource.value;
-    if (doc.overflowed())
-        return false;
-    String payload;
-    if (serializeJson(doc, payload) == 0)
-        return false;
-    return publisher_->publish(topicFor(resource, "state"), payload, true);
+    // The wire format is the codec's own representation: "23.5", "true", raw
+    // string. The declared type is already in the manifest.
+    return publisher_->publish(topicFor(resource, "state"), resource.encodedValue(), true);
 }
 
 bool ResourcesManager::announceAll()
@@ -279,71 +477,108 @@ bool ResourcesManager::announceAll()
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resource->authority == ResourceAuthority::HAS_AUTHORITY && resource->kind == NetResourceType::VALUE)
-        {
-            NetValueResource &value = *static_cast<NetValueResource *>(resource);
-            if (value.freshness == ResourceFreshness::FRESH && !publishState(value))
-                published = false;
-        }
+        if (!resource->isOwned() || resource->kind != NetResourceType::VALUE)
+            continue;
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (value.hasAuthoritativeValue() && !publishState(value))
+            published = false;
     }
     return published;
 }
 
-bool ResourcesManager::setValue(NetValueResource &resource, const String &newValue)
+bool ResourcesManager::setValue(NetValueResource &resource, const String &encoded)
 {
-    // LOG("RM", " Setting value of resource '%s' to '%s'", resource.name.c_str(), newValue.c_str());
-    // Serial.printf("has pub = %s; has sub = %s, device = %s\n", publisher_ != nullptr ? "true" : "false", subscriber_ != nullptr ? "true" : "false", resource.ownerDevice.deviceName.c_str());
-    if (resource.resourceManager != this || newValue.length() > MaxValueLength)
+    if (resource.resourceManager != this || encoded.length() > MaxValueLength)
         return false;
-    if (resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY)
+
+    if (!resource.isOwned())
     {
-        if (resource.access != AccessPolicy::READ_WRITE || publisher_ == nullptr)
+        // A remote write only counts once the transport took it; otherwise the
+        // caller would start an optimistic window over a request nobody sent.
+        if (resource.access != AccessPolicy::READ_WRITE || publisher_ == nullptr ||
+            !hasResolvedSource(resource))
             return false;
-        return publisher_->publish(topicFor(resource, "set"), newValue, false);
+        return publisher_->publish(topicFor(resource, "set"), encoded, false);
     }
 
-    resource.value = newValue;
-    resource.freshness = ResourceFreshness::FRESH;
-    publishState(resource); // An owned update remains valid if the transport is offline.
+    // Local truth does not depend on the network: publish best-effort and let
+    // the caller commit regardless. announceAll() retries after a reconnect.
+    if (publisher_ != nullptr && hasResolvedSource(resource))
+        publisher_->publish(topicFor(resource, "state"), encoded, true);
     return true;
 }
 
 bool ResourcesManager::invoke(NetActionResource &resource, const String &payload)
 {
-    if (resource.resourceManager != this || resource.access != AccessPolicy::READ_WRITE ||
-        payload.length() > MaxValueLength)
+    if (resource.resourceManager != this || payload.length() > MaxValueLength)
         return false;
-    if (resource.authority == ResourceAuthority::EXTERNAL_AUTHORITY)
-        return publisher_ != nullptr && publisher_->publish(topicFor(resource, "invoke"), payload, false);
+    // Only a remote action is dispatched; a managed one is executed instead.
+    if (resource.isOwned() || !hasResolvedSource(resource) || publisher_ == nullptr)
+        return false;
+    return publisher_->publish(topicFor(resource, "invoke"), payload, false);
+}
 
-    NetActionResource::InvokeHandler handler = resource.onInvoke != nullptr
-                                                   ? resource.onInvoke : actionHandler_;
-    return handler != nullptr && handler(resource, payload);
+ActionResult ResourcesManager::executeAction(NetActionResource &action, const String &canonicalPayload)
+{
+    if (!action.isOwned())
+        return {false, String("not implemented by this device")};
+    if (canonicalPayload.length() > MaxValueLength)
+        return {false, String("payload too large")};
+
+    if (action.argumentCount() == 0)
+    {
+        const String trimmed = canonicalPayload;
+        if (trimmed.length() != 0 && trimmed != "{}")
+            return {false, String("action takes no arguments")};
+        return action.execute(canonicalPayload);
+    }
+
+    DynamicJsonDocument doc(canonicalPayload.length() + 256);
+    if (deserializeJson(doc, canonicalPayload) || !doc.is<JsonObject>())
+        return {false, String("payload is not a JSON object")};
+    JsonObjectConst arguments = doc.as<JsonObjectConst>();
+
+    for (size_t i = 0; i < action.argumentCount(); ++i)
+    {
+        const ActionArgMetadata &meta = action.argument(i);
+        JsonVariantConst value = arguments[meta.name];
+        if (value.isNull())
+            return {false, String("missing argument '") + meta.name + "'"};
+        if (!argumentTypeMatches(meta.type, value))
+            return {false, String("argument '") + meta.name + "' has the wrong type"};
+    }
+    for (JsonPairConst entry : arguments)
+    {
+        if (!schemaHasArgument(action, entry.key().c_str()))
+            return {false, String("unknown argument '") + entry.key().c_str() + "'"};
+    }
+
+    return action.execute(canonicalPayload);
 }
 
 bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const String &message)
 {
     if (deviceName == gDeviceIdentity.getDeviceName() || message.length() > MaxManifestLength)
         return false;
+
+    // An empty retained manifest means the device withdrew its declarations.
     if (message.length() == 0)
     {
         bool matched = false;
         for (int i = 0; i < resourceCount_; ++i)
         {
             NetResource *resource = resources_[i];
-            if (resource->authority != ResourceAuthority::EXTERNAL_AUTHORITY ||
-                resource->ownerDevice.deviceName != deviceName)
+            if (resource->isOwned() || resource->ownerDevice.deviceName != deviceName)
                 continue;
             matched = true;
-            if (resource->kind == NetResourceType::ACTION)
-                static_cast<NetActionResource *>(resource)->freshness = ResourceFreshness::STALE;
-            else
+            if (resource->kind == NetResourceType::VALUE)
                 static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
         }
         if (manifestHandler_ != nullptr)
             manifestHandler_(deviceName, message);
         return matched || manifestHandler_ != nullptr;
     }
+
     DynamicJsonDocument doc(MaxManifestLength);
     if (deserializeJson(doc, message) || !doc["resources"].is<JsonArray>())
         return false;
@@ -353,30 +588,41 @@ bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resource->authority != ResourceAuthority::EXTERNAL_AUTHORITY || resource->ownerDevice.deviceName != deviceName)
+        if (resource->isOwned() || resource->ownerDevice.deviceName != deviceName)
             continue;
         matched = true;
-        bool found = false;
+
+        JsonObject declaration;
         for (JsonObject item : items)
         {
-            if (item["name"].as<String>() != resource->name ||
-                item["kind"].as<String>() != kindName(resource->kind))
-                continue;
-            const String access = item["access"].as<String>();
-            if (access == "read")
-                resource->access = AccessPolicy::READ;
-            else if (access == "read_write")
-                resource->access = AccessPolicy::READ_WRITE;
-            else
-                continue;
-            found = true;
-            break;
+            if (item["name"].as<String>() == resource->name)
+            {
+                declaration = item;
+                break;
+            }
         }
-        if (resource->kind == NetResourceType::ACTION)
-            static_cast<NetActionResource *>(resource)->freshness =
-                found ? ResourceFreshness::FRESH : ResourceFreshness::STALE;
-        else if (!found)
-            static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
+
+        // The local declaration is intentional and is never rewritten from a
+        // remote manifest; a disagreement marks the source unusable instead.
+        bool compatible = !declaration.isNull() &&
+                          declaration["kind"].as<String>() == kindName(resource->kind);
+        if (compatible && resource->kind == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = *static_cast<NetValueResource *>(resource);
+            if (declaration["type"].as<String>() != valueTypeName(value.valueType))
+                compatible = false;
+            else if (value.access == AccessPolicy::READ_WRITE &&
+                     declaration["access"].as<String>() != accessName(AccessPolicy::READ_WRITE))
+                compatible = false;
+        }
+
+        if (!compatible)
+        {
+            LOG_WARNING("RM", "Source '%s/%s' is missing or incompatible with the local declaration",
+                        deviceName.c_str(), resource->name.c_str());
+            if (resource->kind == NetResourceType::VALUE)
+                static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
+        }
     }
     if (manifestHandler_ != nullptr)
         manifestHandler_(deviceName, message);
@@ -385,12 +631,10 @@ bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
 
 bool ResourcesManager::handleIngressMessage(const String &topic, const String &message)
 {
-    LOG("RM", "Handling ingress message on topic '%s' with payload '%s'", topic.c_str(), message.c_str());
     const int firstSlash = topic.indexOf('/');
     if (firstSlash <= 0)
         return false;
     const String deviceName = topic.substring(0, firstSlash);
-    LOG("RM", "Device name extracted from topic: '%s'", deviceName.c_str());
     if (!validSegment(deviceName))
         return false;
     const String path = topic.substring(firstSlash + 1);
@@ -412,57 +656,49 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     if (resource == nullptr)
         return false;
 
-    if (operation == "state" && resource->kind == NetResourceType::VALUE &&
-        resource->authority == ResourceAuthority::EXTERNAL_AUTHORITY)
+    // Owner state for a value this device only observes.
+    if (operation == "state" && resource->kind == NetResourceType::VALUE && !resource->isOwned())
     {
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (message.length() == 0)
         {
-            NetValueResource &value = *static_cast<NetValueResource *>(resource);
+            // The retained state was deleted. The last known value stays
+            // readable; only setSource() discards it, because only that changes
+            // what the resource represents.
             value.freshness = ResourceFreshness::STALE;
-            if (value.onState != nullptr)
-                value.onState(value);
             return true;
         }
-        if (message.length() > MaxValueLength + 128)
+        if (message.length() > MaxValueLength)
             return false;
-        DynamicJsonDocument doc(message.length() + 128);
-        if (deserializeJson(doc, message) || !doc["value"].is<const char *>())
-            return false;
-        const String incomingValue = doc["value"].as<String>();
-        if (incomingValue.length() > MaxValueLength)
-            return false;
+        // The decode belongs to NetValue<T>/NetCodec<T>, never here.
+        return value.applyEncodedOwnerValue(message);
+    }
+
+    // A write request aimed at a value this device implements.
+    if (operation == "set" && resource->kind == NetResourceType::VALUE && resource->isOwned())
+    {
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        value.value = incomingValue;
-        value.freshness = ResourceFreshness::FRESH;
-        if (value.onState != nullptr)
-            value.onState(value);
+        if (value.access != AccessPolicy::READ_WRITE || message.length() > MaxValueLength)
+            return false;
+        if (!value.applyEncodedWrite(message))
+            return false; // Rejected or undecodable: state is unchanged, so say nothing.
+        publishState(value);
         return true;
     }
 
-    if (operation == "set" && resource->kind == NetResourceType::VALUE &&
-        resource->authority == ResourceAuthority::HAS_AUTHORITY &&
-        resource->access == AccessPolicy::READ_WRITE)
+    // An invocation of an action this device implements.
+    if (operation == "invoke" && resource->kind == NetResourceType::ACTION && resource->isOwned())
     {
-        NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        NetValueResource::WriteHandler handler = value.onWrite != nullptr
-                                                    ? value.onWrite : valueHandler_;
-        return handler != nullptr && message.length() <= MaxValueLength &&
-               handler(value, message) && setValue(value, message);
+        // Raw MQTT has nowhere to put a result; correlated callers use
+        // executeAction() directly and keep it.
+        const ActionResult result =
+            executeAction(*static_cast<NetActionResource *>(resource), message);
+        if (!result.success)
+            LOG_WARNING("RM", "Action '%s' failed: %s", name.c_str(), result.result.c_str());
+        return result.success;
     }
-
-    if (operation == "invoke" && resource->kind == NetResourceType::ACTION &&
-        resource->authority == ResourceAuthority::HAS_AUTHORITY)
-        return invoke(*static_cast<NetActionResource *>(resource), message);
 
     return false;
-}
-
-ResourcesManager::triggerManagedActionCallback(String action, String payload, NetResource *resource)
-{
-    if (ownedResoucesActionCallback_ != nullptr)
-    {
-        ownedResoucesActionCallback_(resource, action, payload);
-    }
 }
 
 #endif // NM_ENABLE_RESOURCES

@@ -97,15 +97,21 @@ namespace NetCodecDetail
     // and looking like a remote update.
     inline String encodeReal(double value, int maxPrecision, bool narrowToFloat)
     {
+        // %.17g needs at most 24 characters. GCC cannot see that through a
+        // runtime precision, so the length is checked rather than trusted.
         char buffer[40];
         for (int precision = 6; precision < maxPrecision; ++precision)
         {
-            snprintf(buffer, sizeof(buffer), "%.*g", precision, value);
+            const int written = snprintf(buffer, sizeof(buffer), "%.*g", precision, value);
+            if (written < 0 || written >= (int)sizeof(buffer))
+                break;
             const double parsed = strtod(buffer, nullptr);
             if (narrowToFloat ? ((float)parsed == (float)value) : (parsed == value))
                 return String(buffer);
         }
-        snprintf(buffer, sizeof(buffer), "%.*g", maxPrecision, value);
+        const int written = snprintf(buffer, sizeof(buffer), "%.*g", maxPrecision, value);
+        if (written < 0 || written >= (int)sizeof(buffer))
+            return String();
         return String(buffer);
     }
 }

@@ -9,14 +9,18 @@
 // is and what it currently points at are separate questions.
 void NetResource::setRemoteSource(const String &deviceName, const String &resourceName)
 {
+    // Captured before the swap: the Manager still has the old source subscribed
+    // and cannot reconstruct those topics once they are overwritten.
+    const NetDeviceIdentity oldOwner = this->ownerDevice;
+    const String oldName = this->name;
+
     this->ownerDevice = NetDeviceIdentity(deviceName);
     this->name = resourceName;
     resetRemoteState();
 #if NM_ENABLE_RESOURCES
     if (resourceManager != nullptr)
     {
-        // The Manager still has the old source subscribed.
-        resourceManager->notifySourceChanged(*this);
+        resourceManager->notifySourceChanged(*this, oldOwner, oldName);
     }
 #endif
 }

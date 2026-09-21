@@ -20,6 +20,16 @@ public:
     virtual bool unsubscribe(const String &topicFilter) = 0;
 };
 
+/// @brief Registration, routing, manifests, subscriptions and reconnect
+/// behaviour for declared resources. Deliberately non-template: it only ever
+/// sees NetResource, NetValueResource, NetActionResource and String. Everything
+/// type-specific lives in NetValue<T>, NetCodec<T> and ManagedState<T>.
+///
+/// Topic vocabulary:
+///   <device>/resources                  manifest, retained
+///   <device>/resources/<name>/state     value state, retained
+///   <device>/resources/<name>/set       write request, transient
+///   <device>/resources/<name>/invoke    action request, transient
 class ResourcesManager
 {
 public:
@@ -29,12 +39,14 @@ public:
     void setPublisher(ResourcePublisher *publisher);
     void setSubscriber(ResourceSubscriber *subscriber);
 
-    // Project API: resources remain owned by the project and must outlive their binding.
+    // Project API: resources remain owned by the project and must outlive their
+    // binding. A Remote resource may be bound before it has a source; it is
+    // registered now and subscribed when setSource() supplies one.
     bool bindResource(NetResource *resource);
     void unbindResource(NetResource *resource);
 
     // Call after transport reconnection to republish the retained manifest and
-    // all known values owned by this device. Binding one also announces it.
+    // every managed value that has authoritative state. Binding one also announces it.
     bool announceAll();
     // Rebuild exact subscriptions after a transport reconnects.
     void subscribeAll();
@@ -44,46 +56,63 @@ public:
     // Returns true when a known resource accepted the message.
     bool handleIngressMessage(const String &topic, const String &message);
 
-    // Optional fallback handlers. Per-resource handlers take precedence.
-    void setValueHandler(NetValueResource::WriteHandler handler) { valueHandler_ = handler; }
-    void setActionHandler(NetActionResource::InvokeHandler handler) { actionHandler_ = handler; }
     // Called for valid manifests from other devices, including retained deletion
-    // (an empty payload). Discovery mode makes all such manifests visible.
+    // (an empty payload).
     using ManifestHandler = void (*)(const String &deviceName, const String &manifest);
     void setManifestHandler(ManifestHandler handler) { manifestHandler_ = handler; }
-    void onResourcesActionsRequested(void (*callback)(NetResource &resource,const String &action, const String &payload)) { ownedResoucesActionCallback_ = callback; }
+
+    /// @brief Runs a locally implemented action and hands back what it returned.
+    /// Raw MQTT ingress uses this and drops the result; a correlated caller
+    /// (controlled console / MQTTP) uses the same path and keeps it, so action
+    /// execution is never implemented twice.
+    ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
 
 private:
+    friend struct NetResource;
     friend struct NetValueResource;
     friend struct NetActionResource;
+
+    // Resource methods delegate here. A managed write keeps local truth even if
+    // publication fails; a remote request succeeds only when it was transported.
+    bool setValue(NetValueResource &resource, const String &encoded);
+    bool invoke(NetActionResource &resource, const String &payload);
+
+    /// @brief A bound Remote resource was pointed at a different source. The old
+    /// owner and name arrive explicitly because the resource has already been
+    /// retargeted and its previous topics can no longer be reconstructed.
+    void notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
+                             const String &oldName);
+
+    static bool validSegment(const String &segment);
+    static bool validActionSchema(const NetActionResource &action);
+    NetResource *findResource(const String &deviceName, const String &name) const;
+    bool addressTakenByOther(const String &deviceName, const String &name,
+                             const NetResource *self) const;
+
+    // Topic helpers.
+    String topicFor(const NetResource &resource, const char *suffix) const;
+    String topicFor(const String &deviceName, const String &resourceName, const char *suffix) const;
+    String manifestTopicFor(const String &deviceName) const;
+    // The one ingress topic a resource needs, or empty when it needs none
+    // (ManagedSensor, RemoteAction, or a Remote resource with no source yet).
+    String ingressTopicFor(const NetResource &resource) const;
+    String ingressTopicFor(const NetResource &resource, const String &deviceName,
+                           const String &resourceName) const;
+    static bool hasResolvedSource(const NetResource &resource);
+    // Manifests are subscribed once per remote device, not once per resource.
+    bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
+
+    bool publishManifest();
+    bool publishState(const NetValueResource &resource);
+    bool applyOtherDeviceManifest(const String &deviceName, const String &message);
+    void subscribeResource(const NetResource &resource, bool includeManifest);
+    void unsubscribeResource(const NetResource &resource, bool removeManifest);
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;
     ResourcePublisher *publisher_ = nullptr;   // Non-owning.
     ResourceSubscriber *subscriber_ = nullptr; // Non-owning.
-    NetValueResource::WriteHandler valueHandler_ = nullptr;
-    NetActionResource::InvokeHandler actionHandler_ = nullptr;
     ManifestHandler manifestHandler_ = nullptr;
-    // Called when a owned resource is requested to perform an action.
-    // This gives user two ways to handle the request: 
-    // 1. Handle the action in the resource's onInvoke/onWrite callback.
-    // 2. A global callback that is called for all owned resources.
-    void (*ownedResoucesActionCallback_)(NetResource &resource,const String &action, const String &payload) = nullptr;
-    // Resource methods delegate here. Local state changes remain committed if
-    // publication fails; announceAll() can retry them. Remote requests succeed
-    // only when accepted for publication.
-    bool setValue(NetValueResource &resource, const String &newValue);
-    bool invoke(NetActionResource &resource, const String &payload);
-
-    static bool validSegment(const String &segment);
-    NetResource *findResource(const String &deviceName, const String &name) const;
-    String topicFor(const NetResource &resource, const char *suffix) const;
-    bool publishManifest();
-    bool publishState(const NetValueResource &resource);
-    bool applyOtherDeviceManifest(const String &deviceName, const String &message);
-    bool hasOtherDeviceResource(const String &deviceName) const;
-    void subscribeResource(const NetResource &resource, bool includeManifest);
-    void unsubscribeResource(const NetResource &resource, bool removeManifest);
 };
 
 extern ResourcesManager gResourcesManager;
