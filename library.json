@@ -3,5 +3,14 @@
   "version": "0.2.0",
   "frameworks": ["arduino"],
   "platforms": ["espressif32"],
-  "dependencies": [{"name": "ArduinoJson", "version": "^6.21.3"}]
+  "dependencies": [
+    {"owner": "bblanchon", "name": "ArduinoJson", "version": "^6.21.3"}
+  ],
+  "export": {"exclude": ["Legacy/**", "FailedAttempt/**", "new/**", "tests/**"]},
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "libLDFMode": "chain+",
+    "flags": "-I$PROJECT_DIR/include"
+  }
 }
