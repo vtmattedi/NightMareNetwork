@@ -45,15 +45,27 @@ struct NetDeviceIdentity
 /// @return A full topic string in the format "<device>/resources[/<name>/{state,set,invoke}]" based on the provided parameters.
 String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resourceName, NetResourceType resourceType, const String &action = String());
 
-/* Value resources are layered as:
+/* Resources are layered as:
  *
  *   application            T
- *                          |  NetValue<T>
+ *                          |  NetValue<T> / NetAction<T>
  *                          v  NetCodec<T>
  *   ResourcesManager / MQTT   String
  *
- * NetResource and NetValueResource are non-template on purpose: routing,
- * manifests, subscriptions and the transport never see T.
+ * NetResource, NetValueResource and NetActionResource are non-template on
+ * purpose: routing, manifests, subscriptions and the transport never see T.
+ *
+ *   NetResource
+ *   |- NetValueResource            non-template boundary
+ *   |  '- NetValue<T>              typed implementation
+ *   |     |- ManagedSensor<T>      local, READ
+ *   |     |- RemoteSensor<T>       remote, READ, STRICT
+ *   |     |- ManagedState<T>       local, READ_WRITE
+ *   |     '- RemoteState<T>        remote, READ_WRITE, OPTIMISTIC
+ *   '- NetActionResource           non-template boundary
+ *      '- NetAction<T>             typed payload implementation
+ *         |- ManagedAction<T>      this device implements it
+ *         '- RemoteAction<T>       another device implements it
  */
 
 struct NetResource
@@ -80,6 +92,7 @@ private:
     ResourcesManager *resourceManager = nullptr; // Non-owning; set by bindResource().
     friend class ResourcesManager;
     friend struct NetValueResource;
+    friend struct NetActionResource;
 };
 
 enum class NetSyncStrategy : uint8_t
@@ -93,9 +106,9 @@ enum class NetSyncStrategy : uint8_t
 /// machine. The typed container is NetValue<T>.
 struct NetValueResource : public NetResource
 {
-    // The wire format is String, so these never need to know T.
+    // The wire format is String, so this never needs to know T. The
+    // application-facing update callback is typed and lives on NetValue<T>.
     using WriteHandler = bool (*)(NetValueResource &resource, const String &requestedValue);
-    using UpdateHandler = void (*)(NetValueResource &resource);
 
     NetValueResource(const String &resourceName, const String &resourceOwner,
                      AccessPolicy resourceAccess, NetValueType resourceValueType)
@@ -108,7 +121,6 @@ struct NetValueResource : public NetResource
     NetValueType valueType = NetValueType::STRING; // Manifest metadata, from NetCodec<T>::Type.
 
     WriteHandler onWrite = nullptr; // Owner side: accept or reject a /set request.
-    UpdateHandler onUpdate = nullptr; // Owner side: local state bookkeeping.
 
     NetSyncStrategy syncStrategy = NetSyncStrategy::OPTIMISTIC;
     uint32_t optimisticWindowMs = 5000; // How long a local write shadows owner state.
@@ -133,7 +145,9 @@ protected:
     void noteOwnerUpdate();
 
     bool hasAuthoritativeValue_ = false;
-    bool optimisticPending_ = false;
+    // Set by the first local write and never cleared: expiry is derived from
+    // millis() and lastWriteMs_, so no timer has to reset it.
+    bool hasOptimisticValue_ = false;
     uint32_t lastUpdateMs_ = 0;
     uint32_t lastWriteMs_ = 0;
 
@@ -157,7 +171,10 @@ struct NetValue : public NetValueResource
              AccessPolicy resourceAccess = AccessPolicy::READ)
         : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type) {}
 
-    // Fires when the effective value changes, not on every owner packet.
+    /// @brief Fires when the *effective* value changes, which is what the
+    /// application reads. It is not a "packet received" hook: an owner packet
+    /// that leaves getValue() unchanged, whether because it repeats the current
+    /// value or because an optimistic window is shadowing it, fires nothing.
     UpdateHandler onUpdate = nullptr;
 
     /// @brief The value the application should act on: the optimistic value
@@ -211,7 +228,7 @@ struct NetValue : public NetValueResource
 
     bool applyEncodedOwnerValue(const String &encoded) override
     {
-        T decoded;
+        T decoded = T();
         if (!NetCodec<T>::decode(encoded, decoded))
             return false;
         return applyOwnerValue(decoded);
@@ -226,4 +243,138 @@ private:
 
     T authoritativeValue_ = T();
     T optimisticValue_ = T();
+};
+
+/* The wrappers below only pick ownership, access and sync defaults. They add no
+ * fields and no value logic: NetValue<T> stays the implementation, and remains
+ * available directly for cases these four do not describe. */
+
+/// @brief Owned by this device, observe-only for everyone else.
+template <typename T>
+struct ManagedSensor : public NetValue<T>
+{
+    ManagedSensor(const String &resourceName)
+        : NetValue<T>(resourceName, AccessPolicy::READ) {}
+};
+
+/// @brief Owned by another device, observe-only. Reports owner state at all
+/// times: nothing local can write it, so there is nothing to be optimistic about.
+template <typename T>
+struct RemoteSensor : public NetValue<T>
+{
+    RemoteSensor(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetValue<T>(resourceName, owner, AccessPolicy::READ)
+    {
+        this->syncStrategy = NetSyncStrategy::STRICT;
+    }
+};
+
+/// @brief Owned by this device and writable by others.
+template <typename T>
+struct ManagedState : public NetValue<T>
+{
+    ManagedState(const String &resourceName)
+        : NetValue<T>(resourceName, AccessPolicy::READ_WRITE) {}
+};
+
+/// @brief Owned by another device and writable from here. A local write shows
+/// immediately and holds until the owner catches up or the window closes.
+template <typename T>
+struct RemoteState : public NetValue<T>
+{
+    RemoteState(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetValue<T>(resourceName, owner, AccessPolicy::READ_WRITE)
+    {
+        this->syncStrategy = NetSyncStrategy::OPTIMISTIC;
+    }
+};
+
+/// @brief Manager-facing half of an action. v1 is fire-and-forget: no results,
+/// no correlation ids, no retries. Those belong with the protocol rewrite.
+struct NetActionResource : public NetResource
+{
+    using InvokeHandler = bool (*)(NetActionResource &resource, const String &payload);
+
+    NetActionResource(const String &resourceName, const String &resourceOwner,
+                      NetValueType actionPayloadType)
+        : NetResource(resourceName, resourceOwner, NetResourceType::ACTION),
+          payloadType(actionPayloadType) {}
+    virtual ~NetActionResource() = default;
+
+    // An action exists to be invoked, so READ_WRITE is the meaningful default.
+    AccessPolicy access = AccessPolicy::READ_WRITE;
+    NetValueType payloadType = NetValueType::NONE; // Manifest metadata, from NetCodec<T>::Type.
+
+    ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
+    bool isStale() const { return freshness == ResourceFreshness::STALE; }
+
+    // Type-erasure boundary: Manager -> locally owned action.
+    virtual bool applyEncodedInvoke(const String &encoded) = 0;
+
+protected:
+    // Application -> remote owner.
+    bool dispatchInvoke(const String &encoded);
+
+    friend class ResourcesManager;
+};
+
+/// @brief The typed action. Converts the payload through NetCodec<T> and leaves
+/// the handler to ManagedAction<T>.
+template <typename T>
+struct NetAction : public NetActionResource
+{
+    /// @brief An action implemented by this device.
+    NetAction(const String &resourceName)
+        : NetActionResource(resourceName, String(), NetCodec<T>::Type) {}
+
+    /// @brief An action implemented by another device.
+    NetAction(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetActionResource(resourceName, owner.deviceName, NetCodec<T>::Type) {}
+
+    /// @brief Application intent: encode the payload and hand it to the transport.
+    bool invoke(const T &payload) { return dispatchInvoke(NetCodec<T>::encode(payload)); }
+
+    bool applyEncodedInvoke(const String &encoded) override
+    {
+        T payload = T();
+        if (!NetCodec<T>::decode(encoded, payload))
+            return false;
+        return handleDecodedInvoke(payload);
+    }
+
+protected:
+    /// @brief Where a decoded invoke lands. Only an implementing device has
+    /// something to run, so the default refuses.
+    virtual bool handleDecodedInvoke(const T &payload)
+    {
+        (void)payload;
+        return false;
+    }
+};
+
+/// @brief This device implements the action and runs it when invoked.
+template <typename T>
+struct ManagedAction : public NetAction<T>
+{
+    using Handler = bool (*)(ManagedAction<T> &action, const T &payload);
+
+    ManagedAction(const String &resourceName) : NetAction<T>(resourceName) {}
+
+    Handler onInvoke = nullptr;
+
+protected:
+    bool handleDecodedInvoke(const T &payload) override
+    {
+        if (onInvoke == nullptr)
+            return false;
+        return onInvoke(*this, payload);
+    }
+};
+
+/// @brief Another device implements the action; invoke() sends the request.
+template <typename T>
+struct RemoteAction : public NetAction<T>
+{
+    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetAction<T>(resourceName, owner) {}
 };

@@ -16,7 +16,14 @@ enum class NetValueType : uint8_t
     BOOLEAN,
     INTEGER,
     FLOAT,
-    STRUCT
+    STRUCT,
+    NONE // Appended last so the existing values keep their numbers.
+};
+
+/// @brief Payload marker for resources that carry nothing, so "no payload" is a
+/// type the codec understands rather than a String special case at every call site.
+struct NetNoArgs
+{
 };
 
 /// @brief Translates a value between its C++ type and the String used on the wire.
@@ -186,4 +193,15 @@ struct NetCodec<String>
         out = encoded;
         return true;
     }
+};
+
+template <>
+struct NetCodec<NetNoArgs>
+{
+    static constexpr NetValueType Type = NetValueType::NONE;
+
+    static String encode(const NetNoArgs &) { return String(); }
+
+    // Any payload decodes, including an empty one: there is nothing to read.
+    static bool decode(const String &, NetNoArgs &) { return true; }
 };
