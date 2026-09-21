@@ -183,6 +183,8 @@ struct NetCodec<T, typename std::enable_if<std::is_floating_point<T>::value>::ty
     }
 };
 
+/// An empty payload on the wire means "deleted / unavailable", so the empty
+/// String is not a value a resource can hold.
 template <>
 struct NetCodec<String>
 {
@@ -192,6 +194,8 @@ struct NetCodec<String>
 
     static bool decode(const String &encoded, String &out)
     {
+        if (encoded.length() == 0)
+            return false;
         out = encoded;
         return true;
     }

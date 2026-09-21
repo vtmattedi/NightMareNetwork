@@ -3,6 +3,52 @@
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
 #endif
+#include "DeviceIdentity.h"
+
+namespace
+{
+const char *operationSuffix(ResourceTopicOperation operation)
+{
+    switch (operation)
+    {
+    case ResourceTopicOperation::SET:
+        return "set";
+    case ResourceTopicOperation::INVOKE:
+        return "invoke";
+    case ResourceTopicOperation::STATE:
+    default:
+        return "state";
+    }
+}
+}
+
+// Read at resolution time rather than copied into the resource, so a managed
+// resource can never carry a stale name for this device.
+const String &resolveResourceOwner(const NetResource &resource)
+{
+    return resource.isOwned() ? gDeviceIdentity.getDeviceName() : resource.ownerDevice.deviceName;
+}
+
+String resolveResourceManifestTopic(const String &deviceName)
+{
+    return deviceName + "/resources";
+}
+
+String resolveResourceTopic(const String &deviceName, const String &resourceName,
+                            ResourceTopicOperation operation)
+{
+    String topic = resolveResourceManifestTopic(deviceName);
+    topic += '/';
+    topic += resourceName;
+    topic += '/';
+    topic += operationSuffix(operation);
+    return topic;
+}
+
+String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation)
+{
+    return resolveResourceTopic(resolveResourceOwner(resource), resource.name, operation);
+}
 
 // Retargets a REMOTE resource. The role is fixed at declaration, so ownership
 // is deliberately not recalculated from the new device name: what this object
@@ -61,6 +107,15 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
     {
         LOG_WARNING("NET", "Attempt to set value of read-only resource '%s' owned by '%s'",
                     name.c_str(), ownerDevice.deviceName.c_str());
+        return false;
+    }
+    // Checked here, bound or not, so a value set while unbound cannot later
+    // turn out to be unpublishable. An empty encoding is the wire's deletion
+    // marker and can never be a real value.
+    if (encoded.length() == 0 || encoded.length() > NetResourceMaxPayloadLength)
+    {
+        LOG_WARNING("NET", "Rejected value for '%s': encoded length %u is outside 1..%u",
+                    name.c_str(), (unsigned)encoded.length(), (unsigned)NetResourceMaxPayloadLength);
         return false;
     }
 #if NM_ENABLE_RESOURCES

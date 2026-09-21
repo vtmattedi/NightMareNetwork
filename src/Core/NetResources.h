@@ -37,14 +37,6 @@ struct NetDeviceIdentity
     NetDeviceIdentity(const String &name) : deviceName(name) {}
 };
 
-/// @brief Resolves a resource topic for a given owner, resource name, resource type, and optional action.
-/// @param owner // The owner of the resource, represented by a NetDeviceIdentity object.
-/// @param resourceName // The name of the resource for which the topic is being resolved.
-/// @param resourceType // The type of the resource, represented by a NetResourceType enum value.
-/// @param action // An optional action associated with the resource. Defaults to an empty string if not provided.
-/// @return A full topic string in the format "<device>/resources[/<name>/{state,set,invoke}]" based on the provided parameters.
-String resolveResourceTopic(const NetDeviceIdentity &owner, const String &resourceName, NetResourceType resourceType, const String &action = String());
-
 /* Resources are layered as:
  *
  *   application            T
@@ -89,10 +81,11 @@ struct NetResource
     bool isBound() const { return resourceManager != nullptr; }
     bool isOwned() const { return role_ == ResourceRole::MANAGED; }
 
-    // A MANAGED resource leaves the owner empty: the real device name is filled
-    // in at bind time, so a globally declared resource never has to resolve the
-    // local identity from its constructor. A REMOTE one may also start empty and
-    // be pointed at a source later with setSource().
+    // A MANAGED resource leaves ownerDevice empty for good: its owner is always
+    // the current device identity, read when a topic is resolved (see
+    // resolveResourceOwner). Nothing is copied at construction or bind time, so
+    // a global declaration never has to know the local name. A REMOTE one may
+    // also start empty and be pointed at a source later with setSource().
     NetResource(const String &resourceName, const String &identity,
                 const NetResourceType resourceType, const ResourceRole resourceRole)
         : kind(resourceType),
@@ -117,6 +110,36 @@ private:
     friend struct NetActionResource;
 };
 
+/* Canonical addressing. Topics belong to the resource layer, so a resource can
+ * name itself without a ResourcesManager, and the Manager builds nothing of its
+ * own. These only assemble strings: callers validate the segments first.
+ *
+ *   <device>/resources                  manifest, retained
+ *   <device>/resources/<name>/state     value state, retained
+ *   <device>/resources/<name>/set       write request, transient
+ *   <device>/resources/<name>/invoke    action request, transient
+ */
+enum class ResourceTopicOperation : uint8_t
+{
+    STATE,
+    SET,
+    INVOKE
+};
+
+/// @brief The device that implements the resource: the current identity for a
+/// MANAGED one, the configured source for a REMOTE one. A reference, because
+/// both live as long as the resource; the Manager calls this per registry entry.
+const String &resolveResourceOwner(const NetResource &resource);
+
+String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation);
+
+/// @brief Explicit address, for topics that are not the resource's current one,
+/// such as a previous identity being cleaned up.
+String resolveResourceTopic(const String &deviceName, const String &resourceName,
+                            ResourceTopicOperation operation);
+
+String resolveResourceManifestTopic(const String &deviceName);
+
 enum class NetSyncStrategy : uint8_t
 {
     OPTIMISTIC, // A local write shadows owner state for a short window.
@@ -128,10 +151,6 @@ enum class NetSyncStrategy : uint8_t
 /// machine. The typed container is NetValue<T>.
 struct NetValueResource : public NetResource
 {
-    // The wire format is String, so this never needs to know T. The
-    // application-facing update callback is typed and lives on NetValue<T>.
-    using WriteHandler = bool (*)(NetValueResource &resource, const String &requestedValue);
-
     NetValueResource(const String &resourceName, const String &resourceOwner,
                      AccessPolicy resourceAccess, NetValueType resourceValueType,
                      ResourceRole resourceRole)
@@ -397,6 +416,15 @@ struct ActionArgMetadata
 {
     const char *name;
     NetValueType type;
+    // Optional arguments let a declaration grow without breaking older callers.
+    // What an omitted one means is the handler's decision; there are no defaults.
+    bool required;
+
+    // A constructor rather than a default member initializer: under C++11 the
+    // latter would stop this being an aggregate and break the brace syntax.
+    constexpr ActionArgMetadata(const char *argName, NetValueType argType,
+                                bool argRequired = true)
+        : name(argName), type(argType), required(argRequired) {}
 };
 
 /// @brief What a local implementation reports back. An ordinary MQTT /invoke
@@ -412,10 +440,14 @@ struct ActionResult
 /// payload syntax, no freshness, no value semantics. Turning MQTT JSON or
 /// positional console input into arguments is the Manager's job, so the
 /// execution boundary here stays a plain encoded String.
+///
+/// The schema is self-description first: it goes into the manifest for
+/// discovery, documentation and tooling. Checking payloads against it is an
+/// optional extra (NM_ENABLE_ACTION_PAYLOAD_ASSERTION), and it is tolerant:
+/// unknown fields pass, so either side can grow new optional arguments. A
+/// change old callers cannot survive deserves a new action name, not a check.
 struct NetActionResource : public NetResource
 {
-    using InvokeHandler = bool (*)(NetActionResource &resource, const String &payload);
-
     /// @param args Not copied. The schema has to outlive the action, so a static
     /// or global array is the expected source.
     NetActionResource(const String &resourceName, const String &resourceOwner,
@@ -428,6 +460,8 @@ struct NetActionResource : public NetResource
     size_t argumentCount() const { return argumentCount_; }
     const ActionArgMetadata *arguments() const { return arguments_; }
     const ActionArgMetadata &argument(size_t index) const { return arguments_[index]; }
+    // A RemoteAction may carry no schema at all, and still invokes normally.
+    bool hasSchema() const { return arguments_ != nullptr && argumentCount_ != 0; }
 
     /// @brief Manager -> an action this device implements. The result survives
     /// this non-template boundary, so a correlated caller can return it while an
@@ -463,6 +497,11 @@ struct ManagedAction : public NetActionResource
     ManagedAction(const String &resourceName, const ActionArgMetadata (&args)[N])
         : NetActionResource(resourceName, String(), args, N, ResourceRole::MANAGED) {}
 
+    ManagedAction(const String &resourceName, const ActionArgMetadata *args, size_t argCount)
+        : NetActionResource(resourceName, String(), args, argCount, ResourceRole::MANAGED) {}
+
+    // This declaration is the authoritative contract the device publishes. The
+    // handler still gets the canonical payload String and parses it itself.
     Handler onInvoke = nullptr;
 
     /// @brief Runs the local implementation and reports what it returned.
@@ -475,6 +514,10 @@ struct ManagedAction : public NetActionResource
 };
 
 /// @brief Another device implements the action; invoke() sends the request.
+///
+/// It does not need to repeat the implementer's schema: the usual form declares
+/// none and just invokes. A schema given here is what this caller knows and
+/// expects, possibly a subset, never a claim to mirror the remote contract.
 struct RemoteAction : public NetActionResource
 {
     /// @brief Declared without a source yet; point it at one with setSource().
@@ -488,6 +531,14 @@ struct RemoteAction : public NetActionResource
     RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
                  const ActionArgMetadata (&args)[N])
         : NetActionResource(resourceName, owner.deviceName, args, N, ResourceRole::REMOTE) {}
+
+    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
+                 const ActionArgMetadata *args, size_t argCount)
+        : NetActionResource(resourceName, owner.deviceName, args, argCount, ResourceRole::REMOTE) {}
+
+    /// @brief An expected schema with the source supplied later by setSource().
+    RemoteAction(const String &resourceName, const ActionArgMetadata *args, size_t argCount)
+        : NetActionResource(resourceName, String(), args, argCount, ResourceRole::REMOTE) {}
 
     /// @brief Points this at a different remote action. Stays REMOTE whatever
     /// device is named. The argument schema is a property of this declaration,

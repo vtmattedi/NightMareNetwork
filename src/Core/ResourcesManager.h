@@ -25,11 +25,9 @@ public:
 /// sees NetResource, NetValueResource, NetActionResource and String. Everything
 /// type-specific lives in NetValue<T>, NetCodec<T> and ManagedState<T>.
 ///
-/// Topic vocabulary:
-///   <device>/resources                  manifest, retained
-///   <device>/resources/<name>/state     value state, retained
-///   <device>/resources/<name>/set       write request, transient
-///   <device>/resources/<name>/invoke    action request, transient
+/// It owns participation and routing, not identity: every topic comes from the
+/// resource layer's resolveResourceTopic(), and a managed resource's owner is
+/// always the current DeviceIdentity.
 class ResourcesManager
 {
 public:
@@ -52,8 +50,11 @@ public:
     void subscribeAll();
     bool needsSubscription(const String &topicFilter) const;
 
-    // Accepts exact <device>/resources[/<name>/{state,set,invoke}] topics.
-    // Returns true when a known resource accepted the message.
+    /// @brief True when the message was resource traffic this Manager consumed,
+    /// whether or not the operation succeeded. A rejected write, a failed
+    /// action or an undecodable state still returns true, so it cannot leak
+    /// into the application's generic MQTT callback. Only traffic that is not
+    /// for a known resource returns false.
     bool handleIngressMessage(const String &topic, const String &message);
 
     // Called for valid manifests from other devices, including retained deletion
@@ -66,6 +67,13 @@ public:
     /// (controlled console / MQTTP) uses the same path and keeps it, so action
     /// execution is never implemented twice.
     ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
+
+    /// @brief Removes the retained resource footprint of a previous identity:
+    /// the manifest and the state of every currently declared managed value.
+    /// Only values declared now can be found, so one declared under the old name
+    /// and since removed from the firmware is not reached. True only when every
+    /// deletion was accepted for publishing, so a failure can be retried.
+    bool withdrawIdentity(const String &oldDeviceName);
 
 private:
     friend struct NetResource;
@@ -85,20 +93,18 @@ private:
 
     static bool validSegment(const String &segment);
     static bool validActionSchema(const NetActionResource &action);
+    // Every part of a Remote source is set; it may still be invalid.
+    static bool sourceConfigured(const NetResource &resource);
+    static bool hasResolvedSource(const NetResource &resource);
     NetResource *findResource(const String &deviceName, const String &name) const;
     bool addressTakenByOther(const String &deviceName, const String &name,
                              const NetResource *self) const;
 
-    // Topic helpers.
-    String topicFor(const NetResource &resource, const char *suffix) const;
-    String topicFor(const String &deviceName, const String &resourceName, const char *suffix) const;
-    String manifestTopicFor(const String &deviceName) const;
     // The one ingress topic a resource needs, or empty when it needs none
     // (ManagedSensor, RemoteAction, or a Remote resource with no source yet).
     String ingressTopicFor(const NetResource &resource) const;
     String ingressTopicFor(const NetResource &resource, const String &deviceName,
                            const String &resourceName) const;
-    static bool hasResolvedSource(const NetResource &resource);
     // Manifests are subscribed once per remote device, not once per resource.
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
@@ -107,6 +113,11 @@ private:
     bool applyOtherDeviceManifest(const String &deviceName, const String &message);
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);
+
+    // Consumers for recognised traffic. Outcomes are logged, not returned: the
+    // message is consumed either way.
+    void applyRemoteState(NetValueResource &value, const String &message);
+    void applyManagedWrite(NetValueResource &value, const String &message);
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;

@@ -54,6 +54,12 @@
 #ifndef NM_ENABLE_LVGL
 #define NM_ENABLE_LVGL 0
 #endif
+// Runtime checking of action payloads against their declared arguments. The
+// schema is published either way: it describes the action, and checking is an
+// opt-in extra on top of that.
+#ifndef NM_ENABLE_ACTION_PAYLOAD_ASSERTION
+#define NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
+#endif
 
 // Current implementation targets ESP32. Reserved for a future platform split.
 #ifndef NM_PLATFORM_ESP32
