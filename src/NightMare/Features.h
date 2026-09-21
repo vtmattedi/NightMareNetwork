@@ -1,5 +1,5 @@
 #pragma once
-
+#include <core/Logs.h>
 // A consuming project may provide include/NightMareConfig.h. PlatformIO compiles
 // every library .cpp; optional implementations guard their includes and code.
 #if __has_include(<NightMareConfig.h>)

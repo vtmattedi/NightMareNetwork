@@ -1,9 +1,11 @@
 #pragma once
 
-#include <NightMare/Features.h>
+#if __has_include(<NightMareConfig.h>)
+#include <NightMareConfig.h>
+#endif
 
 #include <Arduino.h>
-
+#include <NightMareConfig.h>
 // NM_LOG_LEVEL can be supplied by the project's configuration.
 // 0 disables logging; 1-5 enable Error, Warning, Info, Debug, and Trace.
 #define NM_LOG_LEVEL_OFF 0
@@ -15,6 +17,10 @@
 
 #ifndef NM_LOG_LEVEL
 #define NM_LOG_LEVEL NM_LOG_LEVEL_OFF
+#endif
+
+#ifndef NM_LOG_USE_ANSI
+#define NM_LOG_USE_ANSI 1
 #endif
 
 namespace NMLog

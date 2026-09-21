@@ -81,6 +81,26 @@ String DeviceIdentity::topic(const String &relative)
     return name + "/" + relative;
 }
 
+bool DeviceIdentity::changeName(const String &newName)
+{
+    if (!validName(newName))
+        return false;
+    deviceName_ = newName;
+    if (nameChangedCallback_ != nullptr)
+        nameChangedCallback_(newName);
+    return true;
+}
+
+void DeviceIdentity::onNameChanged(void (*callback)(const String &newName))
+{
+    nameChangedCallback_ = callback;
+}
+
+void DeviceIdentity::lockAddress()
+{
+    addressLocked_ = true;
+}
+
 bool DeviceIdentity::changeDeviceName(const String &newName)
 {
     begin();

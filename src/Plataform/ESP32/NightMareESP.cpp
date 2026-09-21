@@ -21,6 +21,7 @@ void startNightMareESP()
     Telemetry.start();
 #endif
 #if NM_ENABLE_WIFI
+    Serial.println("Initializing WiFi...");
     WiFi_Auto();
 #endif
 }

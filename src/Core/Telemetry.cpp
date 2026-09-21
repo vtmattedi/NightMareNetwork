@@ -16,37 +16,47 @@
 
 namespace
 {
-constexpr const char *TelemetryJobLabel = "nm.telemetry";
+    constexpr const char *TelemetryJobLabel = "nm.telemetry";
 
-const char *directionName(NMHardware::Direction direction)
-{
-    switch (direction)
+    const char *directionName(NMHardware::Direction direction)
     {
-    case NMHardware::Direction::Input: return "input";
-    case NMHardware::Direction::Output: return "output";
-    case NMHardware::Direction::Bidirectional: return "bidirectional";
-    case NMHardware::Direction::Power: return "power";
-    case NMHardware::Direction::Ground: return "ground";
-    case NMHardware::Direction::Bus: return "bus";
+        switch (direction)
+        {
+        case NMHardware::Direction::Input:
+            return "input";
+        case NMHardware::Direction::Output:
+            return "output";
+        case NMHardware::Direction::Bidirectional:
+            return "bidirectional";
+        case NMHardware::Direction::Power:
+            return "power";
+        case NMHardware::Direction::Ground:
+            return "ground";
+        case NMHardware::Direction::Bus:
+            return "bus";
+        }
+        return "unknown";
     }
-    return "unknown";
-}
 
-const char *pullName(NMHardware::Pull pull)
-{
-    switch (pull)
+    const char *pullName(NMHardware::Pull pull)
     {
-    case NMHardware::Pull::None: return "none";
-    case NMHardware::Pull::Up: return "up";
-    case NMHardware::Pull::Down: return "down";
-    case NMHardware::Pull::External: return "external";
+        switch (pull)
+        {
+        case NMHardware::Pull::None:
+            return "none";
+        case NMHardware::Pull::Up:
+            return "up";
+        case NMHardware::Pull::Down:
+            return "down";
+        case NMHardware::Pull::External:
+            return "external";
+        }
+        return "unknown";
     }
-    return "unknown";
-}
 }
 
 TelemetryService Telemetry;
-
+static int32_t heartbeat = 0;
 bool TelemetryService::start(uint32_t intervalMs)
 {
     if (intervalMs == 0)
@@ -58,6 +68,7 @@ bool TelemetryService::start(uint32_t intervalMs)
         gScheduler.remove(TelemetryJobLabel);
     if (gScheduler.everyMonotonic(TelemetryJobLabel, "TELEMETRY PUBLISH", intervalMs) < 0)
         return false;
+    gScheduler.timer("heartbeat", [](){ MQTT_Publish("/heartbeat", String(heartbeat++), true, false); }, 300 * 1000);
     started_ = true;
     intervalMs_ = intervalMs;
     return true;

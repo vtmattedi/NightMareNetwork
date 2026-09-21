@@ -1113,7 +1113,7 @@ void NightMareCommand_SerialResolver(SERIALTYPE *_Serial, char readUntilChar)
             while (_Serial->available())
             {
                 cmd += (char)_Serial->read();
-                delay(10); // Small delay to allow buffer to fill
+                delayMicroseconds(10); // Small delay to allow buffer to fill
             }
         }
         cmd.trim();

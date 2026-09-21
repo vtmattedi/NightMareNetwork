@@ -51,6 +51,7 @@ public:
     // (an empty payload). Discovery mode makes all such manifests visible.
     using ManifestHandler = void (*)(const String &deviceName, const String &manifest);
     void setManifestHandler(ManifestHandler handler) { manifestHandler_ = handler; }
+    void onResourcesActionsRequested(void (*callback)(NetResource &resource,const String &action, const String &payload)) { ownedResoucesActionCallback_ = callback; }
 
 private:
     friend struct NetValueResource;
@@ -58,12 +59,16 @@ private:
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;
-    ResourcePublisher *publisher_ = nullptr; // Non-owning.
+    ResourcePublisher *publisher_ = nullptr;   // Non-owning.
     ResourceSubscriber *subscriber_ = nullptr; // Non-owning.
     NetValueResource::WriteHandler valueHandler_ = nullptr;
     NetActionResource::InvokeHandler actionHandler_ = nullptr;
     ManifestHandler manifestHandler_ = nullptr;
-
+    // Called when a owned resource is requested to perform an action.
+    // This gives user two ways to handle the request: 
+    // 1. Handle the action in the resource's onInvoke/onWrite callback.
+    // 2. A global callback that is called for all owned resources.
+    void (*ownedResoucesActionCallback_)(NetResource &resource,const String &action, const String &payload) = nullptr;
     // Resource methods delegate here. Local state changes remain committed if
     // publication fails; announceAll() can retry them. Remote requests succeed
     // only when accepted for publication.

@@ -11,49 +11,49 @@
 
 namespace
 {
-constexpr const char *JobsFile = "/jobs.json";
-constexpr const char *LegacySchedulerFile = "/scheduleTasks.json";
-constexpr uint32_t MaxInterval = 0x7fffffffUL;
-constexpr uint32_t StorageRetryMs = 5000;
-constexpr uint32_t SchedulerPollMs = 100;
-constexpr size_t MaxLabelLength = 64;
+    constexpr const char *JobsFile = "/jobs.json";
+    constexpr const char *LegacySchedulerFile = "/scheduleTasks.json";
+    constexpr uint32_t MaxInterval = 0x7fffffffUL;
+    constexpr uint32_t StorageRetryMs = 5000;
+    constexpr uint32_t SchedulerPollMs = 100;
+    constexpr size_t MaxLabelLength = 64;
 
-SemaphoreHandle_t jobMutex()
-{
-    static SemaphoreHandle_t mutex = xSemaphoreCreateRecursiveMutex();
-    return mutex;
-}
-
-class JobGuard
-{
-public:
-    JobGuard() : mutex_(jobMutex()) { lock(); }
-    ~JobGuard() { unlock(); }
-
-    void lock()
+    SemaphoreHandle_t jobMutex()
     {
-        if (mutex_ != nullptr && !locked_)
-            locked_ = xSemaphoreTakeRecursive(mutex_, portMAX_DELAY) == pdTRUE;
+        static SemaphoreHandle_t mutex = xSemaphoreCreateRecursiveMutex();
+        return mutex;
     }
 
-    void unlock()
+    class JobGuard
     {
-        if (locked_)
+    public:
+        JobGuard() : mutex_(jobMutex()) { lock(); }
+        ~JobGuard() { unlock(); }
+
+        void lock()
         {
-            xSemaphoreGiveRecursive(mutex_);
-            locked_ = false;
+            if (mutex_ != nullptr && !locked_)
+                locked_ = xSemaphoreTakeRecursive(mutex_, portMAX_DELAY) == pdTRUE;
         }
+
+        void unlock()
+        {
+            if (locked_)
+            {
+                xSemaphoreGiveRecursive(mutex_);
+                locked_ = false;
+            }
+        }
+
+    private:
+        SemaphoreHandle_t mutex_;
+        bool locked_ = false;
+    };
+
+    bool wallTimeReady()
+    {
+        return NightMare::Time::valid();
     }
-
-private:
-    SemaphoreHandle_t mutex_;
-    bool locked_ = false;
-};
-
-bool wallTimeReady()
-{
-    return NightMare::Time::valid();
-}
 }
 
 Scheduler gScheduler;
@@ -111,8 +111,37 @@ void Scheduler::task(void *context)
     }
 }
 
+int32_t Scheduler::setTimeout(void (*callback)(void), uint32_t intervalMs)
+{
+    JobGuard guard;
+    static int timeoutId = 0;
+    if (intervalMs == 0 || intervalMs > MaxInterval)
+        return -1;
+    if (!begun_)
+        begin();
+    if (!callback)
+    {
+        LOG("Scheduler", "Timeout job requires a callback function.");
+    }
+    return add(String("Timeout_") + String(timeoutId++), String(), SchedulerClock::Monotonic, millis() + intervalMs, 0, callback);
+}
+
+int32_t Scheduler::timer(const String &label, void (*callback)(void), uint32_t intervalMs)
+{
+    JobGuard guard;
+    if (intervalMs == 0 || intervalMs > MaxInterval)
+        return -1;
+    if (!begun_)
+        begin();
+    if (!callback)
+    {
+        LOG("Scheduler", "Timer job '%s' requires a callback function.", label.c_str());
+    }
+    return add(label, String(), SchedulerClock::Monotonic, millis() +1, intervalMs, callback);
+}
+
 int32_t Scheduler::add(const String &label, const String &command, SchedulerClock clock,
-                        uint32_t due, uint32_t interval)
+                       uint32_t due, uint32_t interval, void (*callback)(void))
 {
     JobGuard guard;
     if (!begun_ || (clock == SchedulerClock::Wall && !storageReady_))
@@ -189,6 +218,7 @@ int32_t Scheduler::everyMonotonic(const String &label, const String &command, ui
         begin();
     return add(label, command, SchedulerClock::Monotonic, millis() + intervalMs, intervalMs);
 }
+
 
 bool Scheduler::remove(const String &label)
 {
@@ -341,8 +371,12 @@ void Scheduler::tick()
         }
 
         guard.unlock();
-        handleNightMareCommand(previous.command,
-                               NightmareContext(NM_CMD_SRC_JOB, String(previous.id)));
+        // Dispatch the job. If it has a callback, call it. Otherwise, send the command to the NightMare command handler.
+        if (job.callback != nullptr)
+            job.callback();
+        else
+            handleNightMareCommand(previous.command,
+                                   NightmareContext(NM_CMD_SRC_JOB, String(previous.id)));
         guard.lock();
     }
     dispatching_ = false;
@@ -456,7 +490,7 @@ bool Scheduler::importLegacy()
         {
             if (interval == 0)
                 continue; // The old boot-relative one-shot deadline cannot be recovered.
-            due = 0; // Start a fresh wall interval after synchronization.
+            due = 0;      // Start a fresh wall interval after synchronization.
         }
         if (label.length() == 0 || label.length() > MaxLabelLength ||
             command.length() == 0 || command.length() > NM_MAX_MESSAGE_LEN ||

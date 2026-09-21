@@ -25,7 +25,9 @@ void WiFi_onConnected(WiFiConnectedCallback callback);
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0, void *waitCallback(unsigned int) = nullptr);
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect = true);
 void WiFi_Disconnect();
-void WiFi_Auto();
+bool WiFi_Auto();
+void WiFi_Scan();
 bool WiFi_ChangeCredentials(const String &ssid, const String &password);
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
+const char *WiFi_getStatusName(wl_status_t status);
 #endif // NM_ENABLE_WIFI

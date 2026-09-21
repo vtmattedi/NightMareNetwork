@@ -31,6 +31,7 @@ void wifiConnectedInternal()
         autoSyncTime();
 #endif
     }
+    LOG("WiFi", "WiFi connected to SSID: %s, IP: %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
     if (wifiConnectedCallback)
     {
         wifiConnectedCallback(firstConnection);
@@ -57,6 +58,7 @@ void WiFi_Task(void *pvParameters)
                 wifiConnectedInternal();
                 if (deleteAfterConnect)
                 {
+                    LOG("WiFi", "WiFi connected to SSID: %s, IP: %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
                     WiFiTaskHandle = NULL;
                     vTaskDelete(NULL);
                     return;
@@ -65,6 +67,7 @@ void WiFi_Task(void *pvParameters)
             old_state = WiFi.status();
         }
         int delayTime = old_state == WL_CONNECTED ? 5000 : 100;
+        LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(old_state));
         vTaskDelay(delayTime / portTICK_PERIOD_MS);
     }
 }
@@ -82,13 +85,29 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
     gDeviceIdentity.lockAddress();
+    // A prior scanNetworks() (or a previous failed connect) can leave the
+    // driver's status stuck on a stale value; disconnect first so begin()
+    // actually starts a fresh association instead of being ignored.
+    WiFi.disconnect();
     WiFi.begin(ssid, password);
     unsigned int start = millis();
+    LOG("WiFi", "Connecting to WiFi: %s", ssid);
+    wl_status_t lastStatus = WiFi.status();
     while (WiFi.status() != WL_CONNECTED)
     {
         if (waitCallback)
         {
             waitCallback(millis() - start);
+        }
+        if (WiFi.status() != lastStatus)
+        {
+            lastStatus = WiFi.status();
+            LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(lastStatus));
+        }
+        if (millis()%200 == 0)
+        {
+            Serial.print(".");
+            vTaskDelay(1 / portTICK_PERIOD_MS);
         }
         if (timeoutMs > 0 && millis() - start >= (unsigned int)timeoutMs)
         {
@@ -102,9 +121,12 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect)
 {
 
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
-    gDeviceIdentity.lockAddress();
+    // See WiFi_Connect: clears any stale status left by a prior scan/connect
+    // so begin() is guaranteed to start a fresh association attempt.
+    WiFi.disconnect();
     WiFi.begin(ssid, password);
 
     if (WiFiTaskHandle)
@@ -121,6 +143,7 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
                                        1,
                                        &WiFiTaskHandle,
                                        tskNO_AFFINITY);
+    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s, %s", OK_LOG(res), ssid, password );
 
     return res;
 }
@@ -131,7 +154,7 @@ void WiFi_Disconnect()
     WiFi.disconnect();
 }
 
-void WiFi_Auto()
+bool WiFi_Auto()
 {
     // Ensure StateStore module is initialized
     PersistentSettings.begin();
@@ -142,7 +165,23 @@ void WiFi_Auto()
     }
     String ssid = PersistentSettings.get("_ssid");
     String password = PersistentSettings.get("_password");
-    WiFi_ConnectAsync(ssid.c_str(), password.c_str(), true);
+    return WiFi_ConnectAsync(ssid.c_str(), password.c_str(), true);
+}
+
+void WiFi_Scan()
+{
+    LOG("WiFi", "Scanning for WiFi networks...");
+    int n = WiFi.scanNetworks();
+    LOG("WiFi", "Found %d networks", n);
+    for (int i = 0; i < n; ++i)
+    {
+        LOG("WiFi", "%d: %s (%d) %s", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "Open" : "Secured");
+    }
+    // Releases the scan-result buffer and clears the driver's internal scan
+    // state. Without this, a WiFi.begin() issued right after a scan can be
+    // dropped or ignored: the driver's status flag is left over from the
+    // scan and a fresh connect attempt is never actually started.
+    WiFi.scanDelete();
 }
 
 bool WiFi_ChangeCredentials(const String &ssid, const String &password)
@@ -161,6 +200,31 @@ bool WiFi_ChangeCredentials(const String &ssid, const String &password)
     PersistentSettings.set("_password", password);
     PersistentSettings.save();
     return true;
+}
+
+const char *WiFi_getStatusName (wl_status_t status)
+{
+    switch (status)
+    {
+    case WL_NO_SHIELD:
+        return "No Shield";
+    case WL_IDLE_STATUS:
+        return "Idle";
+    case WL_NO_SSID_AVAIL:
+        return "No SSID Available";
+    case WL_SCAN_COMPLETED:
+        return "Scan Completed";
+    case WL_CONNECTED:
+        return "Connected";
+    case WL_CONNECT_FAILED:
+        return "Connect Failed";
+    case WL_CONNECTION_LOST:
+        return "Connection Lost";
+    case WL_DISCONNECTED:
+        return "Disconnected";
+    default:
+        return "Unknown Status";
+    }
 }
 
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType)

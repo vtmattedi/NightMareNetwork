@@ -24,6 +24,7 @@ struct Job
     SchedulerClock clock = SchedulerClock::Monotonic;
     uint32_t due = 0;
     uint32_t interval = 0; // Zero means run once.
+    void (*callback)(void) = nullptr; // Optional callback to run instead of command.
 };
 
 class Scheduler
@@ -40,6 +41,8 @@ public:
     int32_t after(const String &label, const String &command, uint32_t delayMs);
     int32_t everyWall(const String &label, const String &command, uint32_t intervalSeconds);
     int32_t everyMonotonic(const String &label, const String &command, uint32_t intervalMs);
+    int32_t timer(const String &label, void (*callback)(void), uint32_t intervalMs);
+    int32_t setTimeout(void (*callback)(void), uint32_t intervalMs);
     bool remove(const String &label);
     bool remove(uint32_t id);
     bool clear();
@@ -57,7 +60,7 @@ private:
     TaskHandle_t schedulerTask_ = nullptr;
 
     int32_t add(const String &label, const String &command, SchedulerClock clock,
-                uint32_t due, uint32_t interval);
+                uint32_t due, uint32_t interval, void (*callback)(void) = nullptr);
     bool save();
     bool load();
     bool importLegacy();
