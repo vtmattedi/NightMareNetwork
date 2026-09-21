@@ -21,7 +21,8 @@ struct PendingIdentityCleanup
 // Adopting a new name is a migration, not a rename: the new name is persisted,
 // the old one is remembered along with what still has to be cleaned up under
 // it, and the migration only ends when that cleanup has succeeded. This class
-// keeps that state; it never touches MQTT or the ResourcesManager itself.
+// keeps that state; it never publishes, calls the ResourcesManager or schedules
+// anything. processPendingIdentityCleanup() does the work.
 class DeviceIdentity
 {
 public:
@@ -51,6 +52,7 @@ public:
     /// that data is still live and must not be withdrawn.
     bool getPendingIdentityCleanup(PendingIdentityCleanup &cleanup);
     /// @brief Clears one participant's bit, and the whole record with the last.
+    /// Transactional: false means nothing changed, in memory or on flash.
     bool markIdentityCleanupComplete(IdentityCleanupFlags flag);
 
 private:

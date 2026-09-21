@@ -207,13 +207,24 @@ bool DeviceIdentity::getPendingIdentityCleanup(PendingIdentityCleanup &cleanup)
     return true;
 }
 
+// A bit only counts as done once the record on flash says so. If that write
+// fails, memory goes back to match it, so this boot retries too instead of
+// believing a completion the next boot would not know about.
 bool DeviceIdentity::markIdentityCleanupComplete(IdentityCleanupFlags flag)
 {
     begin();
     if ((pendingFlags_ & flag) == 0)
         return true;
+
+    const uint8_t previousFlags = pendingFlags_;
+    const String previousName = pendingOldName_;
     pendingFlags_ = static_cast<uint8_t>(pendingFlags_ & ~flag);
     if (pendingFlags_ == 0)
         pendingOldName_ = String();
-    return persistPendingCleanup();
+    if (persistPendingCleanup())
+        return true;
+
+    pendingFlags_ = previousFlags;
+    pendingOldName_ = previousName;
+    return false;
 }

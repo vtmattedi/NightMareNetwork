@@ -46,31 +46,6 @@ void runCommand(const String &payload, const String &replyTopic)
 
 #endif
 
-// Finishes an adoption: removes what the previous identity left retained on the
-// broker. Each part clears its own flag only when it succeeded, so a failure is
-// retried on the next connection and the record goes once nothing is left.
-void runPendingIdentityCleanup()
-{
-    PendingIdentityCleanup cleanup;
-    if (!gDeviceIdentity.getPendingIdentityCleanup(cleanup))
-        return;
-    LOG("MQTT", "Cleaning up previous identity '%s'", cleanup.oldName.c_str());
-
-    if ((cleanup.pendingFlags & CLEANUP_RESOURCES) != 0 &&
-        gResourcesManager.withdrawIdentity(cleanup.oldName))
-        gDeviceIdentity.markIdentityCleanupComplete(CLEANUP_RESOURCES);
-
-    if ((cleanup.pendingFlags & CLEANUP_STATUS) != 0)
-    {
-        // "offline" first so anyone watching sees the old device go away, then
-        // empty to delete the retained status so it does not linger as a ghost.
-        const String statusTopic = cleanup.oldName + "/status";
-        if (MQTT_Publish(statusTopic, "offline", false, true) &&
-            MQTT_Publish(statusTopic, "", false, true))
-            gDeviceIdentity.markIdentityCleanupComplete(CLEANUP_STATUS);
-    }
-}
-
 #if NM_ENABLE_TIME_SYNC
 bool syncTime(const String &payload)
 {
@@ -98,11 +73,10 @@ bool syncTime(const String &payload)
 
 namespace NmMessageRouter
 {
+// Current-identity work only. Cleaning up a previous identity is not tied to a
+// connection event: see processPendingIdentityCleanup().
 void onConnected()
 {
-    // Before announcing: the old identity's footprint goes, then the current
-    // one is published.
-    runPendingIdentityCleanup();
     MQTT_Publish("status", "online", true, true);
     gResourcesManager.announceAll();
 #if NM_ENABLE_TELEMETRY

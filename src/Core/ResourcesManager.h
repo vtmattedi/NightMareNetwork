@@ -110,7 +110,7 @@ private:
 
     bool publishManifest();
     bool publishState(const NetValueResource &resource);
-    bool applyOtherDeviceManifest(const String &deviceName, const String &message);
+    void applyOtherDeviceManifest(const String &deviceName, const String &message);
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);
 

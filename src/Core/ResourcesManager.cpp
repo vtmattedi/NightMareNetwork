@@ -643,41 +643,44 @@ void ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
     publishState(value);
 }
 
-bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const String &message)
+// A manifest is description: it feeds discovery and compatibility diagnostics
+// and nothing else. Value freshness belongs to /state alone, so no outcome here
+// (missing, mismatched, withdrawn or malformed) touches it, and nothing here
+// gates /state, /set or /invoke. Whether the message belongs to this Manager is
+// decided by handleIngressMessage(), not here.
+void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const String &message)
 {
-    if (deviceName == gDeviceIdentity.getDeviceName() || message.length() > MaxManifestLength)
-        return false;
+    if (message.length() > MaxManifestLength)
+    {
+        LOG_WARNING("RM", "Ignored oversized manifest from '%s' (%u bytes)", deviceName.c_str(),
+                    (unsigned)message.length());
+        return;
+    }
 
-    // An empty retained manifest means the device withdrew its declarations.
+    // An empty retained manifest withdraws the declarations, and nothing more:
+    // values keep whatever freshness their own /state gave them. Discovery
+    // consumers still need to hear about it, so it counts as valid.
     if (message.length() == 0)
     {
-        bool matched = false;
-        for (int i = 0; i < resourceCount_; ++i)
-        {
-            NetResource *resource = resources_[i];
-            if (resource->isOwned() || resource->ownerDevice.deviceName != deviceName)
-                continue;
-            matched = true;
-            if (resource->kind == NetResourceType::VALUE)
-                static_cast<NetValueResource *>(resource)->freshness = ResourceFreshness::STALE;
-        }
         if (manifestHandler_ != nullptr)
             manifestHandler_(deviceName, message);
-        return matched || manifestHandler_ != nullptr;
+        return;
     }
 
     DynamicJsonDocument doc(MaxManifestLength);
     if (deserializeJson(doc, message) || !doc["resources"].is<JsonArray>())
-        return false;
+    {
+        // Not valid data, so the handler, which is promised only valid data, is not called.
+        LOG_WARNING("RM", "Ignored malformed manifest from '%s'", deviceName.c_str());
+        return;
+    }
 
-    bool matched = false;
     JsonArray items = doc["resources"].as<JsonArray>();
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
         if (resource->isOwned() || resource->ownerDevice.deviceName != deviceName)
             continue;
-        matched = true;
 
         JsonObject declaration;
         for (JsonObject item : items)
@@ -690,23 +693,20 @@ bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         }
 
         // The local declaration is intentional and is never rewritten from a
-        // remote manifest. For a value, a disagreement marks the source stale.
+        // remote manifest. A disagreement is reported, and that is all.
         bool compatible = !declaration.isNull() &&
                           declaration["kind"].as<String>() == kindName(resource->kind);
         if (resource->kind == NetResourceType::VALUE)
         {
-            NetValueResource &value = *static_cast<NetValueResource *>(resource);
+            const NetValueResource &value = *static_cast<NetValueResource *>(resource);
             if (compatible && declaration["type"].as<String>() != valueTypeName(value.valueType))
                 compatible = false;
             else if (compatible && value.access == AccessPolicy::READ_WRITE &&
                      declaration["access"].as<String>() != accessName(AccessPolicy::READ_WRITE))
                 compatible = false;
             if (!compatible)
-            {
                 LOG_WARNING("RM", "Source '%s/%s' is missing or incompatible with the local declaration",
                             deviceName.c_str(), resource->name.c_str());
-                value.freshness = ResourceFreshness::STALE;
-            }
             continue;
         }
 
@@ -756,7 +756,6 @@ bool ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     }
     if (manifestHandler_ != nullptr)
         manifestHandler_(deviceName, message);
-    return matched || manifestHandler_ != nullptr;
 }
 
 bool ResourcesManager::handleIngressMessage(const String &topic, const String &message)
@@ -769,7 +768,17 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
         return false;
     const String path = topic.substring(firstSlash + 1);
     if (path == "resources")
-        return applyOtherDeviceManifest(deviceName, message);
+    {
+        // Consumed when some remote resource points at that device, or a
+        // discovery handler wants every manifest; whether the payload then turns
+        // out to be valid does not change that. This device's own manifest is
+        // not other-device traffic and is left alone.
+        if (deviceName == gDeviceIdentity.getDeviceName() ||
+            (!remoteOwnerInUse(deviceName, nullptr) && manifestHandler_ == nullptr))
+            return false;
+        applyOtherDeviceManifest(deviceName, message);
+        return true;
+    }
     if (!path.startsWith("resources/"))
         return false;
 

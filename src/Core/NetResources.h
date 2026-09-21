@@ -336,7 +336,7 @@ struct ManagedSensor : public NetValue<T>
 /// @brief Owned by another device, observe-only. Reports owner state at all
 /// times: nothing local can write it, so there is nothing to be optimistic about.
 template <typename T>
-struct RemoteSensor : public NetValue<T>
+struct  RemoteSensor : public NetValue<T>
 {
     /// @brief Declared without a source yet; point it at one with setSource().
     RemoteSensor() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ)

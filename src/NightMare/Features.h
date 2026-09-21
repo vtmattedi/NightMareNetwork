@@ -60,6 +60,11 @@
 #ifndef NM_ENABLE_ACTION_PAYLOAD_ASSERTION
 #define NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
 #endif
+// How often a pending cleanup of a previous identity is retried. Deliberately
+// slow: it only matters after an adoption, and each attempt publishes.
+#ifndef NM_IDENTITY_CLEANUP_RETRY_MS
+#define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
+#endif
 
 // Current implementation targets ESP32. Reserved for a future platform split.
 #ifndef NM_PLATFORM_ESP32
