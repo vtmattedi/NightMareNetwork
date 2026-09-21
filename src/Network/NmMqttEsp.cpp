@@ -3,6 +3,7 @@
 #include "NmMqttEsp.h"
 
 #include <Core/DeviceIdentity.h>
+#include <Core/Logs.h>
 #include <creds.h>
 #include <mqtt_client.h>
 #include <freertos/FreeRTOS.h>
@@ -67,6 +68,7 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     case MQTT_EVENT_CONNECTED:
         connectionState = lanBroker ? 1 : 2;
         brokerErrors = 0;
+        LOG("MQTT", "Connected to %s broker (%s)", lanBroker ? "LAN" : "cloud", brokerUri);
         if (onConnected != nullptr)
             onConnected(lanBroker);
         break;
@@ -155,14 +157,20 @@ bool startClient(bool useLan)
     config.task.stack_size = 8192;
     config.task.priority = 5;
 
+    LOG("MQTT", "Starting connection to %s broker at %s", useLan ? "LAN" : "cloud", brokerUri);
+
     client = esp_mqtt_client_init(&config);
     if (client == nullptr)
+    {
+        LOG_ERROR("MQTT", "Failed to initialize client for %s", brokerUri);
         return false;
+    }
     esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
                                    mqttEvent, nullptr);
     connectionState = -2;
     if (esp_mqtt_client_start(client) != ESP_OK)
     {
+        LOG_ERROR("MQTT", "Failed to start client for %s", brokerUri);
         esp_mqtt_client_destroy(client);
         client = nullptr;
         connectionState = -1;
@@ -268,8 +276,10 @@ bool publish(const String &topic, const String &payload, bool retained)
 
 bool subscribe(const String &topicFilter)
 {
-    return client != nullptr && connectionState > 0 && topicFilter.length() != 0 &&
-           esp_mqtt_client_subscribe(client, topicFilter.c_str(), 0) >= 0;
+    const bool ok = client != nullptr && connectionState > 0 && topicFilter.length() != 0 &&
+                    esp_mqtt_client_subscribe(client, topicFilter.c_str(), 0) >= 0;
+    LOG_DEBUG("MQTT", "Subscribe %s: %s", topicFilter.c_str(), OK_LOG(ok));
+    return ok;
 }
 
 bool unsubscribe(const String &topicFilter)

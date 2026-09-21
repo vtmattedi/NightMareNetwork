@@ -4,7 +4,8 @@
   "frameworks": ["arduino"],
   "platforms": ["espressif32"],
   "dependencies": [
-    {"owner": "bblanchon", "name": "ArduinoJson", "version": "^6.21.3"}
+    {"owner": "bblanchon", "name": "ArduinoJson", "version": "^6.21.3"},
+    {"name": "ArduinoOTA"}
   ],
   "export": {"exclude": ["Legacy/**", "FailedAttempt/**", "new/**", "tests/**"]},
   "build": {
