@@ -9,7 +9,7 @@ namespace
 {
 constexpr size_t MaxSegmentLength = 64;
 constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
-constexpr size_t MaxManifestLength = 16384;
+constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
 constexpr int ManifestVersion = 2;
 
 bool commandSpace(char c)
@@ -58,6 +58,20 @@ const char *valueTypeName(NetValueType type)
     case NetValueType::STRING:
     default:
         return "string";
+    }
+}
+
+const char *freshnessName(ResourceFreshness freshness)
+{
+    switch (freshness)
+    {
+    case ResourceFreshness::FRESH:
+        return "fresh";
+    case ResourceFreshness::STALE:
+        return "stale";
+    case ResourceFreshness::UNKNOWN:
+    default:
+        return "unknown";
     }
 }
 
@@ -118,6 +132,59 @@ bool assertActionPayload(const NetActionResource &action, const String &payload,
     return true;
 }
 #endif
+}
+
+InternalCommands parseInternalCommand(const String &command)
+{
+    String normalized = command;
+    normalized.toUpperCase();
+    if (normalized == "LIST")
+        return InternalCommands::LIST;
+    if (normalized == "RAW")
+        return InternalCommands::RAW;
+    return InternalCommands::NONE;
+}
+
+ParsedCommand parseCommand(const String &expression)
+{
+    ParsedCommand result;
+    if (expression.length() == 0)
+        return result;
+
+    // The character immediately after `>` is part of the grammar: a manager
+    // action starts immediately, while resource addressing starts with space.
+    result.internalSyntax = !commandSpace(expression[0]);
+    size_t position = 0;
+    const String first = commandToken(expression, position);
+
+    if (result.internalSyntax)
+    {
+        result.internalAction = first;
+        result.internalCommand = parseInternalCommand(first);
+        if (result.internalCommand == InternalCommands::RAW)
+        {
+            result.target = commandToken(expression, position);
+            if (position < expression.length())
+                result.payload = expression.substring(position + 1);
+        }
+        else if (position < expression.length())
+        {
+            // Keep manager arguments opaque so each manager action owns its
+            // own argument grammar.
+            result.payload = expression.substring(position + 1);
+        }
+        return result;
+    }
+
+    result.target = first;
+    const size_t verbStart = skipCommandSpace(expression, position);
+    if (verbStart >= expression.length())
+        return result;
+    position = verbStart;
+    result.verb = commandToken(expression, position);
+    if (position < expression.length())
+        result.payload = expression.substring(position + 1);
+    return result;
 }
 
 ResourcesManager gResourcesManager;
@@ -529,6 +596,42 @@ bool ResourcesManager::publishState(const NetValueResource &resource)
                                encoded, true);
 }
 
+ActionResult ResourcesManager::listResources() const
+{
+    DynamicJsonDocument doc(MaxManifestLength);
+    JsonArray items = doc.to<JsonArray>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        JsonObject item = items.createNestedObject();
+        item["name"] = resource.name;
+        item["kind"] = kindName(resource.kind);
+        item["role"] = resource.isOwned() ? "managed" : "remote";
+        item["owner"] = resolveResourceOwner(resource);
+
+        if (resource.kind == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item["access"] = accessName(value.access);
+            item["type"] = valueTypeName(value.valueType);
+            item["available"] = value.hasCurrentValue();
+            item["freshness"] = freshnessName(value.freshness);
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            item["arguments"] = action.argumentCount();
+        }
+    }
+    if (doc.overflowed())
+        return {false, String("Resource list too large")};
+
+    String response;
+    if (serializeJson(doc, response) == 0)
+        return {false, String("Could not serialize resource list")};
+    return {true, response};
+}
+
 bool ResourcesManager::announceAll()
 {
     if (!publishManifest())
@@ -640,10 +743,35 @@ ActionResult ResourcesManager::executeAction(NetActionResource &action, const St
 
 ActionResult ResourcesManager::executeCommand(const String &expression)
 {
-    size_t position = 0;
-    const String target = commandToken(expression, position);
-    if (target.length() == 0)
-        return {false, String("Usage: > <topic> [payload] | > <name> [action [payload]]")};
+    LOG("RM", "Executing command: '%s'", expression.c_str());
+    const ParsedCommand command = parseCommand(expression);
+    if (expression.length() == 0)
+        return {false, String("Usage: >list | >raw <topic> [payload] | > <name> [verb [payload]]")};
+
+    if (command.internalSyntax)
+    {
+        if (command.internalCommand == InternalCommands::LIST)
+        {
+            String arguments = command.payload;
+            arguments.trim();
+            if (arguments.length() != 0)
+                return {false, String("Usage: >list")};
+            return listResources();
+        }
+
+        if (command.internalCommand == InternalCommands::RAW)
+        {
+            if (command.target.length() == 0)
+                return {false, String("Usage: >raw <topic> [payload]")};
+            const bool consumed = handleIngressMessage(command.target, command.payload);
+            return {consumed, consumed ? String("OK") : String("Resource topic not consumed")};
+        }
+
+        return {false, String("Unknown resource-manager action: ") + command.internalAction};
+    }
+
+    if (command.target.length() == 0)
+        return {false, String("Usage: > <name> [get|set|invoke] [payload]")};
 
     auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult {
         if (action.isOwned())
@@ -657,72 +785,16 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         return {accepted, accepted ? String("OK") : String("Could not publish action")};
     };
 
-    // A slash selects the MQTT-shaped form. The first token is the complete
-    // topic; everything after its separating whitespace is one opaque payload.
-    if (target.indexOf('/') >= 0)
-    {
-        const String payload = position < expression.length()
-                                   ? expression.substring(position + 1)
-                                   : String();
-        if (payload.length() > MaxValueLength)
-            return {false, String("Payload too large")};
-
-        const int firstSlash = target.indexOf('/');
-        if (firstSlash <= 0)
-            return {false, String("Invalid resource topic")};
-        const String deviceName = target.substring(0, firstSlash);
-        const String path = target.substring(firstSlash + 1);
-        if (!DeviceIdentity::validDeviceName(deviceName) || !path.startsWith("resources/"))
-            return {false, String("Invalid resource topic")};
-
-        const String tail = path.substring(sizeof("resources/") - 1);
-        const int finalSlash = tail.indexOf('/');
-        if (finalSlash <= 0)
-            return {false, String("Invalid resource topic")};
-        const String name = tail.substring(0, finalSlash);
-        const String operation = tail.substring(finalSlash + 1);
-        if (!validSegment(name) || operation.indexOf('/') >= 0)
-            return {false, String("Invalid resource topic")};
-
-        NetResource *resource = findResource(deviceName, name);
-        if (resource == nullptr)
-            return {false, String("Resource not found")};
-
-        if (operation == "invoke" && resource->kind == NetResourceType::ACTION)
-            return invokeAction(*static_cast<NetActionResource *>(resource), payload);
-
-        if (operation == "set" && resource->kind == NetResourceType::VALUE)
-        {
-            NetValueResource &value = *static_cast<NetValueResource *>(resource);
-            if (value.isOwned())
-            {
-                if (!applyManagedWrite(value, payload))
-                    return {false, String("Value write rejected")};
-                return {true, value.encodedCurrentValue()};
-            }
-            const bool accepted = setValue(value, payload);
-            return {accepted, accepted ? String("OK") : String("Could not publish value")};
-        }
-
-        if (operation == "state" && resource->kind == NetResourceType::VALUE &&
-            !resource->isOwned())
-        {
-            const bool applied = applyRemoteState(*static_cast<NetValueResource *>(resource), payload);
-            return {applied, applied ? String("OK") : String("Invalid state payload")};
-        }
-
-        return {false, String("Operation does not match resource")};
-    }
-
     bool ambiguous = false;
-    NetResource *resource = findResourceByName(target, ambiguous);
+    NetResource *resource = findResourceByName(command.target, ambiguous);
     if (ambiguous)
-        return {false, String("Resource name is ambiguous; use its full topic")};
+        return {false, String("Resource name is ambiguous")};
     if (resource == nullptr)
         return {false, String("Resource not found")};
 
-    position = skipCommandSpace(expression, position);
-    if (position >= expression.length())
+    String verb = command.verb;
+    verb.toUpperCase();
+    if (verb.length() == 0)
     {
         if (resource->kind == NetResourceType::ACTION)
             return invokeAction(*static_cast<NetActionResource *>(resource), String());
@@ -733,16 +805,49 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         return {true, value.encodedCurrentValue()};
     }
 
-    const String verb = commandToken(expression, position);
-    if (!verb.equalsIgnoreCase("action") || resource->kind != NetResourceType::ACTION)
-        return {false, String("Usage: > <name> action [payload]")};
+    if (verb == "GET")
+    {
+        if (resource->kind != NetResourceType::VALUE)
+            return {false, String("GET requires a value resource")};
+        String unexpected = command.payload;
+        unexpected.trim();
+        if (unexpected.length() != 0)
+            return {false, String("GET does not accept a payload")};
 
-    const String payload = position < expression.length()
-                               ? expression.substring(position + 1)
-                               : String();
-    if (payload.length() > MaxValueLength)
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (!value.hasCurrentValue())
+            return {false, String("Value unavailable")};
+        return {true, value.encodedCurrentValue()};
+    }
+
+    if (verb == "SET")
+    {
+        if (resource->kind != NetResourceType::VALUE)
+            return {false, String("SET requires a value resource")};
+        if (command.payload.length() == 0)
+            return {false, String("SET requires a payload")};
+        if (command.payload.length() > MaxValueLength)
+            return {false, String("Payload too large")};
+
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (value.isOwned())
+        {
+            if (!applyManagedWrite(value, command.payload))
+                return {false, String("Value write rejected")};
+            return {true, value.encodedCurrentValue()};
+        }
+        const bool accepted = value.requestEncodedValue(command.payload);
+        return {accepted, accepted ? String("OK") : String("Could not publish value")};
+    }
+
+    if (verb != "INVOKE" && verb != "ACTION")
+        return {false, String("Unknown resource verb: ") + command.verb};
+    if (resource->kind != NetResourceType::ACTION)
+        return {false, String("INVOKE requires an action resource")};
+
+    if (command.payload.length() > MaxValueLength)
         return {false, String("Payload too large")};
-    return invokeAction(*static_cast<NetActionResource *>(resource), payload);
+    return invokeAction(*static_cast<NetActionResource *>(resource), command.payload);
 }
 
 bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &message)
