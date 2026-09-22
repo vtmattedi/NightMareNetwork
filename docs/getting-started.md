@@ -91,6 +91,11 @@ A useful explicit default configuration is:
 #define NM_ENABLE_JOBS 1
 #define NM_ENABLE_TIME_SYNC 1
 
+#define NM_TIMEZONE "UTC0"
+#define NM_NTP_SERVER_1 "pool.ntp.org"
+#define NM_NTP_SERVER_2 "time.nist.gov"
+#define NM_NTP_SERVER_3 "time.google.com"
+
 #define NM_ENABLE_OTA 0
 #define NM_ENABLE_HTTP 0
 #define NM_ENABLE_WEBSOCKET 0
@@ -596,10 +601,12 @@ With Console built-ins enabled, the command grammar includes:
 ```text
 PING
 INFO ...
+TIME
 JOB ...
 MQTT ...
 WIFI ...
 CONFIG ...
+> ...
 ```
 
 Commands can arrive through:
@@ -611,7 +618,18 @@ controlled MQTT / MQTTP
 Scheduler String jobs
 ```
 
-See [Commands](protocols/commands.md).
+The `>` form routes command/control input to already-bound Resources. For example:
+
+```text
+> temperature
+> identify
+> identify action {"mode":"blink"}
+> bedroom-ac/resources/power/set true
+```
+
+Bare Value names read the effective current Value. Bare Action names invoke an empty-payload Action. Full MQTT-shaped Resource topics preserve the Resource operation and treat the remainder as one opaque payload.
+
+See [Commands](protocols/commands.md) and [Time](modules/time.md).
 
 ## What appears on MQTT
 

@@ -11,6 +11,28 @@ NightMare has one text command grammar that can be executed from different trans
 
 The parser and built-in command handler are shared. A command behaves as the same command whether it came from serial, MQTT console, controlled MQTT request/response, an HTTP endpoint, or a Scheduler String job.
 
+## Resource command expressions
+
+When Resources are enabled, any command whose first non-whitespace character is `>` is handled by `ResourcesManager` **before** the generic command parser.
+
+Forms:
+
+```text
+> <name>
+> <name> action [payload]
+> <device>/resources/<name>/invoke [payload]
+> <device>/resources/<name>/set <payload>
+> <device>/resources/<name>/state <payload>
+```
+
+A short name must identify exactly one bound Resource. A bare Value name returns the encoded effective current Value; a bare Action invokes an empty payload.
+
+Everything after `action`, or after a full MQTT-shaped topic, is treated as one opaque Resource payload rather than as console arguments.
+
+`/state` is only accepted for a Remote Value. `/set` and `/invoke` follow the ownership of the bound Resource.
+
+Resource expressions use the Resource payload limit rather than the normal 512-character command-line limit.
+
 ## Grammar
 
 The parser accepts:
@@ -286,6 +308,28 @@ NETWORK
 are MQTT documents. The other section names are query-only.
 
 See [Status, info, and telemetry](status-info.md).
+
+## TIME
+
+```text
+TIME
+TIME STATUS
+```
+
+Both forms return the same JSON clock-status document with:
+
+```text
+synced
+valid
+epoch
+local
+timezone
+uptime_ms
+```
+
+`valid` reports whether the wall clock is usable. `synced` additionally requires NightMare's synchronization state to be set. `local` is formatted in the process timezone.
+
+See [Time](../modules/time.md).
 
 ## JOB
 
@@ -709,12 +753,13 @@ It should not be treated as part of application protocol design.
 
 ## Commands vs Resource Actions
 
-Commands and Resource Actions are intentionally different.
+Commands and Resource Actions remain intentionally different.
 
 Use a **command** for framework/operator control such as:
 
 ```text
 INFO
+TIME
 JOB
 MQTT
 WIFI
@@ -729,6 +774,6 @@ pair_remote
 run_cycle
 ```
 
-A Resource Action is discoverable through the Resource manifest and belongs to the device's application contract.
+A Resource Action remains discoverable through the Resource manifest and belongs to the device's application contract.
 
-A command belongs to the framework/operator command surface.
+The `>` syntax is a bridge between command transports and already-bound Resources; it does not redefine a Resource Action as a command family.

@@ -246,6 +246,8 @@ Discovery is separate from Remote Resource binding. A bound Remote Resource inst
 
 ## Time synchronization topics
 
+Automatic time synchronization now uses ESP32 SNTP. The MQTT control topics remain as an auxiliary timestamp path.
+
 When time synchronization is enabled, NightMare subscribes to:
 
 ```text

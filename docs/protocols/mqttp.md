@@ -251,38 +251,25 @@ Broadcast console is therefore useful for fan-out commands, but it is not one co
 
 ## Relationship to Resource Actions
 
-The basic Resource Action protocol uses:
+Raw Resource Action MQTT still uses:
 
 ```text
 <device>/resources/<action>/invoke
 ```
 
-and is intentionally fire-and-forget at the wire level.
+and remains fire-and-forget.
 
-A ManagedAction returns an in-process:
-
-```cpp
-ActionResult
-```
-
-but raw MQTT `/invoke` has no standard result topic, so that result is not returned to the invoking MQTT peer.
-
-`ResourcesManager::executeAction()` preserves the `ActionResult` for code that calls it directly.
-
-The current generic MQTTP implementation, however, transports **commands**. It does not automatically translate:
+The `>` Resource-command adapter gives command transports a correlated path around **local** Resource execution. An MQTTP request such as:
 
 ```text
-controlled request ID
-    -> Resource /invoke
-    -> ActionResult
-    -> controlled response
+> identify action {"mode":"blink"}
 ```
 
-into a built-in Resource RPC protocol.
+executes a ManagedAction on the receiving device and returns its `ActionResult.result` on the matching controlled-console response topic.
 
-If an application requires a correlated Action result today, it can expose an application command that executes the corresponding local operation/Action and returns the result through the normal command response path.
+This does not add a Resource result topic.
 
-A future Resource-specific correlated invocation mechanism could build on the same execution path without changing ordinary fire-and-forget `/invoke`.
+If the bound Action is Remote, the command publishes the normal `/invoke` request and can only report whether that publication was accepted. It still cannot report remote execution success. RemoteState writes have the same transport-acceptance limitation.
 
 ## Context on the device
 

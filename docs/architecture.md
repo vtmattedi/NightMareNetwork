@@ -125,6 +125,7 @@ reconnect restoration
 /set handling
 /invoke handling
 remote state application
+Resource command routing
 manifest discovery/diagnostics
 ```
 
@@ -355,7 +356,7 @@ WiFi_Auto()
     starts the WiFi/network path
 ```
 
-The WiFi first-connect path starts other enabled network services such as MQTT, time synchronization, and OTA according to feature configuration.
+The WiFi first-connect path starts other enabled network services according to feature configuration. Automatic time synchronization now starts the asynchronous ESP32 SNTP client; MQTT-assisted `Control/time` synchronization remains available as an auxiliary path.
 
 ## Runtime lifecycle
 
@@ -372,14 +373,17 @@ void loop()
 
 `tickNightMareESP()` is intentionally small.
 
-It services components that require cooperative polling, currently including:
+It services components that require cooperative dispatch, currently including:
 
 ```text
+completed SNTP synchronization events when time sync is enabled
 Scheduler when configured MANUAL
 serial command resolver when enabled
 ```
 
-It does not poll systems that already own tasks or are event driven, such as MQTT or WiFi.
+The SNTP network callback itself runs on lwIP's task; `tickNightMareESP()` moves NightMare state updates and the application time-sync callback back into the normal cooperative context.
+
+It does not otherwise poll systems that already own their own lifecycle, such as MQTT or WiFi.
 
 ## Reconnect lifecycle
 

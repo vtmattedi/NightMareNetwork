@@ -279,6 +279,7 @@ Commands are operator/framework operations such as:
 
 ```text
 INFO
+TIME
 JOB
 MQTT
 WIFI
@@ -288,7 +289,9 @@ REBOOT
 
 Applications may also provide their own command resolver.
 
-Commands are not Resource Actions. A Resource Action is part of the application's capability model; a command is part of the command/control surface.
+Commands and Resource Actions remain different abstractions: a Resource Action is part of the application's capability model, while a command is part of the command/control surface.
+
+A command whose first non-whitespace character is `>` is a Resource-routing expression. It is an operator/control adapter into already-bound Resources; it does not create a second Resource model or change the Resource MQTT protocol.
 
 ## Status
 

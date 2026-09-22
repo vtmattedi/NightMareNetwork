@@ -58,6 +58,11 @@ Example:
 
 #define NM_SCHEDULER_OWN_TASK 1
 
+#define NM_TIMEZONE "UTC0"
+#define NM_NTP_SERVER_1 "pool.ntp.org"
+#define NM_NTP_SERVER_2 "time.nist.gov"
+#define NM_NTP_SERVER_3 "time.google.com"
+
 #define NM_TELEMETRY_INTERVAL_MS 60000UL
 #define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
 ```
@@ -96,6 +101,19 @@ NM_PLATFORM_ESP32 1
 ```
 
 and is reserved for a future platform split.
+
+## Time defaults
+
+When time synchronization is enabled, the current defaults are:
+
+```text
+NM_TIMEZONE      "UTC0"
+NM_NTP_SERVER_1  "pool.ntp.org"
+NM_NTP_SERVER_2  "time.nist.gov"
+NM_NTP_SERVER_3  "time.google.com"
+```
+
+`NM_TIMEZONE` is a POSIX timezone string used for local-time formatting. Epoch timestamps remain UTC-based.
 
 ## Important configurable intervals
 
@@ -320,6 +338,9 @@ This ensures Resource declarations exist before MQTT participation and before ol
 The framework cooperative tick currently handles:
 
 ```text
+Time synchronization completion
+    when NM_ENABLE_TIME_SYNC
+
 Scheduler
     only when Scheduler mode is MANUAL
 
@@ -327,18 +348,9 @@ Serial console
     only when NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
 ```
 
-Example:
+SNTP completion is intentionally dispatched here because the ESP callback runs on lwIP's task. NightMare defers `RuntimeState` bookkeeping and the application `onTimeSync()` callback to the normal cooperative context.
 
-```cpp
-void loop()
-{
-    tickNightMareESP();
-
-    applicationTick();
-}
-```
-
-Task-driven/event-driven subsystems such as MQTT and WiFi are not polled here.
+Task-driven/event-driven subsystems such as MQTT and WiFi are not otherwise polled here.
 
 ## WiFi project credentials
 
@@ -418,7 +430,7 @@ On the first successful WiFi connection in a boot, the current implementation st
 ```text
 OTA
 MQTT
-time synchronization
+SNTP time synchronization
 ```
 
 in that order.
@@ -428,12 +440,14 @@ Specifically:
 ```cpp
 initOTA();
 MQTT_Init(false);
-autoSyncTime();
+startSntpTimeSync();
 ```
 
 according to feature flags.
 
-`MQTT_Init(false)` means the normal automatic first broker selection is Remote MQTT.
+`MQTT_Init(false)` selects Remote MQTT initially.
+
+`startSntpTimeSync()` configures the ESP32 SNTP client and returns immediately. Completion is applied later through `tickNightMareESP()`.
 
 ## Later WiFi reconnects
 
@@ -505,25 +519,19 @@ See [Network and MQTT](network.md).
 
 ## Time synchronization
 
-The current time-sync implementation is platform/project-specific.
+Automatic time synchronization now uses the ESP32 SNTP client rather than a blocking HTTP request.
 
-Automatic synchronization performs an HTTP request to:
+The canonical API is:
 
-```text
-http://utctime.app/api/now/America/Bahia
+```cpp
+startSntpTimeSync();
 ```
 
-and uses the returned:
+It uses the existing process `TZ` value when present, otherwise `NM_TIMEZONE`, plus `NM_NTP_SERVER_1..3`.
 
-```text
-unix
-```
+Synchronization is asynchronous. The SNTP callback marks a pending event; `tickNightMareESP()` later calls `processTimeSyncEvents()` so `SystemState` and application callbacks are not touched from lwIP's task.
 
-timestamp.
-
-The hard-coded `America/Bahia` endpoint is a known platform/application assumption and should not be treated as a general timezone abstraction.
-
-Unix epoch seconds are stored as UTC; timezone offsets are not applied to the epoch value.
+See [Time](time.md) for the complete clock, timezone, formatting, and synchronization API.
 
 ## MQTT-assisted time sync
 
@@ -611,7 +619,7 @@ LittleFS
 Arduino WiFi
 esp_mqtt_client
 ArduinoOTA
-HTTPClient
+esp_sntp
 ```
 
 A future platform split can move those implementations without requiring the Resource protocol itself to become platform-specific.

@@ -452,7 +452,7 @@ struct ActionResult
 
 Ordinary raw MQTT `/invoke` does not have a response topic, so the remote sender does not receive this result automatically.
 
-The result is still useful for local/correlated execution paths that call `executeAction()` directly.
+The result is still useful for local/correlated execution paths. `ResourcesManager::executeAction()` preserves it directly, and the `>` Resource-command adapter can surface a ManagedAction result through the normal command/MQTTP response path.
 
 ## RemoteAction
 
@@ -561,6 +561,32 @@ A zero-argument Action can therefore be invoked with:
 ```cpp
 action.invoke();
 ```
+
+## Resource command bridge
+
+When Console + Resources are enabled, a command beginning with `>` is routed to `ResourcesManager::executeCommand()` before the generic command parser.
+
+Examples:
+
+```text
+> temperature
+> identify
+> identify action {"mode":"blink"}
+> bedroom-ac/resources/power/set true
+> bedroom-ac/resources/identify/invoke {"mode":"blink"}
+```
+
+A bare unique Value name returns its **effective current value**, so an optimistic RemoteState can return its active optimistic value. A bare Action name invokes an empty-payload Action.
+
+If more than one bound Resource has the same short name, the command is rejected as ambiguous and a full MQTT-shaped topic is required.
+
+For `> name action payload`, everything after the `action` token is one opaque Resource payload.
+
+The full-topic form supports `/invoke`, `/set`, and `/state` subject to Resource kind/ownership. `/state` is accepted only for a Remote Value. A Managed writable Value `/set` uses the same decode + `onWrite` path as MQTT ingress. A Remote `/set` or `/invoke` only reports transport acceptance.
+
+For a ManagedAction, command execution returns its local `ActionResult`.
+
+The Resource payload limit remains 2048 bytes. The leading `>` is a command/control adapter; it does not change the Resource MQTT protocol.
 
 ## Manager participation
 

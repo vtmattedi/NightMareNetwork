@@ -139,10 +139,12 @@ const T &authoritativeValue() const;
 bool setValue(const T &value);
 
 String encodedValue() const;
+String encodedCurrentValue() const;
 
 ResourceFreshness freshness;
 bool isStale() const;
 bool hasAuthoritativeValue() const;
+bool hasCurrentValue() const;
 
 uint32_t lastUpdateMs() const;
 uint32_t lastWriteMs() const;
@@ -363,6 +365,9 @@ void setManifestHandler(ManifestHandler handler);
 ActionResult executeAction(
     NetActionResource &action,
     const String &canonicalPayload);
+
+ActionResult executeCommand(
+    const String &expression);
 
 bool withdrawIdentity(const String &oldDeviceName);
 ```
@@ -747,7 +752,25 @@ Namespace:
 NightMare::Time
 ```
 
-Methods:
+```cpp
+constexpr time_t SecondsPerMinute = 60;
+constexpr time_t SecondsPerHour = 60 * SecondsPerMinute;
+
+enum TimeStampFormat
+{
+    DateAndTime,
+    OnlyDate,
+    SmallDate,
+    OnlyTime,
+    OnlyTimeWithSeconds,
+    OnlyTimeLive,
+    DowDate,
+    TimeSinceStamp,
+    CountdownFromTimestamp
+};
+```
+
+Clock API:
 
 ```cpp
 time_t now();
@@ -762,19 +785,34 @@ int month(time_t epoch = now());
 int year(time_t epoch = now());
 ```
 
-Calendar fields are UTC.
+The component accessors are UTC.
+
+Local/human formatting:
+
+```cpp
+String timestampToDateString(time_t timestamp, TimeStampFormat format = DateAndTime);
+String timeString(time_t timestamp = now());
+String fullTimeString(time_t timestamp = now());
+String dateString(time_t timestamp = now());
+time_t timestampOfNextOccurrence(const String &timeString);
+```
+
+See [Time](modules/time.md).
 
 ## Time synchronization
 
-When enabled:
+Canonical synchronization API:
 
 ```cpp
-bool autoSyncTime();
+bool startSntpTimeSync();
 void manualSyncTime(unsigned long timestamp);
 void onTimeSync(void (*callback)(void));
+void processTimeSyncEvents();
 ```
 
-The current automatic service uses an ESP/HTTP implementation and the hard-coded `America/Bahia` endpoint documented in [ESP32 platform lifecycle](platform.md).
+`startSntpTimeSync()` starts asynchronous ESP32 SNTP. `processTimeSyncEvents()` is normally called by `tickNightMareESP()`.
+
+The active source currently also contains a deprecated `autoSyncTime()` compatibility alias; new code should use `startSntpTimeSync()`.
 
 ## Telemetry
 
@@ -1100,6 +1138,11 @@ NM_ENABLE_TELEMETRY                 1
 NM_ENABLE_SCHEDULER                 1
 NM_ENABLE_JOBS                      1
 NM_ENABLE_TIME_SYNC                 1
+
+NM_TIMEZONE                        "UTC0"
+NM_NTP_SERVER_1                    "pool.ntp.org"
+NM_NTP_SERVER_2                    "time.nist.gov"
+NM_NTP_SERVER_3                    "time.google.com"
 
 NM_ENABLE_OTA                       0
 NM_ENABLE_HTTP                      0

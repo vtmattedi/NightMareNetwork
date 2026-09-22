@@ -142,7 +142,7 @@ Examples include:
 
 **Reason:** Resource Actions describe application capabilities. Commands operate the framework, configuration, diagnostics, and administrative control plane.
 
-**Consequence:** there are two deliberate execution surfaces. A capability such as `learn_ir` may be a Resource Action, while `INFO NETWORK` or `JOB CLEAR` is a command.
+**Consequence:** there are two deliberate execution surfaces. A capability such as `learn_ir` remains a Resource Action, while `INFO NETWORK`, `TIME`, or `JOB CLEAR` is a command. The `>` Resource-command syntax is only an adapter from command transports into existing Resources; it does not create a second Resource model.
 
 ## Ordinary `/invoke` is fire-and-forget
 
@@ -150,7 +150,7 @@ Examples include:
 
 **Reason:** most Action requests only need to be delivered. Adding request IDs and result topics to every invocation would make the basic Resource protocol heavier.
 
-**Consequence:** successful publish means accepted for transport, not successful remote execution. Callers that require a result should use a correlated command/MQTTP path.
+**Consequence:** successful raw `/invoke` publish means accepted for transport, not successful remote execution. A correlated command/MQTTP request using the `>` Resource-command form can surface the `ActionResult` of a ManagedAction executed on the receiving device. Invoking a RemoteAction still only reports whether its MQTT publication was accepted.
 
 ## Identity adoption is a migration, not a live rename
 
