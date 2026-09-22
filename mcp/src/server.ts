@@ -25,8 +25,8 @@ export function createServer(repo: Repo): McpServer {
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       instructions: [
-        "NightMare Network is a C++ library for ESP32 devices on a home MQTT network, plus the",
-        "conventions those devices share. Use search_docs first for concepts, protocols and how-tos;",
+        "NightMare Network is an ESP32 C++ framework and MQTT resource protocol. Use search_docs",
+        "first for concepts, protocols and how-tos;",
         "get_api for a specific function, class or macro; search_source / get_source when the docs",
         "are not enough. If documentation and source disagree, the source is right. Every result",
         `carries the version it came from: ${versionLine(repo.version)}.`,

@@ -90,7 +90,7 @@ Documentation should explain the public model, but exact behavior belongs to the
 Every normal tool result ends with a version stamp similar to:
 
 ```text
-NightMare Network 0.2.0 · docs/rewrite @ 26ed983
+NightMare Network 0.2.0 · <branch> @ <revision>
 ```
 
 The values come from:
@@ -387,7 +387,7 @@ For an example:
 get_example
 ```
 
-followed by source verification while the current examples remain stale.
+followed by source verification when exact implementation behavior matters.
 
 ## Documentation metadata
 

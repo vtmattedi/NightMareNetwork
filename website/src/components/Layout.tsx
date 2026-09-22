@@ -37,7 +37,7 @@ export function Layout() {
   return (
     <>
       <Head>
-        <meta name="description" content="NightMare Network: a C++ library and a set of conventions for ESP32 devices on a home MQTT network, with an MCP server for AI assistants." />
+        <meta name="description" content="NightMare Network: an ESP32 C++ framework and MQTT resource protocol, with documentation and a read-only MCP server for AI assistants." />
         <meta property="og:site_name" content="NightMare Network" />
         <meta property="og:image" content="/og-image.png" />
       </Head>
