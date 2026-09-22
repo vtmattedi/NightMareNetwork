@@ -1,50 +1,617 @@
 ---
 title: ESP32 platform lifecycle
-description: Feature flags, hardware profile, WiFi, time, OTA, and lifecycle helpers.
+description: Feature flags, hardware profile, WiFi, time, OTA, and NightMareESP lifecycle helpers.
 section: modules
 order: 70
 ---
 
 # ESP32 platform lifecycle
 
-TODO: rewrite from the active `src/` implementation.
+The active NightMare implementation targets:
+
+```text
+Arduino
+ESP32 / espressif32
+```
+
+The core abstractions are kept reasonably separate, but several platform services still use ESP32, Arduino, FreeRTOS, LittleFS, and `esp_mqtt_client` directly.
+
+The main project-facing lifecycle is:
+
+```cpp
+startNightMareESP();
+tickNightMareESP();
+```
+
+## Main include
+
+Most applications can include:
+
+```cpp
+#include <NightMare.h>
+```
+
+This exposes the enabled NightMare modules according to compile-time feature configuration.
 
 ## NightMareConfig.h
 
-TODO.
+A consuming project may provide:
 
-## startNightMareESP()
+```text
+include/NightMareConfig.h
+```
 
-TODO.
+`Features.h` includes it automatically when present.
 
-## tickNightMareESP()
+The project can define feature macros before NightMare's defaults are applied.
 
-TODO.
+Example:
 
-## Scheduler ownership
+```cpp
+#pragma once
 
-TODO.
+#define NM_FIRMWARE_VERSION "1.2.0"
+
+#define NM_ENABLE_OTA 1
+#define NM_ENABLE_HTTP 0
+#define NM_ENABLE_WEBSOCKET 0
+
+#define NM_SCHEDULER_OWN_TASK 1
+
+#define NM_TELEMETRY_INTERVAL_MS 60000UL
+#define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
+```
+
+## Default feature flags
+
+Current defaults are:
+
+```text
+NM_ENABLE_SETTINGS             1
+NM_ENABLE_RESOURCES            1
+NM_ENABLE_NETWORK              1
+NM_ENABLE_CONSOLE              1
+NM_ENABLE_WIFI                 1
+NM_ENABLE_MQTT                 1
+NM_ENABLE_TELEMETRY            1
+NM_ENABLE_SCHEDULER            1
+NM_ENABLE_JOBS                 1
+NM_ENABLE_TIME_SYNC            1
+
+NM_ENABLE_OTA                  0
+NM_ENABLE_HTTP                 0
+NM_ENABLE_WEBSOCKET            0
+NM_ENABLE_LVGL                 0
+
+NM_ENABLE_ACTION_PAYLOAD_ASSERTION  0
+
+NM_CONSOLE_BUILTINS            1
+NM_CONSOLE_SERIAL              0
+```
+
+The platform marker is currently:
+
+```text
+NM_PLATFORM_ESP32 1
+```
+
+and is reserved for a future platform split.
+
+## Important configurable intervals
+
+Defaults:
+
+```text
+NM_TELEMETRY_INTERVAL_MS           60000
+NM_NETWORK_TELEMETRY_INTERVAL_MS  300000
+NM_IDENTITY_CLEANUP_RETRY_MS       60000
+```
+
+## Scheduler execution mode
+
+```text
+NM_SCHEDULER_OWN_TASK 1
+    startNightMareESP() selects Scheduler TASK mode
+
+NM_SCHEDULER_OWN_TASK 0
+    startNightMareESP() selects Scheduler MANUAL mode
+```
+
+In MANUAL mode:
+
+```cpp
+tickNightMareESP();
+```
+
+drives the Scheduler.
+
+## Compile-time dependencies
+
+The current feature graph enforces:
+
+```text
+MQTT
+    -> NETWORK
+
+NETWORK
+    -> RESOURCES
+
+TELEMETRY
+    -> SCHEDULER
+    -> MQTT
+
+JOBS
+    -> SCHEDULER
+
+SCHEDULER
+    -> SETTINGS
+    -> CONSOLE
+
+CONSOLE
+    -> SETTINGS
+
+TIME_SYNC
+    -> WIFI
+    -> SETTINGS
+
+WIFI
+    -> SETTINGS
+
+OTA
+    -> WIFI
+    -> SETTINGS
+
+HTTP
+    -> NETWORK
+    -> CONSOLE
+
+WEBSOCKET
+    -> HTTP
+
+CONSOLE_SERIAL
+    -> CONSOLE
+```
+
+These are current implementation dependencies, not necessarily permanent architectural requirements.
 
 ## HardwareProfile
 
-TODO.
+Projects can optionally provide:
 
-## WiFi
+```text
+NightMareHardware.h
+```
 
-TODO.
+That file should expose the project's hardware profile through:
 
-## MQTT startup
+```cpp
+NMHardware::Profile projectProfile();
+```
 
-TODO.
+The model is:
+
+```cpp
+struct Connection
+{
+    const char *name;
+    int16_t pin;
+    Direction direction;
+    Pull pull;
+    bool activeLow;
+    const char *note;
+};
+
+struct Profile
+{
+    const char *boardName;
+    const Connection *connections;
+    size_t connectionCount;
+};
+```
+
+Directions:
+
+```text
+Input
+Output
+Bidirectional
+Power
+Ground
+Bus
+```
+
+Pulls:
+
+```text
+None
+Up
+Down
+External
+```
+
+If no `NightMareHardware.h` exists, NightMare returns:
+
+```text
+boardName:   unspecified
+connections: none
+```
+
+The profile feeds INFO/HARDWARE and INFO/HWCONNECTIONS.
+
+## `startNightMareESP()`
+
+The standard startup helper performs common framework setup in this order.
+
+### 1. Device identity
+
+```cpp
+gDeviceIdentity.begin();
+```
+
+### 2. Scheduler
+
+When enabled:
+
+```cpp
+gScheduler.begin(
+    NM_SCHEDULER_OWN_TASK
+        ? SchedulerRunMode::TASK
+        : SchedulerRunMode::MANUAL);
+```
+
+### 3. Pending identity cleanup retry
+
+When Scheduler + MQTT are enabled and cleanup is pending, NightMare installs:
+
+```text
+_nm_identity_cleanup
+```
+
+as a recurring MANAGED callback job.
+
+### 4. Telemetry
+
+When enabled:
+
+```cpp
+Telemetry.start();
+```
+
+installs the periodic system/network publication jobs.
+
+### 5. WiFi
+
+When enabled:
+
+```cpp
+WiFi_Auto();
+```
+
+starts the asynchronous WiFi path.
+
+## Resource registration comes first
+
+Application Resources should be bound before:
+
+```cpp
+startNightMareESP();
+```
+
+Example:
+
+```cpp
+void setup()
+{
+    power.onWrite = onPowerWrite;
+
+    gResourcesManager.bindResource(&power);
+    gResourcesManager.bindResource(&temperature);
+
+    startNightMareESP();
+
+    startApplicationHardware();
+}
+```
+
+This ensures Resource declarations exist before MQTT participation and before old-identity cleanup may run.
+
+## `tickNightMareESP()`
+
+The framework cooperative tick currently handles:
+
+```text
+Scheduler
+    only when Scheduler mode is MANUAL
+
+Serial console
+    only when NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
+```
+
+Example:
+
+```cpp
+void loop()
+{
+    tickNightMareESP();
+
+    applicationTick();
+}
+```
+
+Task-driven/event-driven subsystems such as MQTT and WiFi are not polled here.
+
+## WiFi project credentials
+
+When WiFi is enabled, the current platform code includes a consuming-project header:
+
+```text
+creds.h
+```
+
+and requires:
+
+```cpp
+DEFAULT_SSID
+DEFAULT_PASSWORD
+```
+
+The project, not the NightMare library, owns this credential file.
+
+## WiFi_Auto
+
+```cpp
+WiFi_Auto();
+```
+
+initializes PersistentSettings.
+
+If either stored key is absent:
+
+```text
+_ssid
+_password
+```
+
+the current implementation writes defaults from:
+
+```text
+DEFAULT_SSID
+DEFAULT_PASSWORD
+```
+
+Then it starts an asynchronous connection using the stored values.
+
+## WiFi hostname and identity
+
+Both synchronous and asynchronous WiFi connection paths set the hostname from:
+
+```cpp
+gDeviceIdentity.getDeviceName()
+```
+
+and lock the identity address before network participation.
+
+This is one reason a later adoption may wait for reboot rather than changing the running name immediately.
+
+## Async WiFi task
+
+`WiFi_ConnectAsync()` starts:
+
+```text
+WiFi_Task
+```
+
+with:
+
+```text
+stack:     4096 bytes
+priority:  1
+core:      tskNO_AFFINITY
+```
+
+Using no fixed core allows the same code to run on single-core ESP variants such as C3/C6/H2/S2.
+
+## First WiFi connection
+
+On the first successful WiFi connection in a boot, the current implementation starts enabled network services:
+
+```text
+OTA
+MQTT
+time synchronization
+```
+
+in that order.
+
+Specifically:
+
+```cpp
+initOTA();
+MQTT_Init(false);
+autoSyncTime();
+```
+
+according to feature flags.
+
+`MQTT_Init(false)` means the normal automatic first broker selection is Remote MQTT.
+
+## Later WiFi reconnects
+
+The WiFi layer tracks whether this is its first successful connection.
+
+The first-connection initialization block is not rerun on every later WiFi reconnect.
+
+Long-lived network services are expected to manage their own connection/reconnect lifecycle once started.
+
+## WiFi callback
+
+Projects can register:
+
+```cpp
+WiFi_onConnected(callback);
+```
+
+with signature:
+
+```cpp
+void callback(bool firstConnection);
+```
+
+The callback runs whenever the WiFi monitor detects a connection and tells the project whether this is the first successful connection handled by that module.
+
+## WiFi credential change
+
+```cpp
+WiFi_ChangeCredentials(ssid, password);
+```
+
+does the following:
+
+1. disconnects current WiFi,
+2. tries the new credentials synchronously for up to 15 seconds,
+3. if they fail, starts reconnect with the previous stored credentials,
+4. if they succeed, writes `_ssid` and `_password` to PersistentSettings.
+
+The private storage keys should not be manipulated directly by applications.
+
+## MQTT platform transport
+
+The ESP MQTT implementation uses:
+
+```text
+esp_mqtt_client
+FreeRTOS control queue/task
+```
+
+Local broker:
+
+```text
+mqtt://...
+```
+
+Remote broker:
+
+```text
+mqtts://...
+```
+
+The remote broker is verified with the project-provided:
+
+```text
+ROOT_CA
+```
+
+See [Network and MQTT](network.md).
 
 ## Time synchronization
 
-TODO.
+The current time-sync implementation is platform/project-specific.
+
+Automatic synchronization performs an HTTP request to:
+
+```text
+http://utctime.app/api/now/America/Bahia
+```
+
+and uses the returned:
+
+```text
+unix
+```
+
+timestamp.
+
+The hard-coded `America/Bahia` endpoint is a known platform/application assumption and should not be treated as a general timezone abstraction.
+
+Unix epoch seconds are stored as UTC; timezone offsets are not applied to the epoch value.
+
+## MQTT-assisted time sync
+
+When MQTT connects and NightMare wall time is invalid, it can also publish:
+
+```text
+Control/request
+```
+
+with payload:
+
+```text
+time
+```
+
+and consume a `Control/time` JSON response.
+
+That path ultimately calls:
+
+```cpp
+manualSyncTime(timestamp);
+```
+
+## Time-sync runtime state
+
+Successful time sync updates:
+
+```text
+SystemState["time_synced"] = "1"
+SystemState["boot_time"]   = <derived epoch>
+```
+
+and invokes the optional callback installed by:
+
+```cpp
+onTimeSync(callback);
+```
 
 ## OTA
 
-TODO.
+OTA is disabled by default:
 
-## Feature dependencies
+```text
+NM_ENABLE_OTA 0
+```
 
-TODO.
+When enabled, it depends on WiFi + Settings and is initialized on the first successful WiFi connection.
+
+OTA is a platform service, not part of the Resource protocol.
+
+## HTTP, WebSocket, and LVGL
+
+These modules remain optional:
+
+```text
+NM_ENABLE_HTTP
+NM_ENABLE_WEBSOCKET
+NM_ENABLE_LVGL
+```
+
+They are not part of the core Resource architecture and have not received the same freeze-level architecture pass.
+
+New core design should not use those modules as precedent for Resource/network semantics.
+
+## Platform boundary today
+
+The current library already separates several concepts cleanly:
+
+```text
+Resource model
+DeviceIdentity state
+Scheduler model
+Telemetry model
+MQTT facade vs ESP transport
+```
+
+but the complete library is not yet portable beyond ESP32.
+
+Current platform-specific dependencies include:
+
+```text
+ESP hardware APIs
+FreeRTOS
+LittleFS
+Arduino WiFi
+esp_mqtt_client
+ArduinoOTA
+HTTPClient
+```
+
+A future platform split can move those implementations without requiring the Resource protocol itself to become platform-specific.
