@@ -566,27 +566,112 @@ action.invoke();
 
 When Console + Resources are enabled, a command beginning with `>` is routed to `ResourcesManager::executeCommand()` before the generic command parser.
 
-Examples:
+The character immediately after `>` is part of the grammar.
+
+### ResourceManager operations
+
+No space after `>` selects an operation owned by the manager itself:
+
+```text
+>list
+>raw <topic> [payload]
+```
+
+`>list` returns JSON describing the currently bound Resources.
+
+Each entry includes:
+
+```text
+name
+kind
+role
+owner
+```
+
+Value entries also include:
+
+```text
+access
+type
+available
+freshness
+```
+
+Action entries include:
+
+```text
+arguments
+```
+
+`>raw` feeds the supplied topic and opaque payload through the same Resource ingress path used for MQTT messages:
+
+```text
+>raw bedroom-ac/resources/power/set true
+```
+
+This is an ingress/testing/control facility. It is not the normal short-name Resource syntax.
+
+### Resource operations by name
+
+A space after `>` selects a bound Resource by unique short name:
 
 ```text
 > temperature
+> temperature get
+> power set true
 > identify
-> identify action {"mode":"blink"}
-> bedroom-ac/resources/power/set true
-> bedroom-ac/resources/identify/invoke {"mode":"blink"}
+> identify invoke {"mode":"blink"}
 ```
 
-A bare unique Value name returns its **effective current value**, so an optimistic RemoteState can return its active optimistic value. A bare Action name invokes an empty-payload Action.
+A bare Value performs `get`.
 
-If more than one bound Resource has the same short name, the command is rejected as ambiguous and a full MQTT-shaped topic is required.
+A bare Action performs `invoke` with an empty payload.
 
-For `> name action payload`, everything after the `action` token is one opaque Resource payload.
+The explicit verbs are:
 
-The full-topic form supports `/invoke`, `/set`, and `/state` subject to Resource kind/ownership. `/state` is accepted only for a Remote Value. A Managed writable Value `/set` uses the same decode + `onWrite` path as MQTT ingress. A Remote `/set` or `/invoke` only reports transport acceptance.
+```text
+get
+set
+invoke
+```
+
+The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
+
+If more than one bound Resource has the same short name, the command is rejected as ambiguous.
+
+`get` is valid only for Values and accepts no payload. It returns the **effective current value**, so an optimistic RemoteState can return its active optimistic value.
+
+`set` is valid only for Values and requires a payload.
+
+For a ManagedState, `set` uses the same decode + `onWrite` acceptance path as MQTT `/set` ingress.
+
+For a RemoteState, `set` uses the normal typed `setValue()` path, including optimistic behavior, and success means the request was accepted for transport.
+
+`invoke` is valid only for Actions. Everything after the verb is one opaque Resource payload.
 
 For a ManagedAction, command execution returns its local `ActionResult`.
 
-The Resource payload limit remains 2048 bytes. The leading `>` is a command/control adapter; it does not change the Resource MQTT protocol.
+For a RemoteAction, success means only that the normal MQTT `/invoke` publication was accepted.
+
+### Limits
+
+Normal Value/Action payloads remain limited to:
+
+```text
+2048 bytes
+```
+
+The overall Resource-command expression limit is larger:
+
+```text
+NetResourceMaxCommandLength
+    = NetResourceMaxManifestLength + 256
+    = 16640 bytes
+```
+
+That larger envelope allows `>raw` to carry Resource ingress such as a manifest-sized payload.
+
+The leading `>` is a command/control adapter; it does not change the Resource MQTT protocol.
 
 ## Manager participation
 

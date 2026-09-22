@@ -15,23 +15,79 @@ The parser and built-in command handler are shared. A command behaves as the sam
 
 When Resources are enabled, any command whose first non-whitespace character is `>` is handled by `ResourcesManager` **before** the generic command parser.
 
-Forms:
+The character immediately after `>` selects one of two grammars.
+
+### ResourceManager operations
+
+No space after `>` selects an internal ResourceManager operation:
+
+```text
+>list
+>raw <topic> [payload]
+```
+
+`>list` returns the manager's currently bound Resources as JSON.
+
+`>raw` sends the supplied MQTT-shaped topic and opaque payload through `ResourcesManager::handleIngressMessage()`.
+
+Examples:
+
+```text
+>list
+>raw bedroom-ac/resources/power/set true
+>raw weather-node/resources/temperature/state 23.5
+```
+
+### Bound Resource operations
+
+A space after `>` selects a Resource by unique short name:
 
 ```text
 > <name>
-> <name> action [payload]
-> <device>/resources/<name>/invoke [payload]
-> <device>/resources/<name>/set <payload>
-> <device>/resources/<name>/state <payload>
+> <name> get
+> <name> set <payload>
+> <name> invoke [payload]
 ```
 
-A short name must identify exactly one bound Resource. A bare Value name returns the encoded effective current Value; a bare Action invokes an empty payload.
+A bare Value defaults to `get`.
 
-Everything after `action`, or after a full MQTT-shaped topic, is treated as one opaque Resource payload rather than as console arguments.
+A bare Action defaults to `invoke` with an empty payload.
 
-`/state` is only accepted for a Remote Value. `/set` and `/invoke` follow the ownership of the bound Resource.
+`get` accepts no payload and returns the encoded **effective current Value**.
 
-Resource expressions use the Resource payload limit rather than the normal 512-character command-line limit.
+`set` requires a Value and a payload. A Managed Value goes through its normal managed write path; a Remote writable Value goes through its normal typed request path, preserving RemoteState optimism.
+
+`invoke` requires an Action. A ManagedAction returns its local `ActionResult`; a RemoteAction can only report whether publication was accepted.
+
+The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
+
+A short name must identify exactly one bound Resource. Ambiguous names are rejected.
+
+Everything after `set` or `invoke` is kept as one opaque Resource payload rather than being parsed as command arguments.
+
+### Resource-command size limits
+
+Normal commands remain limited to:
+
+```text
+512 characters
+```
+
+Resource-command expressions use:
+
+```text
+NetResourceMaxCommandLength
+    = NetResourceMaxManifestLength + 256
+    = 16640 bytes
+```
+
+Individual Value/Action payloads are still limited to:
+
+```text
+2048 bytes
+```
+
+The larger expression envelope exists so `>raw` can carry Resource ingress such as a manifest-sized payload.
 
 ## Grammar
 

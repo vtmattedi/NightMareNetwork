@@ -618,16 +618,26 @@ controlled MQTT / MQTTP
 Scheduler String jobs
 ```
 
-The `>` form routes command/control input to already-bound Resources. For example:
+The `>` form routes command/control input to already-bound Resources. The character immediately after `>` is significant:
 
 ```text
+>list
+>raw <topic> [payload]
+
 > temperature
-> identify
-> identify action {"mode":"blink"}
-> bedroom-ac/resources/power/set true
+> power set true
+> identify invoke {"mode":"blink"}
 ```
 
-Bare Value names read the effective current Value. Bare Action names invoke an empty-payload Action. Full MQTT-shaped Resource topics preserve the Resource operation and treat the remainder as one opaque payload.
+No space after `>` selects a ResourceManager operation such as `list` or `raw`.
+
+A space after `>` selects a bound Resource by unique short name. A bare Value reads its effective current Value; a bare Action invokes an empty payload. Explicit Resource verbs are `get`, `set`, and `invoke`.
+
+`>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
+
+```text
+>raw bedroom-ac/resources/power/set true
+```
 
 See [Commands](protocols/commands.md) and [Time](modules/time.md).
 

@@ -140,6 +140,7 @@ bool setValue(const T &value);
 
 String encodedValue() const;
 String encodedCurrentValue() const;
+bool requestEncodedValue(const String &encoded);
 
 ResourceFreshness freshness;
 bool isStale() const;
@@ -369,6 +370,11 @@ ActionResult executeAction(
 ActionResult executeCommand(
     const String &expression);
 
+// Resource command grammar:
+//   >list
+//   >raw <topic> [payload]
+//   > <name> [get|set|invoke] [payload]
+
 bool withdrawIdentity(const String &oldDeviceName);
 ```
 
@@ -400,10 +406,11 @@ public:
 Current limits:
 
 ```text
-Resources per manager:         100
-Resource/topic segment:        64 characters
-Value/Action payload:          2048 bytes
-Resource manifest capacity:    16384 bytes
+Resources per manager:          100
+Resource/topic segment:         64 characters
+Value/Action payload:           2048 bytes
+Resource manifest capacity:     16384 bytes
+Resource command expression:    16640 bytes
 ```
 
 ## Scheduler

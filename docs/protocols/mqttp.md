@@ -262,7 +262,7 @@ and remains fire-and-forget.
 The `>` Resource-command adapter gives command transports a correlated path around **local** Resource execution. An MQTTP request such as:
 
 ```text
-> identify action {"mode":"blink"}
+> identify invoke {"mode":"blink"}
 ```
 
 executes a ManagedAction on the receiving device and returns its `ActionResult.result` on the matching controlled-console response topic.
