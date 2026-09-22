@@ -1,5 +1,5 @@
 #include "NightMareESP.h"
-
+#include <NightMare.h>
 #include <Core/DeviceIdentity.h>
 #if NM_ENABLE_SCHEDULER
 #include <Core/Scheduler.h>
@@ -23,17 +23,42 @@
 #if NM_ENABLE_SCHEDULER && NM_ENABLE_MQTT
 namespace
 {
-constexpr char IdentityCleanupJob[] = "_nm_identity_cleanup";
+    constexpr char IdentityCleanupJob[] = "_nm_identity_cleanup";
 
-void identityCleanupTask()
-{
-    // PENDING keeps the job for the next interval: offline, a failed part, or
-    // an adoption that only takes effect after reboot.
-    if (processPendingIdentityCleanup() != IdentityCleanupResult::PENDING)
-        gScheduler.remove(IdentityCleanupJob);
-}
+    void identityCleanupTask()
+    {
+        // PENDING keeps the job for the next interval: offline, a failed part, or
+        // an adoption that only takes effect after reboot.
+        if (processPendingIdentityCleanup() != IdentityCleanupResult::PENDING)
+            gScheduler.remove(IdentityCleanupJob);
+    }
 }
 #endif
+
+void introNightMareESP()
+{
+#if NM_ENABLE_SETTINGS
+    PersistentSettings.begin();
+    // Local wall jobs for the deployed Sao Paulo device.
+    setenv("TZ", PersistentSettings.get("ac_timezone", NM_TIMEZONE).c_str(), 1);
+#else
+    setenv("TZ", NM_TIMEZONE, 1);
+#endif
+    tzset();
+    Serial.begin(115200);
+    gDeviceIdentity.begin();
+    Serial.print(MattediWorksPresents);
+    Serial.print(NightMareNetworkFiglet);
+    Serial.println(gDeviceIdentity.getDeviceName());
+#ifdef VERSION
+    // Device projects normally generate VERSION and BUILD_TIMESTAMP from their
+    // version pre-script. Guards keep standalone library builds usable too.
+    Serial.printf("\tFirmware Version: %s\n", VERSION);
+#endif
+#ifdef BUILD_TIMESTAMP
+    Serial.printf("\tBuild Date: %s\n", BUILD_TIMESTAMP);
+#endif
+}
 
 // The application binds its resources before calling this, which is why the
 // cleanup retry is installed here: withdrawal can only reach resources that are
