@@ -64,7 +64,7 @@ public:
     /// quietly moving execution somewhere else. True means the scheduler runs,
     /// whether or not persistent storage is available yet (it is retried).
     /// Jobs may be added before this, but none runs until it has been called
-    /// (or, in MANUAL mode, until tick() is serviced).
+    /// (or, in MANUAL mode, until tick() is serviced). tick() may also be called directly for cooperative/manual execution.
     bool begin(SchedulerRunMode mode = SchedulerRunMode::TASK);
     SchedulerRunMode runMode() const { return mode_; }
 
