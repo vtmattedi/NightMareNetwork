@@ -91,10 +91,11 @@ public:
     ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
 
     /// @brief Executes the resource-command expression after a leading `>`.
-    /// `list`, `manifest`, `drop <name>` and `raw <topic> <payload>` are
+    /// `list`, `manifest`, `drop <name|owner/name>` and `raw <topic> <payload>` are
     /// manager operations (no space after `>`). A leading space selects a
-    /// resource by unique name; a bare name performs its default operation and
-    /// an optional verb selects get, set or invoke explicitly.
+    /// resource by unique short name or exact owner/name; a bare address
+    /// performs its default operation and an optional verb selects get, set or
+    /// invoke explicitly.
     ActionResult executeCommand(const String &expression);
 
     /// @brief Removes the retained resource footprint of a previous identity:
@@ -127,6 +128,7 @@ private:
     static bool hasResolvedSource(const NetResource &resource);
     NetResource *findResource(const String &deviceName, const String &name) const;
     NetResource *findResourceByName(const String &name, bool &ambiguous) const;
+    NetResource *findCommandResource(const String &address, bool &ambiguous) const;
     bool addressTakenByOther(const String &deviceName, const String &name,
                              const NetResource *self) const;
 

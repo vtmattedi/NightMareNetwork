@@ -26,7 +26,12 @@ const char *operationSuffix(ResourceTopicOperation operation)
 // resource can never carry a stale name for this device.
 const String &resolveResourceOwner(const NetResource &resource)
 {
-    return resource.isOwned() ? gDeviceIdentity.getDeviceName() : resource.ownerDevice.deviceName;
+    return resource.isOwned() ? gDeviceIdentity.getDeviceName() : resource.ownerDevice_.deviceName;
+}
+
+const String &NetResource::owner() const
+{
+    return resolveResourceOwner(*this);
 }
 
 String resolveResourceManifestTopic(const String &deviceName)
@@ -47,7 +52,7 @@ String resolveResourceTopic(const String &deviceName, const String &resourceName
 
 String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation)
 {
-    return resolveResourceTopic(resolveResourceOwner(resource), resource.name, operation);
+    return resolveResourceTopic(resource.owner(), resource.name(), operation);
 }
 
 // Retargets a REMOTE resource. The role is fixed at declaration, so ownership
@@ -57,23 +62,23 @@ void NetResource::setRemoteSource(const String &deviceName, const String &resour
 {
     // Captured before the swap: the Manager still has the old source subscribed
     // and cannot reconstruct those topics once they are overwritten.
-    const NetDeviceIdentity oldOwner = this->ownerDevice;
-    const String oldName = this->name;
+    const NetDeviceIdentity oldOwner = ownerDevice_;
+    const String oldName = name_;
 
-    this->ownerDevice = NetDeviceIdentity(deviceName);
-    this->name = resourceName;
+    ownerDevice_ = NetDeviceIdentity(deviceName);
+    name_ = resourceName;
     resetRemoteState();
 #if NM_ENABLE_RESOURCES
-    if (resourceManager != nullptr)
+    if (resourceManager_ != nullptr)
     {
-        resourceManager->notifySourceChanged(*this, oldOwner, oldName);
+        resourceManager_->notifySourceChanged(*this, oldOwner, oldName);
     }
 #endif
 }
 
 void NetValueResource::resetRemoteState()
 {
-    freshness = ResourceFreshness::UNKNOWN;
+    freshness_ = ResourceFreshness::UNKNOWN;
     hasAuthoritativeValue_ = false;
     hasOptimisticValue_ = false;
     lastUpdateMs_ = 0;
@@ -84,9 +89,9 @@ void NetValueResource::resetRemoteState()
 // before any time sync, and unsigned subtraction already handles rollover.
 bool NetValueResource::optimisticActive() const
 {
-    if (syncStrategy != NetSyncStrategy::OPTIMISTIC || !hasOptimisticValue_)
+    if (syncStrategy_ != NetSyncStrategy::OPTIMISTIC || !hasOptimisticValue_)
         return false;
-    return (uint32_t)(millis() - lastWriteMs_) < optimisticWindowMs;
+    return (uint32_t)(millis() - lastWriteMs_) < optimisticWindowMs_;
 }
 
 void NetValueResource::noteLocalWrite()
@@ -98,15 +103,15 @@ void NetValueResource::noteLocalWrite()
 void NetValueResource::noteOwnerUpdate()
 {
     lastUpdateMs_ = (uint32_t)millis();
-    freshness = ResourceFreshness::FRESH;
+    freshness_ = ResourceFreshness::FRESH;
 }
 
 bool NetValueResource::dispatchLocalWrite(const String &encoded)
 {
-    if (!isOwned() && access != AccessPolicy::READ_WRITE)
+    if (!isOwned() && access_ != AccessPolicy::READ_WRITE)
     {
         LOG_WARNING("NET", "Attempt to set value of read-only resource '%s' owned by '%s'",
-                    name.c_str(), ownerDevice.deviceName.c_str());
+                    name_.c_str(), ownerDevice_.deviceName.c_str());
         return false;
     }
     // Checked here, bound or not, so a value set while unbound cannot later
@@ -115,12 +120,12 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
     if (encoded.length() == 0 || encoded.length() > NetResourceMaxPayloadLength)
     {
         LOG_WARNING("NET", "Rejected value for '%s': encoded length %u is outside 1..%u",
-                    name.c_str(), (unsigned)encoded.length(), (unsigned)NetResourceMaxPayloadLength);
+                    name_.c_str(), (unsigned)encoded.length(), (unsigned)NetResourceMaxPayloadLength);
         return false;
     }
 #if NM_ENABLE_RESOURCES
-    if (resourceManager != nullptr)
-        return resourceManager->setValue(*this, encoded);
+    if (resourceManager_ != nullptr)
+        return resourceManager_->setValue(*this, encoded);
 #else
     (void)encoded;
 #endif
@@ -130,7 +135,7 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
     if (!isOwned())
     {
         LOG_WARNING("NET", "Cannot set unbound remote value '%s' owned by '%s'",
-                    name.c_str(), ownerDevice.deviceName.c_str());
+                    name_.c_str(), ownerDevice_.deviceName.c_str());
         return false;
     }
     return true;
@@ -139,14 +144,14 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
 bool NetActionResource::dispatchInvoke(const String &payload)
 {
 #if NM_ENABLE_RESOURCES
-    if (resourceManager != nullptr)
-        return resourceManager->invoke(*this, payload);
+    if (resourceManager_ != nullptr)
+        return resourceManager_->invoke(*this, payload);
 #else
     (void)payload;
 #endif
     // Invoking always means reaching the implementing device, so without a
     // transport there is nothing to report success about.
     LOG_WARNING("NET", "Cannot invoke unbound action '%s' owned by '%s'",
-                name.c_str(), ownerDevice.deviceName.c_str());
+                name_.c_str(), ownerDevice_.deviceName.c_str());
     return false;
 }
