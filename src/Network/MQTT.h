@@ -35,10 +35,18 @@ bool MQTT_SubscribeTopic(const String &topicFilter);
 bool MQTT_UnsubscribeTopic(const String &topicFilter);
 
 // Opt-in dashboard discovery: +/resources (retained manifests) and +/status.
-// Register a manifest callback with gResourcesManager.setManifestHandler().
+// Manifests go to gResourcesManager.setManifestHandler(); statuses arrive as
+// ordinary messages through MQTT_onMessage(..., false).
 bool MQTT_SetDiscovery(bool enabled);
 bool MQTT_DiscoveryEnabled();
-void MQTT_onDeviceStatus(void (*cb)(const String &deviceName, bool online));
+
+/// @brief The only shape <device>/status ever has, retained:
+///   {"name":"bedroom-ac","hardware":"Esp32-nm-6ca172e0","online":true}
+/// Used for going online, graceful shutdown, the MQTT last will and cleaning up
+/// a previous identity, so every observer parses one format. "hardware" is
+/// always this board's signature, whichever name is being reported.
+String deviceStatusJson(bool online);
+String deviceStatusJson(const String &deviceName, bool online);
 
 // Optional project hooks. Automatic console, time and resource routing runs first.
 // The default message hook receives only this device's topics without its prefix.

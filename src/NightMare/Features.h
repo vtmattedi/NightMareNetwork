@@ -65,6 +65,16 @@
 #ifndef NM_IDENTITY_CLEANUP_RETRY_MS
 #define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
 #endif
+// Refresh of <device>/telemetry/network. Slow on purpose: it is bookkeeping, it
+// is also published on every MQTT connection, and /status owns presence.
+#ifndef NM_NETWORK_TELEMETRY_INTERVAL_MS
+#define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
+#endif
+// 1: startNightMareESP() gives the Scheduler its own FreeRTOS task.
+// 0: nothing runs jobs except tickNightMareESP(), called from loop().
+#ifndef NM_SCHEDULER_OWN_TASK
+#define NM_SCHEDULER_OWN_TASK 1
+#endif
 
 // Current implementation targets ESP32. Reserved for a future platform split.
 #ifndef NM_PLATFORM_ESP32
@@ -83,9 +93,6 @@
 #endif
 #if NM_ENABLE_NETWORK && !NM_ENABLE_RESOURCES
 #error "NM_ENABLE_NETWORK requires NM_ENABLE_RESOURCES"
-#endif
-#if NM_ENABLE_TELEMETRY && !NM_ENABLE_RESOURCES
-#error "NM_ENABLE_TELEMETRY requires NM_ENABLE_RESOURCES"
 #endif
 #if NM_ENABLE_TELEMETRY && !NM_ENABLE_SCHEDULER
 #error "NM_ENABLE_TELEMETRY requires NM_ENABLE_SCHEDULER"

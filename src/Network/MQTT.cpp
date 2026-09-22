@@ -6,6 +6,7 @@
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
+#include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -28,7 +29,6 @@ namespace
     String customSubscriptions[MaxCustomSubscriptions];
     bool discoveryEnabled = false;
     bool discoveryDirty = false;
-    void (*deviceStatusHandler)(const String &, bool) = nullptr;
     bool isCustomSubscription(const String &topicFilter);
 
     bool isDefaultSubscription(const String &topicFilter)
@@ -177,14 +177,6 @@ namespace
 
     void messageReceived(const String &topic, const String &payload)
     {
-        if (deviceStatusHandler != nullptr && MQTT_DiscoveryEnabled())
-        {
-            const int slash = topic.indexOf('/');
-            if (slash > 0 && topic.substring(slash) == "/status" &&
-                topic.substring(0, slash) != gDeviceIdentity.getDeviceName() &&
-                (payload == "online" || payload == "offline"))
-                deviceStatusHandler(topic.substring(0, slash), payload == "online");
-        }
         if (NmMessageRouter::handleMessage(topic, payload))
             return;
         if (projectMessage == nullptr)
@@ -420,9 +412,21 @@ bool MQTT_DiscoveryEnabled()
     return enabled;
 }
 
-void MQTT_onDeviceStatus(void (*cb)(const String &, bool))
+String deviceStatusJson(const String &deviceName, bool online)
 {
-    deviceStatusHandler = cb;
+    // Serialized, not concatenated: a device name may legally contain '"' or '\'.
+    StaticJsonDocument<256> doc;
+    doc["name"] = deviceName;
+    doc["hardware"] = gDeviceIdentity.getHardwareSignature();
+    doc["online"] = online;
+    String payload;
+    serializeJson(doc, payload);
+    return payload;
+}
+
+String deviceStatusJson(bool online)
+{
+    return deviceStatusJson(gDeviceIdentity.getDeviceName(), online);
 }
 
 void MQTT_onMessage(void (*cb)(String, String), bool onlyDeviceMessages)

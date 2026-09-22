@@ -2,6 +2,32 @@
 
 #include <NightMare/Features.h>
 
-// Optional one-call startup after the project registers its resource handlers.
-// Identity, scheduler, telemetry and WiFi/MQTT are initialized as enabled.
+// Common framework plumbing, so a project never has to know how the Scheduler
+// is driven:
+//
+//   void setup()
+//   {
+//       // Bind the application's resources and register its handlers first.
+//       startNightMareESP();
+//       // Then start application hardware and services.
+//   }
+//
+//   void loop()
+//   {
+//       tickNightMareESP();
+//       // Application cooperative work, if any.
+//   }
+//
+// Application services (IR, sensors, actuators, ...) stay in the application.
+
+/// @brief Identity, the Scheduler (own task or manual per
+/// NM_SCHEDULER_OWN_TASK), the retry of a pending identity cleanup, periodic
+/// telemetry and the WiFi/MQTT path, as enabled. Resources should already be
+/// bound: withdrawing a previous identity only reaches declared resources.
 void startNightMareESP();
+
+/// @brief The framework's cooperative service point: ticks the Scheduler when
+/// nothing else does (MANUAL mode) and reads the serial console when enabled.
+/// Task- and event-driven parts (MQTT, WiFi, OTA, a Scheduler task) are never
+/// polled here.
+void tickNightMareESP();

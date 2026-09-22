@@ -77,10 +77,12 @@ namespace NmMessageRouter
 // connection event: see processPendingIdentityCleanup().
 void onConnected()
 {
-    MQTT_Publish("status", "online", true, true);
+    MQTT_Publish("status", deviceStatusJson(true), true, true);
     gResourcesManager.announceAll();
 #if NM_ENABLE_TELEMETRY
-    Telemetry.publish();
+    // Retained documents are refreshed on every (re)connection, broker switches
+    // included, so the network document names the broker actually in use.
+    Telemetry.publishAll();
 #endif
 #if NM_ENABLE_CONSOLE
     MQTT_Publish("console/out", firstConnection ? "Booted" : "Connected");

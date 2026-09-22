@@ -22,10 +22,11 @@ IdentityCleanupResult processPendingIdentityCleanup()
 
     if ((cleanup.pendingFlags & CLEANUP_STATUS) != 0)
     {
-        // "offline" first so anyone watching sees the old device go away, then
-        // empty to delete the retained status so it does not linger as a ghost.
+        // The usual offline status first, so anyone watching sees the old name
+        // go away in the normal format, then empty to delete the retained
+        // status so it does not linger as a ghost.
         const String statusTopic = cleanup.oldName + "/status";
-        if (MQTT_Publish(statusTopic, "offline", false, true) &&
+        if (MQTT_Publish(statusTopic, deviceStatusJson(cleanup.oldName, false), false, true) &&
             MQTT_Publish(statusTopic, "", false, true))
             gDeviceIdentity.markIdentityCleanupComplete(CLEANUP_STATUS);
     }

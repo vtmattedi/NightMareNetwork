@@ -42,6 +42,7 @@ bool DeviceIdentity::begin()
 
     // Keep the existing default prefix and persisted key for existing devices.
     const String defaultName = String("Esp32-nm-") + String(static_cast<uint32_t>(mac), HEX);
+    hardwareSignature_ = defaultName;
     String storedName = defaultName;
 #if NM_ENABLE_SETTINGS
     const bool settingsReady = PersistentSettings.begin();
@@ -108,6 +109,12 @@ const String &DeviceIdentity::getDeviceId()
 {
     begin();
     return deviceId_;
+}
+
+const String &DeviceIdentity::getHardwareSignature()
+{
+    begin();
+    return hardwareSignature_;
 }
 
 bool DeviceIdentity::isDevice(const String &fullTopic)

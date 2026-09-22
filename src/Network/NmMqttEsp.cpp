@@ -1,6 +1,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
 #include "NmMqttEsp.h"
+#include "MQTT.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
@@ -43,6 +44,9 @@ bool stopRequested = false;
 // ESP MQTT retains pointers to these values for the client's lifetime.
 char brokerUri[192] = {};
 char willTopic[96] = {};
+// The offline status JSON. Also what a graceful stop publishes, so the broker
+// ends up with the same retained payload however the device went away.
+char willMessage[256] = {};
 char clientId[48] = {};
 const char *rootCa = ROOT_CA;
 
@@ -52,7 +56,8 @@ void stopClient()
     if (client != nullptr)
     {
         if (connectionState > 0)
-            esp_mqtt_client_publish(client, willTopic, "offline", 7, 0, true);
+            esp_mqtt_client_publish(client, willTopic, willMessage,
+                                    static_cast<int>(strlen(willMessage)), 0, true);
         esp_mqtt_client_stop(client);
         esp_mqtt_client_destroy(client);
         client = nullptr;
@@ -137,6 +142,15 @@ bool startClient(bool useLan)
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
     snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
+    const String offlineStatus = deviceStatusJson(false);
+    if (offlineStatus.length() >= sizeof(willMessage))
+    {
+        // Cannot happen with a valid name, but a cut-off JSON last will would be
+        // worse than no connection attempt.
+        LOG_ERROR("MQTT", "Offline status does not fit the last-will buffer");
+        return false;
+    }
+    snprintf(willMessage, sizeof(willMessage), "%s", offlineStatus.c_str());
     snprintf(clientId, sizeof(clientId), "nm-%s", gDeviceIdentity.getDeviceId().c_str());
     if (useLan)
         snprintf(brokerUri, sizeof(brokerUri), "mqtt://%s:%d", LOCAL_MQTT_HOST, LOCAL_MQTT_PORT);
@@ -151,7 +165,7 @@ bool startClient(bool useLan)
     config.credentials.authentication.password = MQTT_PASSWD;
     config.credentials.client_id = clientId;
     config.session.last_will.topic = willTopic;
-    config.session.last_will.msg = "offline";
+    config.session.last_will.msg = willMessage;
     config.session.last_will.qos = 0;
     config.session.last_will.retain = 1;
     config.task.stack_size = 8192;

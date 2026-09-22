@@ -12,7 +12,6 @@
 namespace
 {
     constexpr const char *JobsFile = "/jobs.json";
-    constexpr const char *LegacySchedulerFile = "/scheduleTasks.json";
     constexpr uint32_t MaxInterval = 0x7fffffffUL;
     constexpr uint32_t StorageRetryMs = 5000;
     constexpr uint32_t SchedulerPollMs = 100;
@@ -58,10 +57,9 @@ namespace
 
 Scheduler gScheduler;
 
-bool Scheduler::begin()
+void Scheduler::ensureInitialized()
 {
-    JobGuard guard;
-    if (begun_)
+    if (initialized_)
     {
         if (!storageReady_ && static_cast<int32_t>(millis() - nextStorageRetry_) >= 0)
         {
@@ -70,21 +68,39 @@ bool Scheduler::begin()
             if (storageReady_)
                 load();
         }
-        if (schedulerTask_ == nullptr)
-            startScheduler();
-        return storageReady_;
+        return;
     }
-
-    begun_ = true;
+    initialized_ = true;
     storageReady_ = PersistentSettings.begin();
     nextStorageRetry_ = millis() + StorageRetryMs;
     if (storageReady_)
         load();
-    startScheduler();
-    return storageReady_;
 }
 
-bool Scheduler::startScheduler(uint8_t priority, uint32_t stackSize)
+bool Scheduler::begin(SchedulerRunMode mode)
+{
+    JobGuard guard;
+    ensureInitialized();
+    if (modeFixed_)
+    {
+        if (mode != mode_)
+        {
+            LOG_ERROR("Scheduler", "Already running in %s mode; refusing to switch",
+                      mode_ == SchedulerRunMode::TASK ? "TASK" : "MANUAL");
+            return false;
+        }
+        return mode_ == SchedulerRunMode::MANUAL || startTask();
+    }
+    // Only a mode that actually started is fixed, so a failed task creation
+    // can be retried or replaced by MANUAL.
+    if (mode == SchedulerRunMode::TASK && !startTask())
+        return false;
+    mode_ = mode;
+    modeFixed_ = true;
+    return true;
+}
+
+bool Scheduler::startTask(uint8_t priority, uint32_t stackSize)
 {
     if (schedulerTask_ != nullptr)
         return true;
@@ -111,45 +127,26 @@ void Scheduler::task(void *context)
     }
 }
 
-int32_t Scheduler::setTimeout(void (*callback)(void), uint32_t intervalMs)
+bool Scheduler::persists(const Job &job)
 {
-    JobGuard guard;
-    static int timeoutId = 0;
-    if (intervalMs == 0 || intervalMs > MaxInterval)
-        return -1;
-    if (!begun_)
-        begin();
-    if (!callback)
-    {
-        LOG("Scheduler", "Timeout job requires a callback function.");
-    }
-    return add(String("Timeout_") + String(timeoutId++), String(), SchedulerClock::Monotonic, millis() + intervalMs, 0, callback);
-}
-
-int32_t Scheduler::timer(const String &label, void (*callback)(void), uint32_t intervalMs)
-{
-    JobGuard guard;
-    if (intervalMs == 0 || intervalMs > MaxInterval)
-        return -1;
-    if (!begun_)
-        begin();
-    if (!callback)
-    {
-        LOG("Scheduler", "Timer job '%s' requires a callback function.", label.c_str());
-    }
-    return add(label, String(), SchedulerClock::Monotonic, millis() +1, intervalMs, callback);
+    // Only what can be executed from text after a reboot.
+    return job.active && job.clock == SchedulerClock::Wall && job.callback == nullptr;
 }
 
 int32_t Scheduler::add(const String &label, const String &command, SchedulerClock clock,
-                       uint32_t due, uint32_t interval, void (*callback)(void))
+                       uint32_t due, uint32_t interval, SchedulerCallback callback)
 {
     JobGuard guard;
-    if (!begun_ || (clock == SchedulerClock::Wall && !storageReady_))
-        begin();
+    ensureInitialized();
+    const bool hasCommand = command.length() != 0;
+    const bool hasCallback = callback != nullptr;
+    if (hasCommand == hasCallback)
+        return -1; // Exactly one execution target.
     if (label.length() == 0 || label.length() > MaxLabelLength ||
-        command.length() == 0 || command.length() > NM_MAX_MESSAGE_LEN)
+        command.length() > NM_MAX_MESSAGE_LEN)
         return -1;
-    if (clock == SchedulerClock::Wall && !storageReady_)
+    const bool persisted = clock == SchedulerClock::Wall && hasCommand;
+    if (persisted && !storageReady_)
         return -1;
     if (nextId_ == 0 || nextId_ > INT32_MAX)
         return -1;
@@ -166,10 +163,11 @@ int32_t Scheduler::add(const String &label, const String &command, SchedulerCloc
         job.id = nextId_++;
         job.label = label;
         job.command = command;
+        job.callback = callback;
         job.clock = clock;
         job.due = due;
         job.interval = interval;
-        if (clock == SchedulerClock::Wall && !save())
+        if (persisted && !save())
         {
             job = Job{};
             --nextId_;
@@ -180,57 +178,106 @@ int32_t Scheduler::add(const String &label, const String &command, SchedulerCloc
     return -1;
 }
 
-int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds)
+int32_t Scheduler::scheduleAtWall(const String &label, const String &command,
+                                  SchedulerCallback callback, uint32_t epochSeconds)
 {
     if (epochSeconds == 0)
         return -1;
-    return add(label, command, SchedulerClock::Wall, epochSeconds, 0);
+    return add(label, command, SchedulerClock::Wall, epochSeconds, 0, callback);
 }
 
-int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs)
+int32_t Scheduler::scheduleAfter(const String &label, const String &command,
+                                 SchedulerCallback callback, uint32_t delayMs)
 {
     JobGuard guard;
     if (delayMs > MaxInterval)
         return -1;
-    if (!begun_)
-        begin();
-    return add(label, command, SchedulerClock::Monotonic, millis() + delayMs, 0);
+    return add(label, command, SchedulerClock::Monotonic, millis() + delayMs, 0, callback);
 }
 
-int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds)
+int32_t Scheduler::scheduleEveryWall(const String &label, const String &command,
+                                     SchedulerCallback callback, uint32_t intervalSeconds)
 {
     JobGuard guard;
     if (intervalSeconds == 0 || intervalSeconds > MaxInterval)
         return -1;
-    if (!begun_)
-        begin();
+    ensureInitialized();
     // A zero due time starts the interval when the wall clock first becomes valid.
-    uint32_t due = wallTimeReady() ? NightMare::Time::now() + intervalSeconds : 0;
-    return add(label, command, SchedulerClock::Wall, due, intervalSeconds);
+    const uint32_t due = wallTimeReady() ? NightMare::Time::now() + intervalSeconds : 0;
+    return add(label, command, SchedulerClock::Wall, due, intervalSeconds, callback);
 }
 
-int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs)
+int32_t Scheduler::scheduleEveryMonotonic(const String &label, const String &command,
+                                          SchedulerCallback callback, uint32_t intervalMs)
 {
     JobGuard guard;
     if (intervalMs == 0 || intervalMs > MaxInterval)
         return -1;
-    if (!begun_)
-        begin();
-    return add(label, command, SchedulerClock::Monotonic, millis() + intervalMs, intervalMs);
+    return add(label, command, SchedulerClock::Monotonic, millis() + intervalMs, intervalMs,
+               callback);
 }
 
+int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds)
+{
+    return scheduleAtWall(label, command, nullptr, epochSeconds);
+}
+
+int32_t Scheduler::atWall(const String &label, SchedulerCallback callback, uint32_t epochSeconds)
+{
+    return scheduleAtWall(label, String(), callback, epochSeconds);
+}
+
+int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs)
+{
+    return scheduleAfter(label, command, nullptr, delayMs);
+}
+
+int32_t Scheduler::after(const String &label, SchedulerCallback callback, uint32_t delayMs)
+{
+    return scheduleAfter(label, String(), callback, delayMs);
+}
+
+int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds)
+{
+    return scheduleEveryWall(label, command, nullptr, intervalSeconds);
+}
+
+int32_t Scheduler::everyWall(const String &label, SchedulerCallback callback, uint32_t intervalSeconds)
+{
+    return scheduleEveryWall(label, String(), callback, intervalSeconds);
+}
+
+int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs)
+{
+    return scheduleEveryMonotonic(label, command, nullptr, intervalMs);
+}
+
+int32_t Scheduler::everyMonotonic(const String &label, SchedulerCallback callback, uint32_t intervalMs)
+{
+    return scheduleEveryMonotonic(label, String(), callback, intervalMs);
+}
+
+int32_t Scheduler::timer(const String &label, SchedulerCallback callback, uint32_t intervalMs)
+{
+    return everyMonotonic(label, callback, intervalMs);
+}
+
+int32_t Scheduler::setTimeout(SchedulerCallback callback, uint32_t delayMs)
+{
+    JobGuard guard;
+    return after(String("Timeout_") + String(nextTimeoutId_++), callback, delayMs);
+}
 
 bool Scheduler::remove(const String &label)
 {
     JobGuard guard;
-    if (!begun_ || !storageReady_)
-        begin();
+    ensureInitialized();
     for (Job &job : jobs_)
     {
         if (!job.active || job.label != label)
             continue;
-        bool persisted = job.clock == SchedulerClock::Wall;
-        Job previous = job;
+        const bool persisted = persists(job);
+        const Job previous = job;
         job = Job{};
         if (persisted && !save())
         {
@@ -245,14 +292,13 @@ bool Scheduler::remove(const String &label)
 bool Scheduler::remove(uint32_t id)
 {
     JobGuard guard;
-    if (!begun_ || !storageReady_)
-        begin();
+    ensureInitialized();
     for (Job &job : jobs_)
     {
         if (!job.active || job.id != id)
             continue;
-        bool persisted = job.clock == SchedulerClock::Wall;
-        Job previous = job;
+        const bool persisted = persists(job);
+        const Job previous = job;
         job = Job{};
         if (persisted && !save())
         {
@@ -267,8 +313,7 @@ bool Scheduler::remove(uint32_t id)
 bool Scheduler::clear()
 {
     JobGuard guard;
-    if (!begun_ || !storageReady_)
-        begin();
+    ensureInitialized();
     if (!storageReady_)
         return false;
 
@@ -288,8 +333,7 @@ bool Scheduler::clear()
 String Scheduler::list()
 {
     JobGuard guard;
-    if (!begun_ || !storageReady_)
-        begin();
+    ensureInitialized();
 
     DynamicJsonDocument doc(32768);
     JsonArray array = doc.createNestedArray("jobs");
@@ -302,11 +346,18 @@ String Scheduler::list()
         JsonObject item = array.createNestedObject();
         item["id"] = job.id;
         item["label"] = job.label;
-        item["command"] = job.command;
         item["clock"] = job.clock == SchedulerClock::Wall ? "wall" : "monotonic";
         item["due"] = job.due;
         item["interval"] = job.interval;
         item["repeat"] = job.interval != 0;
+        // A callback's address means nothing to a reader, so only its kind is shown.
+        if (job.callback != nullptr)
+            item["target"] = "callback";
+        else
+        {
+            item["target"] = "command";
+            item["command"] = job.command;
+        }
     }
     doc["count"] = count;
     const bool wallReady = wallTimeReady();
@@ -325,8 +376,7 @@ void Scheduler::tick()
     JobGuard guard;
     if (dispatching_)
         return;
-    if (!begun_ || !storageReady_)
-        begin();
+    ensureInitialized();
 
     dispatching_ = true;
     const uint32_t monotonicNow = millis();
@@ -355,7 +405,7 @@ void Scheduler::tick()
             continue;
         }
 
-        const bool persistRemoval = job.clock == SchedulerClock::Wall && job.interval == 0;
+        const bool persistRemoval = persists(job) && job.interval == 0;
         const Job previous = job;
         if (job.interval == 0)
             job = Job{};
@@ -370,10 +420,11 @@ void Scheduler::tick()
             continue;
         }
 
+        // The live slot may already be empty (a one-shot), and the job may
+        // remove or replace itself while unlocked, so only the copy is used.
         guard.unlock();
-        // Dispatch the job. If it has a callback, call it. Otherwise, send the command to the NightMare command handler.
-        if (job.callback != nullptr)
-            job.callback();
+        if (previous.callback != nullptr)
+            previous.callback();
         else
             handleNightMareCommand(previous.command,
                                    NightmareContext(NM_CMD_SRC_JOB, String(previous.id)));
@@ -391,7 +442,7 @@ bool Scheduler::save()
     JsonArray array = doc.createNestedArray("jobs");
     for (const Job &job : jobs_)
     {
-        if (!job.active || job.clock != SchedulerClock::Wall)
+        if (!persists(job))
             continue;
         JsonObject item = array.createNestedObject();
         item["id"] = job.id;
@@ -412,8 +463,9 @@ bool Scheduler::save()
 
 bool Scheduler::load()
 {
+    // No file simply means no persisted jobs.
     if (!LittleFS.exists(JobsFile))
-        return importLegacy();
+        return true;
     File file = LittleFS.open(JobsFile, "r");
     if (!file)
         return false;
@@ -464,57 +516,5 @@ bool Scheduler::load()
         }
     }
     return true;
-}
-
-bool Scheduler::importLegacy()
-{
-    if (!LittleFS.exists(LegacySchedulerFile))
-        return true;
-    File file = LittleFS.open(LegacySchedulerFile, "r");
-    if (!file)
-        return false;
-    DynamicJsonDocument doc(32768);
-    DeserializationError error = deserializeJson(doc, file);
-    file.close();
-    if (error)
-        return false;
-
-    for (JsonObject item : doc["tasks"].as<JsonArray>())
-    {
-        String label = item["label"].as<String>();
-        String command = item["command"].as<String>();
-        uint32_t due = item["executionTime"] | 0UL;
-        uint32_t interval = item["interval"] | 0UL;
-        bool synced = item["executionTimeSynced"] | false;
-        if (!synced)
-        {
-            if (interval == 0)
-                continue; // The old boot-relative one-shot deadline cannot be recovered.
-            due = 0;      // Start a fresh wall interval after synchronization.
-        }
-        if (label.length() == 0 || label.length() > MaxLabelLength ||
-            command.length() == 0 || command.length() > NM_MAX_MESSAGE_LEN ||
-            (due == 0 && interval == 0))
-            continue;
-        bool duplicateLabel = false;
-        for (const Job &job : jobs_)
-            duplicateLabel |= job.active && job.label == label;
-        if (duplicateLabel || nextId_ > INT32_MAX)
-            continue;
-        for (Job &job : jobs_)
-        {
-            if (job.active)
-                continue;
-            job.active = true;
-            job.id = nextId_++;
-            job.label = label;
-            job.command = command;
-            job.clock = SchedulerClock::Wall;
-            job.due = due;
-            job.interval = interval;
-            break;
-        }
-    }
-    return save();
 }
 #endif // NM_ENABLE_SCHEDULER

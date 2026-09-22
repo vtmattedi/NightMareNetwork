@@ -13,6 +13,9 @@
 #if NM_ENABLE_MQTT
 #include <Network/IdentityCleanup.h>
 #endif
+#if NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
+#include <Core/NightMareCommand.h>
+#endif
 
 #if NM_ENABLE_SCHEDULER && NM_ENABLE_MQTT
 namespace
@@ -36,7 +39,9 @@ void startNightMareESP()
 {
     gDeviceIdentity.begin();
 #if NM_ENABLE_SCHEDULER
-    gScheduler.begin();
+    if (!gScheduler.begin(NM_SCHEDULER_OWN_TASK ? SchedulerRunMode::TASK
+                                                : SchedulerRunMode::MANUAL))
+        LOG_ERROR("NM", "Scheduler did not start; no job will run");
 #if NM_ENABLE_MQTT
     if (gDeviceIdentity.hasPendingIdentityCleanup() &&
         gScheduler.timer(IdentityCleanupJob, identityCleanupTask, NM_IDENTITY_CLEANUP_RETRY_MS) < 0)
@@ -45,10 +50,24 @@ void startNightMareESP()
 #endif
 #endif
 #if NM_ENABLE_TELEMETRY
-    Telemetry.start();
+    if (!Telemetry.start())
+        LOG_ERROR("NM", "Could not schedule periodic telemetry");
 #endif
 #if NM_ENABLE_WIFI
     Serial.println("Initializing WiFi...");
     WiFi_Auto();
+#endif
+}
+
+void tickNightMareESP()
+{
+#if NM_ENABLE_SCHEDULER
+    // In TASK mode the Scheduler's own task does this; ticking here too would
+    // only contend for the same lock.
+    if (gScheduler.runMode() == SchedulerRunMode::MANUAL)
+        gScheduler.tick();
+#endif
+#if NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
+    NightMareCommand_SerialResolver(&Serial, '\n');
 #endif
 }

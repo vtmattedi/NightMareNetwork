@@ -484,22 +484,34 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         return executeJobCommand(parsedMsg, context);
 #endif
 #if NM_ENABLE_TELEMETRY
-    if (parsedMsg.command == "TELEMETRY")
+    // INFO [section]            query: the aggregate, or one section of it
+    // INFO PUBLISH [document]   publish INFO (default), SYSTEM or NETWORK
+    if (parsedMsg.command == "INFO")
     {
         if (parsedMsg.subcommand == "PUBLISH")
         {
-            result.result = Telemetry.publish();
-            result.response = result.result ? "Telemetry published." : "Telemetry publish failed.";
-        }
-        else if (parsedMsg.subcommand == "SNAPSHOT")
-        {
-            result.response = Telemetry.snapshotJson();
-            result.result = result.response.length() != 0;
+            const InfoType type = getInfoType(parsedMsg.args[1]);
+            if (type != InfoType::INFO && type != InfoType::SYSTEM && type != InfoType::NETWORK)
+            {
+                result.result = false;
+                result.response = type == InfoType::INVALID
+                                      ? "Unknown INFO section."
+                                      : "Only INFO, SYSTEM and NETWORK are published documents.";
+            }
+            else
+            {
+                result.result = Telemetry.publishInfo(type);
+                result.response = result.result ? "OK" : "INFO publish failed.";
+            }
         }
         else
         {
-            result.result = false;
-            result.response = "Usage: TELEMETRY <PUBLISH|SNAPSHOT>";
+            const TelemetryResult info = Telemetry.getInfo(parsedMsg.subcommand);
+            result.result = info.valid;
+            result.response = info.valid
+                                  ? info.data
+                                  : "Usage: INFO [IDENTITY|HARDWARE|HWCONNECTIONS|BUILD|BOOT|SYSTEM|NETWORK]"
+                                    " | INFO PUBLISH [SYSTEM|NETWORK]";
         }
         return result;
     }
@@ -515,36 +527,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     {
         ESP.restart();
         result.response = "Rebooting...";
-    }
-    else if (parsedMsg.command == "BOOTINFO")
-    {
-        auto doc = DynamicJsonDocument(256);
-        doc["ResetReason"] = SystemState.get("boot_reason", "Unknown");
-        doc["IsTimeSynced"] = NightMare::Time::valid();
-        doc["CurrentTime"] = NightMare::Time::now();
-        doc["Uptime"] = millis() / 1000;
-        doc["BootTime"] = NightMare::Time::valid()
-                              ? NightMare::Time::now() - (millis() / 1000)
-                              : 0;
-        String res = "";
-        serializeJson(doc, res);
-        result.response = res;
-    }
-    else if (parsedMsg.command == "HARDWAREINFO")
-    {
-        auto doc = DynamicJsonDocument(512);
-        doc["ChipModel"] = ESP.getChipModel();
-        doc["ChipCores"] = ESP.getChipCores();
-        doc["ChipRevision"] = ESP.getChipRevision();
-        doc["FlashSizeMB"] = ESP.getFlashChipSize() / (1024 * 1024);
-        doc["HeapSize"] = ESP.getHeapSize();
-        doc["PsramSize"] = ESP.getPsramSize();
-#if NM_ENABLE_WIFI
-        doc["MACAddress"] = WiFi.macAddress();
-#endif
-        String res = "";
-        serializeJson(doc, res);
-        result.response = res;
     }
     else if (parsedMsg.command == "TEST")
     {
@@ -567,14 +549,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     // {
     //     istime
     // }
-    else if (parsedMsg.command == "SYSTEMINFO")
-    {
-#if NM_ENABLE_TELEMETRY
-        result.response = Telemetry.snapshotJson();
-#else
-        result.response = SystemState.toJson();
-#endif
-    }
     else if (parsedMsg.command == "FS")
     {
         if (parsedMsg.subcommand == "LIST")

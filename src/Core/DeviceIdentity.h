@@ -27,8 +27,14 @@ class DeviceIdentity
 {
 public:
     bool begin();
+    /// @brief The current network identity, e.g. "bedroom-ac". Adoptable.
     const String &getDeviceName();
+    /// @brief The raw hardware ID, for machines.
     const String &getDeviceId();
+    /// @brief The name this board was born with, e.g. "Esp32-nm-6ca172e0":
+    /// generated from the hardware, identical to the default device name, and
+    /// never changed by adoption. It says which physical board is behind a name.
+    const String &getHardwareSignature();
     bool isDevice(const String &topic);
     bool relativeTopic(const String &topic, String &relative);
     String topic(const String &relative);
@@ -61,6 +67,7 @@ private:
 
     String deviceName_;
     String deviceId_;
+    String hardwareSignature_;
     bool initialized_ = false;
     bool addressLocked_ = false;
     String pendingOldName_;
