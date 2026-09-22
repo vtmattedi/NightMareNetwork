@@ -19,7 +19,7 @@ export interface Doc {
   headings: { depth: number; text: string; id: string }[];
 }
 
-export const SECTION_ORDER = ["overview", "getting-started", "protocols", "architecture", "modules", "mcp"];
+export const SECTION_ORDER = ["overview", "getting-started", "protocols", "architecture", "modules", "contributing", "mcp"];
 
 export const SECTION_LABEL: Record<string, string> = {
   overview: "Overview",
@@ -27,6 +27,7 @@ export const SECTION_LABEL: Record<string, string> = {
   protocols: "Protocols",
   architecture: "Architecture",
   modules: "Modules",
+  contributing: "Contributing",
   mcp: "MCP",
 };
 

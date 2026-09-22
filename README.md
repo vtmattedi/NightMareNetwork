@@ -19,6 +19,6 @@ NightMare does **not** try to hide embedded development. The application still o
 - [Design decisions](docs/architecture/design-decisions.md) — intentional trade-offs and why they exist.
 - [Known gaps](docs/architecture/known-gaps.md) — limitations, deferred work, and non-goals.
 
-The active implementation lives under `src/`. The website and MCP server both consume `docs/**/*.md`.
+The authoritative current implementation lives under `src/`. The website and MCP server both consume `docs/**/*.md`.
 
-Historical and experimental trees such as `Legacy/`, `FailedAttempt/`, and `new/` are not the authoritative implementation.
+`Legacy/` contains the previous NightMare architecture for historical reference and migration context. It is not part of the active library build and should not be used as a model for new code.

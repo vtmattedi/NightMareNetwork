@@ -196,6 +196,7 @@ getting-started
 protocols
 architecture
 modules
+contributing
 mcp
 ```
 

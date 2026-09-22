@@ -26,7 +26,8 @@ export function createServer(repo: Repo): McpServer {
     {
       instructions: [
         "NightMare Network is an ESP32 C++ framework and MQTT resource protocol. Use search_docs",
-        "first for concepts, protocols and how-tos;",
+        "first for concepts, protocols and how-tos. Before modifying the library, read",
+        "contributing/editing-library plus the linked architecture documents;",
         "get_api for a specific function, class or macro; search_source / get_source when the docs",
         "are not enough. If documentation and source disagree, the source is right. Every result",
         `carries the version it came from: ${versionLine(repo.version)}.`,
@@ -87,7 +88,7 @@ export function createServer(repo: Repo): McpServer {
       title: "List documents",
       description: "Every documentation page with its path, title, description and section.",
       inputSchema: {
-        section: z.string().optional().describe("Filter: overview, getting-started, protocols, modules, architecture, mcp"),
+        section: z.string().optional().describe("Filter: overview, getting-started, protocols, modules, architecture, contributing, mcp"),
       },
     },
     async ({ section }) => {
