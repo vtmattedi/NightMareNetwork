@@ -1,42 +1,679 @@
 ---
 title: Getting started
-description: Build a minimal device using the current NightMare API.
+description: Build a minimal NightMare Network device using the current ESP32 API.
 section: getting-started
 order: 10
 ---
 
 # Getting started
 
-TODO: rewrite from the active `src/` implementation.
+This guide uses the current `src/` API.
+
+Do not use the older `Esp32Device`, `ResourceManager`, `NetEvent`, or `NetAction<T>` examples as a guide for the current architecture. The active API is built around the global NightMare services plus `Managed*` / `Remote*` Resources.
 
 ## Requirements
 
-TODO.
+The current implementation targets:
 
-## Install
+```text
+framework: Arduino
+platform:  espressif32
+```
 
-TODO.
+The library currently declares these dependencies:
 
-## Configure
+```text
+ArduinoJson ^6.21.3
+ArduinoOTA
+```
 
-TODO.
+A normal project also needs:
 
-## Declare resources
+```text
+include/NightMareConfig.h
+include/creds.h
+```
 
-TODO.
+and may optionally provide:
 
-## Bind resources
+```text
+include/NightMareHardware.h
+```
 
-TODO.
+## Add the library
+
+With PlatformIO, depend directly on the repository:
+
+```ini
+lib_deps =
+    https://github.com/vtmattedi/NightMareNetwork.git
+```
+
+During development against a local checkout, a project can instead use a local/symlink dependency.
+
+The public umbrella headers are:
+
+```cpp
+#include <NightMare.h>
+```
+
+or the compatibility umbrella:
+
+```cpp
+#include <NightMareNetwork.h>
+```
+
+`NightMareNetwork.h` currently includes `NightMare.h`.
+
+## Configure features
+
+Create:
+
+```text
+include/NightMareConfig.h
+```
+
+A useful explicit default configuration is:
+
+```cpp
+#pragma once
+
+#define NM_FIRMWARE_VERSION "1.0.0"
+
+#define NM_ENABLE_SETTINGS 1
+#define NM_ENABLE_RESOURCES 1
+#define NM_ENABLE_NETWORK 1
+#define NM_ENABLE_CONSOLE 1
+#define NM_ENABLE_WIFI 1
+#define NM_ENABLE_MQTT 1
+#define NM_ENABLE_TELEMETRY 1
+#define NM_ENABLE_SCHEDULER 1
+#define NM_ENABLE_JOBS 1
+#define NM_ENABLE_TIME_SYNC 1
+
+#define NM_ENABLE_OTA 0
+#define NM_ENABLE_HTTP 0
+#define NM_ENABLE_WEBSOCKET 0
+#define NM_ENABLE_LVGL 0
+
+#define NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
+
+#define NM_TELEMETRY_INTERVAL_MS 60000UL
+#define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
+#define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
+
+#define NM_SCHEDULER_OWN_TASK 1
+
+#define NM_CONSOLE_BUILTINS 1
+#define NM_CONSOLE_SERIAL 0
+
+#define NM_LOG_LEVEL 0
+```
+
+`Features.h` supplies defaults for these macros, but the current `Logs.h` still includes `NightMareConfig.h` directly. Providing the project header avoids that current implementation mismatch and gives the build one explicit configuration file.
+
+## Configure WiFi and MQTT credentials
+
+With the default WiFi/MQTT features enabled, create:
+
+```text
+include/creds.h
+```
+
+The current platform code expects:
+
+```cpp
+#pragma once
+
+#define MQTT_CREDS_H
+
+#define DEFAULT_SSID "your-wifi"
+#define DEFAULT_PASSWORD "your-password"
+
+#define LOCAL_MQTT_HOST "192.168.1.10"
+#define LOCAL_MQTT_PORT 1883
+
+#define REMOTE_MQTT_URL "mqtt.example.com"
+#define REMOTE_MQTT_PORT 8883
+
+#define MQTT_USER "username"
+#define MQTT_PASSWD "password"
+
+static const char ROOT_CA[] = R"EOF(
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+)EOF";
+```
+
+Do not include `mqtt://` in `LOCAL_MQTT_HOST`.
+
+Do not include `mqtts://` in `REMOTE_MQTT_URL`.
+
+The transport builds those URI schemes itself.
+
+Remote MQTT uses TLS and `ROOT_CA`.
+
+Local MQTT currently uses plain:
+
+```text
+mqtt://
+```
+
+## Optional hardware profile
+
+To make INFO report the board and physical connections, create:
+
+```text
+include/NightMareHardware.h
+```
+
+Example:
+
+```cpp
+#pragma once
+
+#include <NightMare/HardwareProfile.h>
+
+namespace NMHardware
+{
+inline Profile projectProfile()
+{
+    static const Connection connections[] = {
+        {
+            "button",
+            9,
+            Direction::Input,
+            Pull::Up,
+            true,
+            "user button"
+        },
+        {
+            "status LED",
+            8,
+            Direction::Output,
+            Pull::None,
+            false,
+            "application status"
+        },
+    };
+
+    return {
+        "ESP32-C3 SuperMini",
+        connections,
+        sizeof(connections) / sizeof(connections[0])
+    };
+}
+}
+```
+
+If this file is absent, NightMare reports:
+
+```text
+board: unspecified
+connections: none
+```
+
+## Declare Resources
+
+Resources should normally have application lifetime.
+
+A typical device can declare them globally:
+
+```cpp
+#include <Arduino.h>
+#include <NightMare.h>
+
+ManagedSensor<float> temperature("temperature");
+ManagedState<bool> power("power");
+ManagedAction identify("identify");
+```
+
+These mean:
+
+```text
+temperature
+    this device owns a read-only float Value
+
+power
+    this device owns a remotely writable bool Value
+
+identify
+    this device implements an Action
+```
+
+## Implement a writable state
+
+A `ManagedState<T>` receives already-decoded values.
+
+```cpp
+bool onPowerWrite(
+    ManagedState<bool> &state,
+    const bool &requested)
+{
+    digitalWrite(8, requested ? HIGH : LOW);
+
+    // true means the requested value is accepted as authoritative state.
+    return true;
+}
+```
+
+Attach it before startup:
+
+```cpp
+power.onWrite = onPowerWrite;
+```
+
+Returning `false` rejects the request and leaves Resource state unchanged.
+
+## Implement an Action
+
+A ManagedAction handler receives the canonical payload String and returns an `ActionResult`.
+
+```cpp
+ActionResult onIdentify(
+    ManagedAction &action,
+    const String &payload)
+{
+    (void)action;
+
+    if (payload.length() != 0)
+        return {false, "identify takes no arguments"};
+
+    Serial.println("I am here");
+    return {true, "OK"};
+}
+```
+
+Attach it:
+
+```cpp
+identify.onInvoke = onIdentify;
+```
+
+For richer Actions, declare `ActionArgMetadata` and parse the payload in the handler.
+
+## Bind Resources
+
+Bind every Resource before starting the framework:
+
+```cpp
+gResourcesManager.bindResource(&temperature);
+gResourcesManager.bindResource(&power);
+gResourcesManager.bindResource(&identify);
+```
+
+`ResourcesManager` does not own those objects. They must remain alive while bound.
+
+Binding before framework startup also matters for identity cleanup: retained state under an old adopted identity can only be removed for Resources that the current firmware has declared.
+
+## Give Managed Values an initial state
+
+A Managed Value has no authoritative state until it has been set.
+
+Initialize values before networking if appropriate:
+
+```cpp
+temperature.setValue(0.0f);
+power.setValue(false);
+```
+
+Local Managed state does not depend on MQTT being connected.
+
+Once MQTT connects, NightMare re-announces every Managed Value that has authoritative state.
 
 ## Start NightMare
 
-TODO.
+A minimal setup is:
 
-## What happens automatically
+```cpp
+void setup()
+{
+    Serial.begin(115200);
 
-TODO.
+    pinMode(8, OUTPUT);
+
+    power.onWrite = onPowerWrite;
+    identify.onInvoke = onIdentify;
+
+    gResourcesManager.bindResource(&temperature);
+    gResourcesManager.bindResource(&power);
+    gResourcesManager.bindResource(&identify);
+
+    temperature.setValue(0.0f);
+    power.setValue(false);
+
+    startNightMareESP();
+}
+```
+
+`startNightMareESP()` coordinates the enabled framework services.
+
+With the normal feature set it:
+
+```text
+initializes DeviceIdentity
+starts the Scheduler
+installs pending identity-cleanup retry
+starts periodic telemetry scheduling
+starts WiFi_Auto()
+```
+
+MQTT is started by the first successful WiFi connection rather than directly by `startNightMareESP()`.
+
+## Service the framework loop
+
+Call:
+
+```cpp
+tickNightMareESP();
+```
+
+from `loop()`:
+
+```cpp
+void loop()
+{
+    tickNightMareESP();
+
+    // Application cooperative work.
+}
+```
+
+With the default:
+
+```cpp
+NM_SCHEDULER_OWN_TASK 1
+```
+
+the Scheduler owns its own FreeRTOS task.
+
+`tickNightMareESP()` therefore does not also tick it.
+
+If configured with:
+
+```cpp
+NM_SCHEDULER_OWN_TASK 0
+```
+
+the same `tickNightMareESP()` call services the Scheduler cooperatively.
+
+## Publish sensor readings
+
+When the application obtains a new measurement:
+
+```cpp
+void publishTemperature(float value)
+{
+    temperature.setValue(value);
+}
+```
+
+For a bound ManagedSensor, NightMare publishes the encoded Value retained at:
+
+```text
+<device>/resources/temperature/state
+```
+
+The application does not need to assemble that MQTT topic.
+
+## Observe another device
+
+Declare a RemoteSensor:
+
+```cpp
+RemoteSensor<float> outsideTemperature(
+    "temperature",
+    NetDeviceIdentity("weather-node"));
+```
+
+React to effective Value changes:
+
+```cpp
+void onOutsideTemperature(
+    NetValue<float> &resource,
+    const float &value)
+{
+    Serial.printf("Outside: %.2f\n", value);
+}
+```
+
+Then bind it:
+
+```cpp
+outsideTemperature.onUpdate = onOutsideTemperature;
+
+gResourcesManager.bindResource(&outsideTemperature);
+```
+
+NightMare automatically subscribes to:
+
+```text
+weather-node/resources
+weather-node/resources/temperature/state
+```
+
+and restores those subscriptions after MQTT reconnect.
+
+## Use a source selected at runtime
+
+A Remote Resource can be bound before it has a source:
+
+```cpp
+RemoteSensor<float> selectedTemperature;
+
+void setup()
+{
+    gResourcesManager.bindResource(&selectedTemperature);
+    startNightMareESP();
+}
+```
+
+Later:
+
+```cpp
+selectedTemperature.setSource(
+    "weather-node",
+    "temperature");
+```
+
+The manager replaces the old subscriptions and resets state learned from the previous source.
+
+## Write another device's state
+
+Declare:
+
+```cpp
+RemoteState<bool> bedroomPower(
+    "power",
+    NetDeviceIdentity("bedroom-ac"));
+```
+
+Bind it:
+
+```cpp
+gResourcesManager.bindResource(&bedroomPower);
+```
+
+Request a change:
+
+```cpp
+if (!bedroomPower.setValue(true))
+{
+    Serial.println("write was not accepted for transport");
+}
+```
+
+RemoteState is optimistic by default.
+
+Immediately after a successfully transported write:
+
+```cpp
+bedroomPower.getValue();
+```
+
+shows the requested value for the optimistic window.
+
+The owner's last reported truth remains available through:
+
+```cpp
+bedroomPower.authoritativeValue();
+```
+
+## Invoke a remote Action
+
+Declare and bind:
+
+```cpp
+RemoteAction identifyRemote(
+    "identify",
+    NetDeviceIdentity("bedroom-ac"));
+
+gResourcesManager.bindResource(&identifyRemote);
+```
+
+Invoke:
+
+```cpp
+bool sent = identifyRemote.invoke();
+```
+
+`true` means the request was accepted for transport.
+
+It is not a remote execution acknowledgement.
+
+Ordinary Resource `/invoke` is fire-and-forget.
+
+## Add a Scheduler callback
+
+For recurring runtime work:
+
+```cpp
+void sampleTemperature()
+{
+    // Read hardware.
+    const float value = readTemperature();
+    temperature.setValue(value);
+}
+
+void setup()
+{
+    // ...
+
+    gScheduler.timer(
+        "app.temperature",
+        sampleTemperature,
+        5000);
+
+    startNightMareESP();
+}
+```
+
+C++ callback jobs are MANAGED.
+
+They cannot be removed by operator `JOB CLEAR`.
+
+## Scheduler ownership order
+
+A job may be added before `gScheduler.begin()` / `startNightMareESP()`.
+
+This is useful for application setup:
+
+```text
+declare/bind Resources
+register callbacks/jobs
+start framework
+```
+
+Direct `gScheduler.tick()` is also allowed for manual/cooperative use.
+
+In the standard lifecycle, use `tickNightMareESP()` instead of manually ticking a Scheduler configured in TASK mode.
+
+## Operator commands
+
+With Console built-ins enabled, the command grammar includes:
+
+```text
+PING
+INFO ...
+JOB ...
+MQTT ...
+WIFI ...
+CONFIG ...
+```
+
+Commands can arrive through:
+
+```text
+serial console       when enabled
+MQTT console
+controlled MQTT / MQTTP
+Scheduler String jobs
+```
+
+See [Commands](protocols/commands.md).
+
+## What appears on MQTT
+
+For a device named:
+
+```text
+living-room
+```
+
+the normal retained state may include:
+
+```text
+living-room/status
+living-room/info
+living-room/telemetry/system
+living-room/telemetry/network
+living-room/resources
+living-room/resources/temperature/state
+living-room/resources/power/state
+```
+
+Requests arrive at:
+
+```text
+living-room/resources/power/set
+living-room/resources/identify/invoke
+living-room/console/in
+living-room/console/controlled/<id>/in
+```
+
+See [MQTT topics](protocols/topics.md) for the complete wire map.
+
+## Check the device identity
+
+The generated default network name is based on the board hardware:
+
+```cpp
+Serial.println(gDeviceIdentity.getDeviceName());
+```
+
+Example:
+
+```text
+Esp32-nm-6ca172e0
+```
+
+The same generated name is also available permanently as:
+
+```cpp
+gDeviceIdentity.getHardwareSignature();
+```
+
+If the logical name is later adopted, the hardware signature remains unchanged.
 
 ## Next steps
 
-TODO.
+Read these next:
+
+- [Core concepts](concepts.md) for the vocabulary.
+- [Resources](modules/resources.md) for the C++ Resource model.
+- [Resource protocol](protocols/resources.md) for the wire contract.
+- [Scheduler](modules/scheduler.md) for timing and persistence.
+- [Device identity](modules/identity.md) for adoption and cleanup.
+- [Network and MQTT](modules/network.md) for broker and callback behavior.
+- [Known gaps](architecture/known-gaps.md) before depending on behavior that is intentionally deferred.
