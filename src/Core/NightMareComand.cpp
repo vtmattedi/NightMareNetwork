@@ -548,10 +548,32 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         result.response = res;
         result.result = true;
     }
-    // else if (parsedMsg.command == "TIME")
-    // {
-    //     istime
-    // }
+    else if (parsedMsg.command == "TIME")
+    {
+        if (parsedMsg.argc > 1 || (parsedMsg.argc == 1 && parsedMsg.subcommand != "STATUS"))
+        {
+            result.result = false;
+            result.response = "Usage: TIME [STATUS]";
+        }
+        else
+        {
+            const time_t epoch = NightMare::Time::now();
+            const bool clockValid = NightMare::Time::valid();
+            DynamicJsonDocument doc(256);
+            doc["synced"] = clockValid && SystemState.getFlag("time_synced");
+            doc["valid"] = clockValid;
+            doc["epoch"] = clockValid ? static_cast<uint64_t>(epoch) : 0;
+            doc["local"] = clockValid
+                               ? NightMare::Time::timestampToDateString(
+                                     epoch, NightMare::Time::DateAndTime)
+                               : String();
+            const char *timezone = getenv("TZ");
+            doc["timezone"] = timezone != nullptr ? timezone : "";
+            doc["uptime_ms"] = millis();
+            serializeJson(doc, result.response);
+            result.result = true;
+        }
+    }
     else if (parsedMsg.command == "FS")
     {
         if (parsedMsg.subcommand == "LIST")
