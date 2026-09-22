@@ -53,6 +53,22 @@ namespace
     {
         return NightMare::Time::valid();
     }
+
+    const char *scopeName(SchedulerJobScope scope)
+    {
+        return scope == SchedulerJobScope::USER ? "user" : "managed";
+    }
+
+    bool parseScope(const String &text, SchedulerJobScope &scope)
+    {
+        if (text == "user")
+            scope = SchedulerJobScope::USER;
+        else if (text == "managed")
+            scope = SchedulerJobScope::MANAGED;
+        else
+            return false;
+        return true;
+    }
 }
 
 Scheduler gScheduler;
@@ -133,8 +149,9 @@ bool Scheduler::persists(const Job &job)
     return job.active && job.clock == SchedulerClock::Wall && job.callback == nullptr;
 }
 
-int32_t Scheduler::add(const String &label, const String &command, SchedulerClock clock,
-                       uint32_t due, uint32_t interval, SchedulerCallback callback)
+int32_t Scheduler::add(SchedulerJobScope scope, const String &label, const String &command,
+                       SchedulerClock clock, uint32_t due, uint32_t interval,
+                       SchedulerCallback callback)
 {
     JobGuard guard;
     ensureInitialized();
@@ -151,8 +168,9 @@ int32_t Scheduler::add(const String &label, const String &command, SchedulerCloc
     if (nextId_ == 0 || nextId_ > INT32_MAX)
         return -1;
 
+    // Unique within the scope only, so a user job can never block a framework one.
     for (const Job &job : jobs_)
-        if (job.active && job.label == label)
+        if (job.active && job.scope == scope && job.label == label)
             return -1;
 
     for (Job &job : jobs_)
@@ -161,6 +179,7 @@ int32_t Scheduler::add(const String &label, const String &command, SchedulerCloc
             continue;
         job.active = true;
         job.id = nextId_++;
+        job.scope = scope;
         job.label = label;
         job.command = command;
         job.callback = callback;
@@ -178,25 +197,28 @@ int32_t Scheduler::add(const String &label, const String &command, SchedulerCloc
     return -1;
 }
 
-int32_t Scheduler::scheduleAtWall(const String &label, const String &command,
-                                  SchedulerCallback callback, uint32_t epochSeconds)
+int32_t Scheduler::scheduleAtWall(SchedulerJobScope scope, const String &label,
+                                  const String &command, SchedulerCallback callback,
+                                  uint32_t epochSeconds)
 {
     if (epochSeconds == 0)
         return -1;
-    return add(label, command, SchedulerClock::Wall, epochSeconds, 0, callback);
+    return add(scope, label, command, SchedulerClock::Wall, epochSeconds, 0, callback);
 }
 
-int32_t Scheduler::scheduleAfter(const String &label, const String &command,
-                                 SchedulerCallback callback, uint32_t delayMs)
+int32_t Scheduler::scheduleAfter(SchedulerJobScope scope, const String &label,
+                                 const String &command, SchedulerCallback callback,
+                                 uint32_t delayMs)
 {
     JobGuard guard;
     if (delayMs > MaxInterval)
         return -1;
-    return add(label, command, SchedulerClock::Monotonic, millis() + delayMs, 0, callback);
+    return add(scope, label, command, SchedulerClock::Monotonic, millis() + delayMs, 0, callback);
 }
 
-int32_t Scheduler::scheduleEveryWall(const String &label, const String &command,
-                                     SchedulerCallback callback, uint32_t intervalSeconds)
+int32_t Scheduler::scheduleEveryWall(SchedulerJobScope scope, const String &label,
+                                     const String &command, SchedulerCallback callback,
+                                     uint32_t intervalSeconds)
 {
     JobGuard guard;
     if (intervalSeconds == 0 || intervalSeconds > MaxInterval)
@@ -204,57 +226,64 @@ int32_t Scheduler::scheduleEveryWall(const String &label, const String &command,
     ensureInitialized();
     // A zero due time starts the interval when the wall clock first becomes valid.
     const uint32_t due = wallTimeReady() ? NightMare::Time::now() + intervalSeconds : 0;
-    return add(label, command, SchedulerClock::Wall, due, intervalSeconds, callback);
+    return add(scope, label, command, SchedulerClock::Wall, due, intervalSeconds, callback);
 }
 
-int32_t Scheduler::scheduleEveryMonotonic(const String &label, const String &command,
-                                          SchedulerCallback callback, uint32_t intervalMs)
+int32_t Scheduler::scheduleEveryMonotonic(SchedulerJobScope scope, const String &label,
+                                          const String &command, SchedulerCallback callback,
+                                          uint32_t intervalMs)
 {
     JobGuard guard;
     if (intervalMs == 0 || intervalMs > MaxInterval)
         return -1;
-    return add(label, command, SchedulerClock::Monotonic, millis() + intervalMs, intervalMs,
-               callback);
+    return add(scope, label, command, SchedulerClock::Monotonic, millis() + intervalMs,
+               intervalMs, callback);
 }
 
-int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds)
+int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds,
+                          SchedulerJobScope scope)
 {
-    return scheduleAtWall(label, command, nullptr, epochSeconds);
+    return scheduleAtWall(scope, label, command, nullptr, epochSeconds);
 }
 
 int32_t Scheduler::atWall(const String &label, SchedulerCallback callback, uint32_t epochSeconds)
 {
-    return scheduleAtWall(label, String(), callback, epochSeconds);
+    return scheduleAtWall(SchedulerJobScope::MANAGED, label, String(), callback, epochSeconds);
 }
 
-int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs)
+int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs,
+                         SchedulerJobScope scope)
 {
-    return scheduleAfter(label, command, nullptr, delayMs);
+    return scheduleAfter(scope, label, command, nullptr, delayMs);
 }
 
 int32_t Scheduler::after(const String &label, SchedulerCallback callback, uint32_t delayMs)
 {
-    return scheduleAfter(label, String(), callback, delayMs);
+    return scheduleAfter(SchedulerJobScope::MANAGED, label, String(), callback, delayMs);
 }
 
-int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds)
+int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds,
+                             SchedulerJobScope scope)
 {
-    return scheduleEveryWall(label, command, nullptr, intervalSeconds);
+    return scheduleEveryWall(scope, label, command, nullptr, intervalSeconds);
 }
 
 int32_t Scheduler::everyWall(const String &label, SchedulerCallback callback, uint32_t intervalSeconds)
 {
-    return scheduleEveryWall(label, String(), callback, intervalSeconds);
+    return scheduleEveryWall(SchedulerJobScope::MANAGED, label, String(), callback,
+                             intervalSeconds);
 }
 
-int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs)
+int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs,
+                                  SchedulerJobScope scope)
 {
-    return scheduleEveryMonotonic(label, command, nullptr, intervalMs);
+    return scheduleEveryMonotonic(scope, label, command, nullptr, intervalMs);
 }
 
 int32_t Scheduler::everyMonotonic(const String &label, SchedulerCallback callback, uint32_t intervalMs)
 {
-    return scheduleEveryMonotonic(label, String(), callback, intervalMs);
+    return scheduleEveryMonotonic(SchedulerJobScope::MANAGED, label, String(), callback,
+                                  intervalMs);
 }
 
 int32_t Scheduler::timer(const String &label, SchedulerCallback callback, uint32_t intervalMs)
@@ -268,69 +297,58 @@ int32_t Scheduler::setTimeout(SchedulerCallback callback, uint32_t delayMs)
     return after(String("Timeout_") + String(nextTimeoutId_++), callback, delayMs);
 }
 
-bool Scheduler::remove(const String &label)
+bool Scheduler::removeJob(Job &job)
 {
-    JobGuard guard;
-    ensureInitialized();
-    for (Job &job : jobs_)
+    const bool persisted = persists(job);
+    const Job previous = job;
+    job = Job{};
+    if (persisted && !save())
     {
-        if (!job.active || job.label != label)
-            continue;
-        const bool persisted = persists(job);
-        const Job previous = job;
-        job = Job{};
-        if (persisted && !save())
-        {
-            job = previous;
-            return false;
-        }
-        return true;
+        job = previous;
+        return false;
     }
-    return false;
-}
-
-bool Scheduler::remove(uint32_t id)
-{
-    JobGuard guard;
-    ensureInitialized();
-    for (Job &job : jobs_)
-    {
-        if (!job.active || job.id != id)
-            continue;
-        const bool persisted = persists(job);
-        const Job previous = job;
-        job = Job{};
-        if (persisted && !save())
-        {
-            job = previous;
-            return false;
-        }
-        return true;
-    }
-    return false;
-}
-
-bool Scheduler::clear()
-{
-    JobGuard guard;
-    ensureInitialized();
-    if (!storageReady_)
-        return false;
-
-    File file = LittleFS.open(JobsFile, "w");
-    if (!file)
-        return false;
-    constexpr char EmptyJobs[] = "{\"jobs\":[]}";
-    const bool written = file.print(EmptyJobs) == sizeof(EmptyJobs) - 1;
-    file.close();
-    if (!written)
-        return false;
-    for (Job &job : jobs_)
-        job = Job{};
     return true;
 }
 
-String Scheduler::list()
+bool Scheduler::remove(const String &label, SchedulerJobScope scope)
+{
+    JobGuard guard;
+    ensureInitialized();
+    for (Job &job : jobs_)
+        if (job.active && job.scope == scope && job.label == label)
+            return removeJob(job);
+    return false;
+}
+
+bool Scheduler::remove(uint32_t id, SchedulerJobScope scope)
+{
+    JobGuard guard;
+    ensureInitialized();
+    for (Job &job : jobs_)
+        if (job.active && job.scope == scope && job.id == id)
+            return removeJob(job);
+    return false;
+}
+
+bool Scheduler::clear(SchedulerJobScope scope)
+{
+    JobGuard guard;
+    ensureInitialized();
+    // The file is rewritten without this scope first and memory follows only
+    // if that worked, so a failure leaves both exactly as they were. Nothing
+    // persisted in this scope means there is nothing to write.
+    bool persistedInScope = false;
+    for (const Job &job : jobs_)
+        persistedInScope |= persists(job) && job.scope == scope;
+    if (persistedInScope && !writeJobs(&scope))
+        return false;
+    for (Job &job : jobs_)
+        if (job.active && job.scope == scope)
+            job = Job{};
+    return true;
+}
+
+String Scheduler::list(SchedulerJobScope scope)
 {
     JobGuard guard;
     ensureInitialized();
@@ -340,7 +358,7 @@ String Scheduler::list()
     uint8_t count = 0;
     for (const Job &job : jobs_)
     {
-        if (!job.active)
+        if (!job.active || job.scope != scope)
             continue;
         ++count;
         JsonObject item = array.createNestedObject();
@@ -435,6 +453,11 @@ void Scheduler::tick()
 
 bool Scheduler::save()
 {
+    return writeJobs(nullptr);
+}
+
+bool Scheduler::writeJobs(const SchedulerJobScope *omit)
+{
     if (!storageReady_)
         return false;
 
@@ -442,10 +465,11 @@ bool Scheduler::save()
     JsonArray array = doc.createNestedArray("jobs");
     for (const Job &job : jobs_)
     {
-        if (!persists(job))
+        if (!persists(job) || (omit != nullptr && job.scope == *omit))
             continue;
         JsonObject item = array.createNestedObject();
         item["id"] = job.id;
+        item["scope"] = scopeName(job.scope);
         item["label"] = job.label;
         item["command"] = job.command;
         item["due"] = job.due;
@@ -477,6 +501,10 @@ bool Scheduler::load()
 
     for (JsonObject item : doc["jobs"].as<JsonArray>())
     {
+        // An entry without a valid scope is not read: there is no older format to honour.
+        SchedulerJobScope scope;
+        if (!parseScope(item["scope"].as<String>(), scope))
+            continue;
         String label = item["label"].as<String>();
         String command = item["command"].as<String>();
         uint32_t due = item["due"] | 0UL;
@@ -490,7 +518,7 @@ bool Scheduler::load()
         bool duplicateId = false;
         for (const Job &job : jobs_)
         {
-            duplicateLabel |= job.active && job.label == label;
+            duplicateLabel |= job.active && job.scope == scope && job.label == label;
             duplicateId |= job.active && job.id == id;
         }
         if (duplicateLabel)
@@ -505,6 +533,7 @@ bool Scheduler::load()
                 continue;
             job.active = true;
             job.id = id;
+            job.scope = scope;
             job.label = label;
             job.command = command;
             job.clock = SchedulerClock::Wall;

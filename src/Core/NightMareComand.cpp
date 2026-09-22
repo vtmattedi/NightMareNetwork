@@ -349,23 +349,26 @@ static bool parseJobNumber(const String &text, uint32_t &value)
     return true;
 }
 
+// Every JOB command works on USER jobs only: what arrives as text can neither
+// see nor remove the jobs the framework and application schedule in C++.
 static NightMareResults executeJobCommand(const NightMareMessage &message, NightmareContext context)
 {
+    constexpr SchedulerJobScope Scope = SchedulerJobScope::USER;
     NightMareResults result;
     result.result = false;
     result.context = context;
 
     if (message.subcommand == "LIST")
     {
-        result.response = gScheduler.list();
+        result.response = gScheduler.list(Scope);
         result.result = result.response.length() != 0;
         if (!result.result)
             result.response = "Could not list jobs.";
     }
     else if (message.subcommand == "CLEAR")
     {
-        result.result = gScheduler.clear();
-        result.response = result.result ? "All jobs cleared." : "Could not clear persisted jobs.";
+        result.result = gScheduler.clear(Scope);
+        result.response = result.result ? "All user jobs cleared." : "Could not clear persisted jobs.";
     }
     else if (message.subcommand == "DELETE")
     {
@@ -379,13 +382,13 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
                 result.response = "Invalid job ID.";
             else
             {
-                result.result = gScheduler.remove(id);
+                result.result = gScheduler.remove(id, Scope);
                 result.response = result.result ? "Job deleted." : "Job not found.";
             }
         }
         else
         {
-            result.result = gScheduler.remove(target);
+            result.result = gScheduler.remove(target, Scope);
             result.response = result.result ? "Job deleted." : "Job not found.";
         }
     }
@@ -429,13 +432,13 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
 
         int32_t id = -1;
         if (message.subcommand == "AT")
-            id = gScheduler.atWall(label, command, when);
+            id = gScheduler.atWall(label, command, when, Scope);
         else if (message.subcommand == "AFTER")
-            id = gScheduler.after(label, command, when);
+            id = gScheduler.after(label, command, when, Scope);
         else if (clock == "WALL")
-            id = gScheduler.everyWall(label, command, when);
+            id = gScheduler.everyWall(label, command, when, Scope);
         else
-            id = gScheduler.everyMonotonic(label, command, when);
+            id = gScheduler.everyMonotonic(label, command, when, Scope);
         result.result = id >= 0;
         if (result.result)
             result.response = String("Job created with ID ") + String(id);
