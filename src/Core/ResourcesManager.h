@@ -19,6 +19,26 @@ public:
     virtual bool subscribe(const String &topicFilter) = 0;
     virtual bool unsubscribe(const String &topicFilter) = 0;
 };
+enum class InternalCommands
+{
+    NONE,
+    LIST,
+    RAW,
+};
+
+InternalCommands parseInternalCommand(const String &command);
+
+struct ParsedCommand
+{
+    bool internalSyntax = false;
+    String internalAction;
+    String target;
+    String verb;
+    String payload;
+    InternalCommands internalCommand = InternalCommands::NONE;
+};
+
+ParsedCommand parseCommand(const String &expression);
 
 /// @brief Registration, routing, manifests, subscriptions and reconnect
 /// behaviour for declared resources. Deliberately non-template: it only ever
@@ -69,9 +89,10 @@ public:
     ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
 
     /// @brief Executes the resource-command expression after a leading `>`.
-    /// Full topics preserve MQTT topic/payload semantics. A bare unique name
-    /// reads a value or invokes an action with an empty payload; `name action`
-    /// invokes an action with the remainder as its payload.
+    /// `list` and `raw <topic> <payload>` are manager operations (no space
+    /// after `>`). A leading space selects a resource by unique name; a bare
+    /// name performs its default operation and an optional verb selects get,
+    /// set or invoke explicitly.
     ActionResult executeCommand(const String &expression);
 
     /// @brief Removes the retained resource footprint of a previous identity:
@@ -117,6 +138,7 @@ private:
 
     bool publishManifest();
     bool publishState(const NetValueResource &resource);
+    ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);

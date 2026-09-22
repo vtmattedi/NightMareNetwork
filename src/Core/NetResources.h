@@ -6,6 +6,8 @@
 class ResourcesManager;
 
 constexpr size_t NetResourceMaxPayloadLength = 2048;
+constexpr size_t NetResourceMaxManifestLength = 16384;
+constexpr size_t NetResourceMaxCommandLength = NetResourceMaxManifestLength + 256;
 
 enum class NetResourceType : uint8_t
 {
@@ -177,6 +179,9 @@ struct NetValueResource : public NetResource
     // layer needs, and all three speak the encoded wire format.
     virtual String encodedValue() const = 0;
     virtual String encodedCurrentValue() const = 0;
+    // A local caller requests a value using its wire representation. Remote
+    // values retain their normal optimistic-write behaviour through this path.
+    virtual bool requestEncodedValue(const String &encoded) = 0;
     // Ingress of owner state: this value is now the truth.
     virtual bool applyEncodedOwnerValue(const String &encoded) = 0;
     // Ingress of a /set request aimed at a value this device owns.
@@ -277,6 +282,14 @@ struct NetValue : public NetValueResource
 
     String encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
     String encodedCurrentValue() const override { return NetCodec<T>::encode(getValue()); }
+
+    bool requestEncodedValue(const String &encoded) override
+    {
+        T requested = T();
+        if (!NetCodec<T>::decode(encoded, requested))
+            return false;
+        return setValue(requested);
+    }
 
     bool applyEncodedOwnerValue(const String &encoded) override
     {

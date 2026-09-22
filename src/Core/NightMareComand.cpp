@@ -479,9 +479,8 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         ++commandStart;
     if (commandStart < message.length() && message[commandStart] == '>')
     {
-        constexpr size_t MaxResourceCommandLength = NetResourceMaxPayloadLength + 256;
         const String expression = message.substring(commandStart + 1);
-        if (!ensureSize(expression, MaxResourceCommandLength, result.response))
+        if (!ensureSize(expression, NetResourceMaxCommandLength, result.response))
         {
             result.result = false;
             return result;

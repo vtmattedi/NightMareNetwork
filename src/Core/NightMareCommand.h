@@ -52,9 +52,9 @@ bool ensureSize(const String &str, size_t maxLength, String &error);
 /// @return The parsed message, or one with `valid` false and `error` set.
 NightMareMessage parseNightMareMessage2(const String &message);
 
-/// @brief Parses and executes a command on the calling task. With resources enabled, `> name`
-/// reads a value or invokes a no-payload action, `> name action payload` invokes by short name,
-/// and `> device/resources/name/invoke payload` uses the MQTT-shaped topic form.
+/// @brief Parses and executes a command on the calling task. With resources enabled, `>list`
+/// lists the manager's resources, `>raw topic payload` enters the MQTT ingress path, and
+/// `> name [get|set|invoke] [payload]` addresses a resource by its unique name.
 /// @param message The raw command string, e.g. `"WIFI SCAN -s"`. Callers that only have a message
 /// string can omit context entirely, e.g. `handleNightMareCommand("PING")`.
 /// @param context Execution context; defaults to an anonymous synchronous context.
@@ -62,7 +62,7 @@ NightMareMessage parseNightMareMessage2(const String &message);
 NightMareResults handleNightMareCommand(const String &message, NightmareContext context = NightmareContext());
 
 #if NM_CONSOLE_SERIAL
-#ifdef ESP32_C3
+#if defined(ESP32_C3) || defined(ESP32_C6)
 #define SERIALTYPE HWCDC
 #else
 #define SERIALTYPE HardwareSerial
