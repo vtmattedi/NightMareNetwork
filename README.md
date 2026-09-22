@@ -1,30 +1,24 @@
 # NightMare Network
 
-NightMare Network is a small resource protocol and an ESP32 library for devices that need to discover and use each other's state and capabilities. A Device owns Resources; a Service implements behavior behind them. Values hold state, Actions request work, and Events report occurrences.
+NightMare Network is an ESP32 C++ framework and MQTT resource protocol for devices that need to expose, discover, and use each other's state and capabilities without rebuilding the same network plumbing in every firmware project.
 
-A minimum network needs two devices and one MQTT broker:
+Its guiding idea is:
 
-```text
-Device A ── MQTT broker ── Device B
-```
+> **Register once, participate automatically.**
 
-In a larger deployment, devices communicate through a cluster's local broker. Bridges carry selected traffic to a remote broker. The backend connects on the remote side; it does not connect to Local MQTT. Cluster is a topology boundary, while namespace is a separate logical address boundary.
+An application declares the Resources it owns or consumes, binds its handlers, and starts NightMare. The framework takes care of the repeated infrastructure around identity, MQTT addressing, retained state, discovery, scheduling, command routing, telemetry, reconnect behavior, and common ESP32 lifecycle wiring.
+
+NightMare does **not** try to hide embedded development. The application still owns its hardware drivers, sensor acquisition, actuator behavior, and business logic.
 
 ## Start here
 
-1. [Overview](docs/overview.md) explains the network and topology.
-2. [Getting started](docs/getting-started.md) builds a device with one Value and one Action.
-3. [Resources](docs/resources.md) covers registration, authority, discovery, metadata and callbacks.
-4. [Protocol](docs/protocol.md) specifies the current MQTT mapping.
-5. [Runtime and time](docs/runtime.md) covers Jobs, execution modes and clock synchronization.
-6. [Services and platform](docs/services.md) covers telemetry, ESP32 platform helpers, WiFi and OTA.
-7. [API reference](docs/reference.md) lists public entry points and limits.
-8. [Device infrastructure and Console](docs/qol-restoration.md) covers settings, identity, operator commands and the standard facade.
+- [Overview](docs/overview.md) — motivation, philosophy, and the system model.
+- [Core concepts](docs/concepts.md) — the vocabulary used throughout the project.
+- [Responsibilities](docs/responsibilities.md) — what NightMare owns and what the application owns.
+- [Architecture](docs/architecture.md) — how the pieces fit together at runtime.
+- [Design decisions](docs/architecture/design-decisions.md) — intentional trade-offs and why they exist.
+- [Known gaps](docs/architecture/known-gaps.md) — limitations, deferred work, and non-goals.
 
-The [basic](examples/basic) and [temperature sensor](examples/temp-sensor) projects are buildable PlatformIO examples. Both use `symlink://../..` so their builds test the current checkout.
+The authoritative current implementation lives under `src/`. The website and MCP server both consume `docs/**/*.md`.
 
-## Repository
-
-`src/NightMare` is the active C++ library. `Legacy/src` keeps the earlier TCP, timer, command, controller and configuration implementations as historical reference; it is outside the PlatformIO library build. `docs/` is the documentation source. `website/` renders it and `mcp/` exposes it to clients.
-
-`#include <NightMare.h>` is the convenience include. The matching folder includes, such as `<NightMare/Resources/NetValue.h>`, are available when a smaller dependency surface is useful.
+`Legacy/` contains the previous NightMare architecture for historical reference and migration context. It is not part of the active library build and should not be used as a model for new code.

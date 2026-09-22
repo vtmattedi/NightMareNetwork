@@ -1,12 +1,63 @@
 # DS18B20 Resource device
 
-This example exposes a DS18B20 reading as a read-only `NetValue<float>` named `temperature`. It also exposes `connected` and `sensorAddress` Values, a `rescan` Action, and a `sensorLost` Event. Registration handles discovery, state publication, reconnect and a 60-second temperature heartbeat.
+This example uses the active NightMare Network Resource API around a pollable DS18B20 driver.
 
-The sensor driver is a pollable state machine. It starts a 1-Wire conversion, returns to Runtime, then reads the result after the conversion interval. It creates no sensor task and sends no manual sensor JSON. The DS18B20 data line needs an external 4.7 kΩ pull-up to 3.3 V; many breakout boards already include one.
+It exposes:
 
-1. Copy `include/creds.example.h` to `include/creds.h` and set WiFi and local MQTT values.
-2. Set `DEVICE_ID` and the board/pin selection for your hardware.
-3. Run `pio run -e esp32c3-supermini` or `pio run -e esp32doit-devkit-v1`.
-4. Upload and monitor with `pio run -e esp32c3-supermini -t upload -t monitor`.
+```text
+temperature
+    ManagedSensor<float>
 
-The build uses the repository checkout through `symlink://../..`. The temperature Value has no retained state until the first valid reading. Consumers can use the `connected` Value to distinguish current readings from the last known temperature after a sensor loss.
+connected
+    ManagedSensor<bool>
+
+sensor_address
+    ManagedSensor<String>
+
+rescan
+    ManagedAction
+```
+
+The sensor driver remains application code. NightMare owns how those application facts participate in MQTT.
+
+## Setup
+
+1. Copy `include/creds.example.h` to `include/creds.h`.
+2. Set WiFi, Local MQTT and Remote MQTT values.
+3. If Remote MQTT is used, replace the placeholder `ROOT_CA` with the broker CA certificate.
+4. Select the appropriate PlatformIO environment for the hardware.
+5. Build/upload normally.
+
+The DS18B20 data line requires an external 4.7 kΩ pull-up to 3.3 V; many breakout boards already include one.
+
+## Runtime model
+
+`TempSensor.cpp` is a cooperative state machine:
+
+```text
+start conversion
+return to the application
+wait without blocking
+read after conversion time
+schedule next reading
+```
+
+The application registers a MANAGED Scheduler callback every 100 ms to service that state machine.
+
+A valid measurement updates:
+
+```text
+<device>/resources/temperature/state
+```
+
+`connected` reports whether a DS18B20 is currently available.
+
+If the physical sensor disappears, `temperature` remains the last known Resource value; consumers that care about physical availability should use `connected`.
+
+`sensor_address` is only published after a non-empty DS18B20 address is known, because an empty Resource String is reserved for retained-state deletion.
+
+## Broker selection
+
+Like the basic example, this project switches to Local MQTT from the first WiFi-connected callback for convenient local development.
+
+Remove that callback if the project should keep the framework's normal remote-first behavior.

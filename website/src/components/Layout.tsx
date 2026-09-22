@@ -37,7 +37,7 @@ export function Layout() {
   return (
     <>
       <Head>
-        <meta name="description" content="NightMare Network: a C++ library and a set of conventions for ESP32 devices on a home MQTT network, with an MCP server for AI assistants." />
+        <meta name="description" content="NightMare Network: an ESP32 C++ framework and MQTT resource protocol, with documentation and a read-only MCP server for AI assistants." />
         <meta property="og:site_name" content="NightMare Network" />
         <meta property="og:image" content="/og-image.png" />
       </Head>
@@ -57,7 +57,7 @@ export function Layout() {
             <NavLink to="/docs/getting-started">Get started</NavLink>
             <NavLink to="/docs/protocols/topics">Protocols</NavLink>
             <NavLink to="/docs/architecture">Architecture</NavLink>
-            <NavLink to="/docs/modules/mqtt">Modules</NavLink>
+            <NavLink to="/docs/modules/resources">Modules</NavLink>
             <NavLink to="/docs/mcp" className="nav-mcp">MCP</NavLink>
             <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
             <button className="theme-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
