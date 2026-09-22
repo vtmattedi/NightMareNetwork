@@ -23,6 +23,8 @@ enum class InternalCommands
 {
     NONE,
     LIST,
+    MANIFEST,
+    DROP,
     RAW,
 };
 
@@ -89,10 +91,10 @@ public:
     ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
 
     /// @brief Executes the resource-command expression after a leading `>`.
-    /// `list` and `raw <topic> <payload>` are manager operations (no space
-    /// after `>`). A leading space selects a resource by unique name; a bare
-    /// name performs its default operation and an optional verb selects get,
-    /// set or invoke explicitly.
+    /// `list`, `manifest`, `drop <name>` and `raw <topic> <payload>` are
+    /// manager operations (no space after `>`). A leading space selects a
+    /// resource by unique name; a bare name performs its default operation and
+    /// an optional verb selects get, set or invoke explicitly.
     ActionResult executeCommand(const String &expression);
 
     /// @brief Removes the retained resource footprint of a previous identity:
@@ -137,6 +139,7 @@ private:
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
     bool publishManifest();
+    bool serializeManifest(String &payload) const;
     bool publishState(const NetValueResource &resource);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
