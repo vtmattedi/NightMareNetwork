@@ -140,6 +140,10 @@ InternalCommands parseInternalCommand(const String &command)
     normalized.toUpperCase();
     if (normalized == "LIST")
         return InternalCommands::LIST;
+    if (normalized == "MANIFEST")
+        return InternalCommands::MANIFEST;
+    if (normalized == "DROP")
+        return InternalCommands::DROP;
     if (normalized == "RAW")
         return InternalCommands::RAW;
     return InternalCommands::NONE;
@@ -536,6 +540,14 @@ bool ResourcesManager::publishManifest()
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
 
+    String payload;
+    if (!serializeManifest(payload))
+        return false;
+    return publisher_->publish(resolveResourceManifestTopic(thisDevice), payload, true);
+}
+
+bool ResourcesManager::serializeManifest(String &payload) const
+{
     DynamicJsonDocument doc(MaxManifestLength);
     doc["version"] = ManifestVersion;
     JsonArray items = doc.createNestedArray("resources");
@@ -571,10 +583,10 @@ bool ResourcesManager::publishManifest()
     if (doc.overflowed())
         return false;
 
-    String payload;
+    payload = String();
     if (serializeJson(doc, payload) == 0)
         return false;
-    return publisher_->publish(resolveResourceManifestTopic(thisDevice), payload, true);
+    return true;
 }
 
 bool ResourcesManager::publishState(const NetValueResource &resource)
@@ -746,7 +758,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     LOG("RM", "Executing command: '%s'", expression.c_str());
     const ParsedCommand command = parseCommand(expression);
     if (expression.length() == 0)
-        return {false, String("Usage: >list | >raw <topic> [payload] | > <name> [verb [payload]]")};
+        return {false, String("Usage: >list | >manifest | >drop <name> | >raw <topic> [payload] | > <name> [verb [payload]]")};
 
     if (command.internalSyntax)
     {
@@ -757,6 +769,41 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
             if (arguments.length() != 0)
                 return {false, String("Usage: >list")};
             return listResources();
+        }
+
+        if (command.internalCommand == InternalCommands::MANIFEST)
+        {
+            String arguments = command.payload;
+            arguments.trim();
+            if (arguments.length() != 0)
+                return {false, String("Usage: >manifest")};
+
+            String manifest;
+            if (!serializeManifest(manifest))
+                return {false, String("Could not serialize manifest")};
+            return {true, manifest};
+        }
+
+        if (command.internalCommand == InternalCommands::DROP)
+        {
+            size_t position = 0;
+            const String name = commandToken(command.payload, position);
+            String extra = position < command.payload.length()
+                               ? command.payload.substring(position)
+                               : String();
+            extra.trim();
+            if (name.length() == 0 || extra.length() != 0)
+                return {false, String("Usage: >drop <name>")};
+
+            bool ambiguous = false;
+            NetResource *resource = findResourceByName(name, ambiguous);
+            if (ambiguous)
+                return {false, String("Resource name is ambiguous")};
+            if (resource == nullptr)
+                return {false, String("Resource not found")};
+
+            unbindResource(resource);
+            return {true, String("Dropped resource: ") + name};
         }
 
         if (command.internalCommand == InternalCommands::RAW)
