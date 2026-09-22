@@ -4,6 +4,8 @@
 #include "NetCodec.h"
 
 class ResourcesManager;
+template <typename T>
+class NetValue;
 
 constexpr size_t NetResourceMaxPayloadLength = 2048;
 constexpr size_t NetResourceMaxManifestLength = 16384;
@@ -74,15 +76,16 @@ enum class ResourceRole : uint8_t
     REMOTE   // Implemented by another device.
 };
 
-struct NetResource
+class NetResource
 {
-    const NetResourceType kind;
-    String name;
-    NetDeviceIdentity ownerDevice;
+public:
+    const String &name() const { return name_; }
+    const String &owner() const;
+    NetResourceType kind() const { return kind_; }
+    bool isBound() const { return resourceManager_ != nullptr; }
+    bool isRemote() const { return role_ == ResourceRole::REMOTE; }
 
-    bool isBound() const { return resourceManager != nullptr; }
-    bool isOwned() const { return role_ == ResourceRole::MANAGED; }
-
+protected:
     // A MANAGED resource leaves ownerDevice empty for good: its owner is always
     // the current device identity, read when a topic is resolved (see
     // resolveResourceOwner). Nothing is copied at construction or bind time, so
@@ -90,13 +93,11 @@ struct NetResource
     // also start empty and be pointed at a source later with setSource().
     NetResource(const String &resourceName, const String &identity,
                 const NetResourceType resourceType, const ResourceRole resourceRole)
-        : kind(resourceType),
-          name(resourceName),
-          ownerDevice(identity),
+        : kind_(resourceType),
+          name_(resourceName),
+          ownerDevice_(identity),
           role_(resourceRole) {};
     virtual ~NetResource() = default;
-
-protected:
     /// @brief Points a REMOTE resource at a different source. Updates the target
     /// only: the role is permanent, so ownership is never recalculated here.
     void setRemoteSource(const String &deviceName, const String &resourceName);
@@ -105,11 +106,18 @@ protected:
     virtual void resetRemoteState() {}
 
 private:
+    const NetResourceType kind_;
+    String name_;
+    NetDeviceIdentity ownerDevice_;
     const ResourceRole role_;
-    ResourcesManager *resourceManager = nullptr; // Non-owning; set by bindResource().
+    ResourcesManager *resourceManager_ = nullptr; // Non-owning; set by bindResource().
+
+    bool isOwned() const { return role_ == ResourceRole::MANAGED; }
+
     friend class ResourcesManager;
-    friend struct NetValueResource;
-    friend struct NetActionResource;
+    friend class NetValueResource;
+    friend class NetActionResource;
+    friend const String &resolveResourceOwner(const NetResource &resource);
 };
 
 /* Canonical addressing. Topics belong to the resource layer, so a resource can
@@ -151,32 +159,32 @@ enum class NetSyncStrategy : uint8_t
 /// @brief Manager-facing half of a value resource: everything that does not
 /// depend on the value's C++ type, including the optimistic/authoritative state
 /// machine. The typed container is NetValue<T>.
-struct NetValueResource : public NetResource
+class NetValueResource : public NetResource
 {
+public:
+    NetValueType type() const { return valueType_; }
+
+protected:
     NetValueResource(const String &resourceName, const String &resourceOwner,
                      AccessPolicy resourceAccess, NetValueType resourceValueType,
                      ResourceRole resourceRole)
         : NetResource(resourceName, resourceOwner, NetResourceType::VALUE, resourceRole),
-          access(resourceAccess),
-          valueType(resourceValueType) {}
+          access_(resourceAccess),
+          valueType_(resourceValueType) {}
 
-    AccessPolicy access = AccessPolicy::READ;
-    NetValueType valueType = NetValueType::STRING; // Manifest metadata, from NetCodec<T>::Type.
-
-    // Optimism is opt-in: only RemoteState<T> selects it, because only a write
-    // that has to travel to another device has a gap worth papering over.
-    NetSyncStrategy syncStrategy = NetSyncStrategy::STRICT;
-    uint32_t optimisticWindowMs = 5000; // How long a local write shadows owner state.
-
-    ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
-    bool isStale() const { return freshness == ResourceFreshness::STALE; }
-    bool hasAuthoritativeValue() const { return hasAuthoritativeValue_; }
-    bool hasCurrentValue() const { return hasAuthoritativeValue_ || optimisticActive(); }
-    uint32_t lastUpdateMs() const { return lastUpdateMs_; }
-    uint32_t lastWriteMs() const { return lastWriteMs_; }
+    bool hasValueImpl() const { return hasAuthoritativeValue_ || optimisticActive(); }
+    bool isStaleImpl() const { return freshness_ == ResourceFreshness::STALE; }
+    void useOptimisticSync() { syncStrategy_ = NetSyncStrategy::OPTIMISTIC; }
 
     // Type-erasure boundary. These are the only value operations the transport
     // layer needs, and all three speak the encoded wire format.
+private:
+    AccessPolicy access_ = AccessPolicy::READ;
+    NetValueType valueType_ = NetValueType::STRING;
+    NetSyncStrategy syncStrategy_ = NetSyncStrategy::STRICT;
+    uint32_t optimisticWindowMs_ = 5000;
+    ResourceFreshness freshness_ = ResourceFreshness::UNKNOWN;
+
     virtual String encodedValue() const = 0;
     virtual String encodedCurrentValue() const = 0;
     // A local caller requests a value using its wire representation. Remote
@@ -187,7 +195,6 @@ struct NetValueResource : public NetResource
     // Ingress of a /set request aimed at a value this device owns.
     virtual bool applyEncodedWrite(const String &encoded) = 0;
 
-protected:
     // Everything learned from a source is per-source, so retargeting clears it.
     void resetRemoteState() override;
 
@@ -206,16 +213,23 @@ protected:
     uint32_t lastWriteMs_ = 0;
 
     friend class ResourcesManager;
+    template <typename T>
+    friend class NetValue;
 };
 
 /// @brief The typed value container. Holds the owner's truth and the last
 /// locally requested value, and converts at the wire boundary through
 /// NetCodec<T>. Deliberately thin: the framework logic lives in the base.
 template <typename T>
-struct NetValue : public NetValueResource
+class NetValue : public NetValueResource
 {
+public:
     using UpdateHandler = void (*)(NetValue<T> &resource, const T &value);
 
+    /// @brief Fires after the effective value actually changes.
+    UpdateHandler onUpdate = nullptr;
+
+protected:
     /// @brief A value owned by this device.
     NetValue(const String &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ)
         : NetValueResource(resourceName, String(), resourceAccess, NetCodec<T>::Type,
@@ -227,68 +241,51 @@ struct NetValue : public NetValueResource
         : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type,
                            ResourceRole::REMOTE) {}
 
-    /// @brief Fires when the *effective* value changes, which is what the
-    /// application reads. It is not a "packet received" hook: an owner packet
-    /// that leaves getValue() unchanged, whether because it repeats the current
-    /// value or because an optimistic window is shadowing it, fires nothing.
-    UpdateHandler onUpdate = nullptr;
-
     /// @brief The value the application should act on: the optimistic value
     /// while its window is open, the owner's value otherwise.
-    const T &getValue() const
+    const T &getValueImpl() const
     {
         return optimisticActive() ? optimisticValue_ : authoritativeValue_;
     }
 
-    /// @brief The owner's last reported value, ignoring any optimistic window.
-    const T &authoritativeValue() const { return authoritativeValue_; }
-
-    /// @brief Application intent: a local change when owned, a /set request otherwise.
-    bool setValue(const T &value)
+    bool setManagedValue(const T &value, bool applyWritePolicy)
     {
-        const T previous = getValue();
-        if (!dispatchLocalWrite(NetCodec<T>::encode(value)))
+        const String encoded = NetCodec<T>::encode(value);
+        if (encoded.length() == 0 || encoded.length() > NetResourceMaxPayloadLength)
+            return false;
+        if (applyWritePolicy && !acceptManagedWrite(value))
             return false;
 
-        if (isOwned())
-        {
-            // This device is the owner, so the request is the new truth.
-            authoritativeValue_ = value;
-            hasAuthoritativeValue_ = true;
-            noteOwnerUpdate();
-        }
-        else
-        {
-            optimisticValue_ = value;
-            noteLocalWrite();
-        }
+        const T previous = getValueImpl();
+        commitOwnerValue(value);
         notifyIfEffectiveChanged(previous);
-        return true;
+        return dispatchLocalWrite(encoded);
     }
 
-    /// @brief Framework ingress: the owner reported this value. Refreshes
-    /// authoritative state without cancelling an open optimistic window, so a
-    /// delayed packet cannot make the application flicker back.
-    /// Becomes ResourcesManager-only once the manager pass lands.
-    bool applyOwnerValue(const T &value)
+    bool setRemoteValue(const T &value)
     {
-        const T previous = getValue();
-        authoritativeValue_ = value;
-        hasAuthoritativeValue_ = true;
-        noteOwnerUpdate();
+        const T previous = getValueImpl();
+        if (!dispatchLocalWrite(NetCodec<T>::encode(value)))
+            return false;
+        optimisticValue_ = value;
+        noteLocalWrite();
         notifyIfEffectiveChanged(previous);
         return true;
     }
 
+    bool hasValueImpl() const { return NetValueResource::hasValueImpl(); }
+    bool isStaleImpl() const { return NetValueResource::isStaleImpl(); }
+
+private:
     String encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
-    String encodedCurrentValue() const override { return NetCodec<T>::encode(getValue()); }
+    String encodedCurrentValue() const override { return NetCodec<T>::encode(getValueImpl()); }
 
     bool requestEncodedValue(const String &encoded) override
     {
         T requested = T();
         if (!NetCodec<T>::decode(encoded, requested))
             return false;
-        return setValue(requested);
+        return setRemoteValue(requested);
     }
 
     bool applyEncodedOwnerValue(const String &encoded) override
@@ -296,7 +293,10 @@ struct NetValue : public NetValueResource
         T decoded = T();
         if (!NetCodec<T>::decode(encoded, decoded))
             return false;
-        return applyOwnerValue(decoded);
+        const T previous = getValueImpl();
+        commitOwnerValue(decoded);
+        notifyIfEffectiveChanged(previous);
+        return true;
     }
 
     bool applyEncodedWrite(const String &encoded) override
@@ -304,14 +304,15 @@ struct NetValue : public NetValueResource
         T requested = T();
         if (!NetCodec<T>::decode(encoded, requested))
             return false;
-        return handleDecodedWrite(requested);
+        if (!acceptManagedWrite(requested))
+            return false;
+        const T previous = getValueImpl();
+        commitOwnerValue(requested);
+        notifyIfEffectiveChanged(previous);
+        return true;
     }
 
-protected:
-    /// @brief Where a decoded /set request lands. Only a device that owns the
-    /// value and offers a handler has something to decide, so the default
-    /// refuses. ManagedState<T> overrides this.
-    virtual bool handleDecodedWrite(const T &requested)
+    virtual bool acceptManagedWrite(const T &requested)
     {
         (void)requested;
         return false;
@@ -326,45 +327,56 @@ protected:
         optimisticValue_ = T();
     }
 
-private:
+    void commitOwnerValue(const T &value)
+    {
+        authoritativeValue_ = value;
+        hasAuthoritativeValue_ = true;
+        noteOwnerUpdate();
+    }
+
     void notifyIfEffectiveChanged(const T &previous)
     {
-        if (onUpdate != nullptr && !(getValue() == previous))
-            onUpdate(*this, getValue());
+        if (onUpdate != nullptr && !(getValueImpl() == previous))
+            onUpdate(*this, getValueImpl());
     }
 
     T authoritativeValue_ = T();
     T optimisticValue_ = T();
 };
 
-/* The wrappers below only pick ownership, access and sync defaults. They add no
- * fields and no value logic: NetValue<T> stays the implementation, and remains
- * available directly for cases these four do not describe. */
+/* These four leaf types are the application API. NetValue<T> is their
+ * non-instantiable implementation base, so invalid operations are absent from
+ * each leaf rather than present and rejected at runtime. */
 
 /// @brief Owned by this device, observe-only for everyone else.
 template <typename T>
-struct ManagedSensor : public NetValue<T>
+class ManagedSensor : public NetValue<T>
 {
+public:
     ManagedSensor(const String &resourceName)
         : NetValue<T>(resourceName, AccessPolicy::READ) {}
+
+    const T &getValue() const { return this->getValueImpl(); }
+    bool setValue(const T &value) { return this->setManagedValue(value, false); }
 };
 
 /// @brief Owned by another device, observe-only. Reports owner state at all
 /// times: nothing local can write it, so there is nothing to be optimistic about.
 template <typename T>
-struct  RemoteSensor : public NetValue<T>
+class RemoteSensor : public NetValue<T>
 {
+public:
     /// @brief Declared without a source yet; point it at one with setSource().
     RemoteSensor() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ)
-    {
-        this->syncStrategy = NetSyncStrategy::STRICT;
-    }
+    {}
 
     RemoteSensor(const String &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ)
-    {
-        this->syncStrategy = NetSyncStrategy::STRICT;
-    }
+    {}
+
+    const T &getValue() const { return this->getValueImpl(); }
+    bool hasValue() const { return this->hasValueImpl(); }
+    bool isStale() const { return this->isStaleImpl(); }
 
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source.
@@ -377,8 +389,9 @@ struct  RemoteSensor : public NetValue<T>
 /// @brief Owned by this device and writable by others. The handler receives the
 /// already-decoded value: String conversion stops at the resource boundary.
 template <typename T>
-struct ManagedState : public NetValue<T>
+class ManagedState : public NetValue<T>
 {
+public:
     /// @brief Returns true to accept the request, which then becomes the
     /// authoritative value, or false to reject it and leave state untouched.
     using WriteRequestHandler = bool (*)(ManagedState<T> &state, const T &requested);
@@ -388,33 +401,38 @@ struct ManagedState : public NetValue<T>
 
     WriteRequestHandler onWrite = nullptr;
 
-protected:
-    bool handleDecodedWrite(const T &requested) override
+    const T &getValue() const { return this->getValueImpl(); }
+    bool setValue(const T &value) { return this->setManagedValue(value, true); }
+
+private:
+    bool acceptManagedWrite(const T &requested) override
     {
-        if (onWrite == nullptr || !onWrite(*this, requested))
-            return false;
-        // Accepted by the owner, so the request is the new truth.
-        this->applyOwnerValue(requested);
-        return true;
+        return onWrite != nullptr && onWrite(*this, requested);
     }
 };
 
 /// @brief Owned by another device and writable from here. A local write shows
 /// immediately and holds until the owner catches up or the window closes.
 template <typename T>
-struct RemoteState : public NetValue<T>
+class RemoteState : public NetValue<T>
 {
+public:
     /// @brief Declared without a source yet; point it at one with setSource().
     RemoteState() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ_WRITE)
     {
-        this->syncStrategy = NetSyncStrategy::OPTIMISTIC;
+        this->useOptimisticSync();
     }
 
     RemoteState(const String &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ_WRITE)
     {
-        this->syncStrategy = NetSyncStrategy::OPTIMISTIC;
+        this->useOptimisticSync();
     }
+
+    const T &getValue() const { return this->getValueImpl(); }
+    bool setValue(const T &value) { return this->setRemoteValue(value); }
+    bool hasValue() const { return this->hasValueImpl(); }
+    bool isStale() const { return this->isStaleImpl(); }
 
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source,
@@ -462,8 +480,15 @@ struct ActionResult
 /// optional extra (NM_ENABLE_ACTION_PAYLOAD_ASSERTION), and it is tolerant:
 /// unknown fields pass, so either side can grow new optional arguments. A
 /// change old callers cannot survive deserves a new action name, not a check.
-struct NetActionResource : public NetResource
+class NetActionResource : public NetResource
 {
+public:
+    size_t argumentCount() const { return argumentCount_; }
+    const ActionArgMetadata *arguments() const { return arguments_; }
+    const ActionArgMetadata &argument(size_t index) const { return arguments_[index]; }
+    bool hasSchema() const { return arguments_ != nullptr && argumentCount_ != 0; }
+
+protected:
     /// @param args Not copied. The schema has to outlive the action, so a static
     /// or global array is the expected source.
     NetActionResource(const String &resourceName, const String &resourceOwner,
@@ -473,12 +498,7 @@ struct NetActionResource : public NetResource
           arguments_(args),
           argumentCount_(argCount) {}
 
-    size_t argumentCount() const { return argumentCount_; }
-    const ActionArgMetadata *arguments() const { return arguments_; }
-    const ActionArgMetadata &argument(size_t index) const { return arguments_[index]; }
-    // A RemoteAction may carry no schema at all, and still invokes normally.
-    bool hasSchema() const { return arguments_ != nullptr && argumentCount_ != 0; }
-
+private:
     /// @brief Manager -> an action this device implements. The result survives
     /// this non-template boundary, so a correlated caller can return it while an
     /// ordinary MQTT /invoke simply drops it. A normalized payload can replace
@@ -493,6 +513,7 @@ protected:
     // Application -> remote owner.
     bool dispatchInvoke(const String &payload);
 
+private:
     const ActionArgMetadata *arguments_ = nullptr;
     size_t argumentCount_ = 0;
 
@@ -500,8 +521,9 @@ protected:
 };
 
 /// @brief This device implements the action and runs it when invoked.
-struct ManagedAction : public NetActionResource
+class ManagedAction : public NetActionResource
 {
+public:
     using Handler = ActionResult (*)(ManagedAction &action, const String &payload);
 
     ManagedAction(const String &resourceName)
@@ -520,7 +542,7 @@ struct ManagedAction : public NetActionResource
     // handler still gets the canonical payload String and parses it itself.
     Handler onInvoke = nullptr;
 
-    /// @brief Runs the local implementation and reports what it returned.
+private:
     ActionResult execute(const String &payload) override
     {
         if (onInvoke == nullptr)
@@ -534,8 +556,9 @@ struct ManagedAction : public NetActionResource
 /// It does not need to repeat the implementer's schema: the usual form declares
 /// none and just invokes. A schema given here is what this caller knows and
 /// expects, possibly a subset, never a claim to mirror the remote contract.
-struct RemoteAction : public NetActionResource
+class RemoteAction : public NetActionResource
 {
+public:
     /// @brief Declared without a source yet; point it at one with setSource().
     RemoteAction()
         : NetActionResource(String(), String(), nullptr, 0, ResourceRole::REMOTE) {}

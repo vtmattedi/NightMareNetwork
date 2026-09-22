@@ -61,20 +61,6 @@ const char *valueTypeName(NetValueType type)
     }
 }
 
-const char *freshnessName(ResourceFreshness freshness)
-{
-    switch (freshness)
-    {
-    case ResourceFreshness::FRESH:
-        return "fresh";
-    case ResourceFreshness::STALE:
-        return "stale";
-    case ResourceFreshness::UNKNOWN:
-    default:
-        return "unknown";
-    }
-}
-
 #if NM_ENABLE_ACTION_PAYLOAD_ASSERTION
 bool argumentTypeMatches(NetValueType type, JsonVariantConst value)
 {
@@ -235,13 +221,13 @@ void ResourcesManager::setSubscriber(ResourceSubscriber *subscriber)
 bool ResourcesManager::sourceConfigured(const NetResource &resource)
 {
     return resource.isOwned() ||
-           (resource.ownerDevice.deviceName.length() != 0 && resource.name.length() != 0);
+           (resource.ownerDevice_.deviceName.length() != 0 && resource.name_.length() != 0);
 }
 
 bool ResourcesManager::hasResolvedSource(const NetResource &resource)
 {
     return DeviceIdentity::validDeviceName(resolveResourceOwner(resource)) &&
-           validSegment(resource.name);
+           validSegment(resource.name_);
 }
 
 bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const
@@ -251,7 +237,7 @@ bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResou
         const NetResource *resource = resources_[i];
         if (resource == exclude || resource->isOwned())
             continue;
-        if (hasResolvedSource(*resource) && resource->ownerDevice.deviceName == deviceName)
+        if (hasResolvedSource(*resource) && resource->ownerDevice_.deviceName == deviceName)
             return true;
     }
     return false;
@@ -263,14 +249,14 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource, const Stri
     if (!DeviceIdentity::validDeviceName(deviceName) || !validSegment(resourceName))
         return String();
 
-    if (resource.kind == NetResourceType::VALUE)
+    if (resource.kind_ == NetResourceType::VALUE)
     {
         // Remote values listen to their owner. Managed values only listen when
         // somebody else is allowed to write them.
         if (!resource.isOwned())
             return resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::STATE);
         const NetValueResource &value = static_cast<const NetValueResource &>(resource);
-        if (value.access == AccessPolicy::READ_WRITE)
+        if (value.access_ == AccessPolicy::READ_WRITE)
             return resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::SET);
         return String();
     }
@@ -283,7 +269,7 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource, const Stri
 
 String ResourcesManager::ingressTopicFor(const NetResource &resource) const
 {
-    return ingressTopicFor(resource, resolveResourceOwner(resource), resource.name);
+    return ingressTopicFor(resource, resolveResourceOwner(resource), resource.name_);
 }
 
 void ResourcesManager::subscribeResource(const NetResource &resource, bool includeManifest)
@@ -291,7 +277,7 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
     if (subscriber_ == nullptr)
         return;
     if (includeManifest && !resource.isOwned() && hasResolvedSource(resource))
-        subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice.deviceName));
+        subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->subscribe(ingress);
@@ -305,7 +291,7 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
     if (ingress.length() != 0)
         subscriber_->unsubscribe(ingress);
     if (removeManifest && !resource.isOwned() && hasResolvedSource(resource))
-        subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice.deviceName));
+        subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
 }
 
 void ResourcesManager::subscribeAll()
@@ -318,7 +304,7 @@ void ResourcesManager::subscribeAll()
         bool includeManifest = !resource.isOwned() && hasResolvedSource(resource);
         for (int j = 0; includeManifest && j < i; ++j)
             if (!resources_[j]->isOwned() && hasResolvedSource(*resources_[j]) &&
-                resources_[j]->ownerDevice.deviceName == resource.ownerDevice.deviceName)
+                resources_[j]->ownerDevice_.deviceName == resource.ownerDevice_.deviceName)
                 includeManifest = false;
         subscribeResource(resource, includeManifest);
     }
@@ -334,7 +320,7 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
         if (ingressTopicFor(resource) == topicFilter)
             return true;
         if (!resource.isOwned() && hasResolvedSource(resource) &&
-            resolveResourceManifestTopic(resource.ownerDevice.deviceName) == topicFilter)
+            resolveResourceManifestTopic(resource.ownerDevice_.deviceName) == topicFilter)
             return true;
     }
     return false;
@@ -345,7 +331,7 @@ NetResource *ResourcesManager::findResource(const String &deviceName, const Stri
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resolveResourceOwner(*resource) == deviceName && resource->name == name)
+        if (resolveResourceOwner(*resource) == deviceName && resource->name_ == name)
             return resource;
     }
     return nullptr;
@@ -358,7 +344,7 @@ NetResource *ResourcesManager::findResourceByName(const String &name, bool &ambi
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resource->name != name)
+        if (resource->name_ != name)
             continue;
         if (match != nullptr)
         {
@@ -370,6 +356,23 @@ NetResource *ResourcesManager::findResourceByName(const String &name, bool &ambi
     return match;
 }
 
+NetResource *ResourcesManager::findCommandResource(const String &address, bool &ambiguous) const
+{
+    ambiguous = false;
+    const int slash = address.indexOf('/');
+    if (slash < 0)
+        return findResourceByName(address, ambiguous);
+    if (slash == 0 || slash == static_cast<int>(address.length()) - 1 ||
+        address.indexOf('/', slash + 1) >= 0)
+        return nullptr;
+
+    const String owner = address.substring(0, slash);
+    const String name = address.substring(slash + 1);
+    if (!DeviceIdentity::validDeviceName(owner) || !validSegment(name))
+        return nullptr;
+    return findResource(owner, name);
+}
+
 // Unlike findResource(), this cannot be fooled by `self` appearing first.
 bool ResourcesManager::addressTakenByOther(const String &deviceName, const String &name,
                                            const NetResource *self) const
@@ -378,7 +381,7 @@ bool ResourcesManager::addressTakenByOther(const String &deviceName, const Strin
     {
         const NetResource *resource = resources_[i];
         if (resource != self && resolveResourceOwner(*resource) == deviceName &&
-            resource->name == name)
+            resource->name_ == name)
             return true;
     }
     return false;
@@ -386,23 +389,23 @@ bool ResourcesManager::addressTakenByOther(const String &deviceName, const Strin
 
 bool ResourcesManager::bindResource(NetResource *resource)
 {
-    if (resource == nullptr || resource->resourceManager != nullptr ||
+    if (resource == nullptr || resource->resourceManager_ != nullptr ||
         resourceCount_ >= MaxResources)
         return false;
-    if (resource->kind == NetResourceType::ACTION &&
+    if (resource->kind_ == NetResourceType::ACTION &&
         !validActionSchema(*static_cast<NetActionResource *>(resource)))
     {
-        LOG_ERROR("RM", "Cannot bind action '%s': invalid argument schema", resource->name.c_str());
+        LOG_ERROR("RM", "Cannot bind action '%s': invalid argument schema", resource->name_.c_str());
         return false;
     }
 
     const String &thisDevice = gDeviceIdentity.getDeviceName();
     if (resource->isOwned())
     {
-        if (!validSegment(resource->name) || !DeviceIdentity::validDeviceName(thisDevice))
+        if (!validSegment(resource->name_) || !DeviceIdentity::validDeviceName(thisDevice))
         {
             LOG_ERROR("RM", "Cannot bind managed resource '%s': invalid name or local identity",
-                      resource->name.c_str());
+                      resource->name_.c_str());
             return false;
         }
         gDeviceIdentity.lockAddress();
@@ -411,10 +414,10 @@ bool ResourcesManager::bindResource(NetResource *resource)
     {
         // Configured, so it has to be a usable address: a present-but-invalid
         // source is a mistake, unlike one that simply has not been set yet.
-        if (!hasResolvedSource(*resource) || resource->ownerDevice.deviceName == thisDevice)
+        if (!hasResolvedSource(*resource) || resource->ownerDevice_.deviceName == thisDevice)
         {
             LOG_ERROR("RM", "Cannot bind remote resource '%s' for device '%s': invalid source",
-                      resource->name.c_str(), resource->ownerDevice.deviceName.c_str());
+                      resource->name_.c_str(), resource->ownerDevice_.deviceName.c_str());
             return false;
         }
     }
@@ -422,19 +425,19 @@ bool ResourcesManager::bindResource(NetResource *resource)
     // An unconfigured remote resource has no logical address yet, so it cannot
     // collide with anything.
     if (hasResolvedSource(*resource) &&
-        findResource(resolveResourceOwner(*resource), resource->name) != nullptr)
+        findResource(resolveResourceOwner(*resource), resource->name_) != nullptr)
     {
         LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': already bound",
-                  resource->name.c_str(), resolveResourceOwner(*resource).c_str());
+                  resource->name_.c_str(), resolveResourceOwner(*resource).c_str());
         return false;
     }
 
     const bool firstFromOwner = !resource->isOwned() && hasResolvedSource(*resource) &&
-                                !remoteOwnerInUse(resource->ownerDevice.deviceName, resource);
-    resource->resourceManager = this;
+                                !remoteOwnerInUse(resource->ownerDevice_.deviceName, resource);
+    resource->resourceManager_ = this;
     resources_[resourceCount_++] = resource;
-    LOG("RM", "Bound %s '%s' (%s) for device '%s'", kindName(resource->kind),
-        resource->name.c_str(), resource->isOwned() ? "managed" : "remote",
+    LOG("RM", "Bound %s '%s' (%s) for device '%s'", kindName(resource->kind_),
+        resource->name_.c_str(), resource->isOwned() ? "managed" : "remote",
         resolveResourceOwner(*resource).c_str());
 
     subscribeResource(*resource, firstFromOwner);
@@ -442,7 +445,7 @@ bool ResourcesManager::bindResource(NetResource *resource)
     if (resource->isOwned())
     {
         publishManifest();
-        if (resource->kind == NetResourceType::VALUE)
+        if (resource->kind_ == NetResourceType::VALUE)
             publishState(*static_cast<NetValueResource *>(resource));
     }
     return true;
@@ -459,8 +462,8 @@ void ResourcesManager::unbindResource(NetResource *resource)
 
         const bool managed = resource->isOwned();
         // Drop the retained state this device put on the broker.
-        if (managed && resource->kind == NetResourceType::VALUE && publisher_ != nullptr &&
-            static_cast<NetValueResource *>(resource)->hasAuthoritativeValue() &&
+        if (managed && resource->kind_ == NetResourceType::VALUE && publisher_ != nullptr &&
+            static_cast<NetValueResource *>(resource)->hasAuthoritativeValue_ &&
             hasResolvedSource(*resource))
             publisher_->publish(resolveResourceTopic(*resource, ResourceTopicOperation::STATE),
                                 String(), true);
@@ -468,12 +471,12 @@ void ResourcesManager::unbindResource(NetResource *resource)
         for (int j = i; j < resourceCount_ - 1; ++j)
             resources_[j] = resources_[j + 1];
         resources_[--resourceCount_] = nullptr;
-        resource->resourceManager = nullptr;
+        resource->resourceManager_ = nullptr;
 
         // Now that it is out of the registry, "last one for this owner" is an
         // honest question to ask.
         unsubscribeResource(*resource,
-                            !remoteOwnerInUse(resource->ownerDevice.deviceName, resource));
+                            !remoteOwnerInUse(resource->ownerDevice_.deviceName, resource));
         if (managed)
             publishManifest();
         return;
@@ -483,10 +486,10 @@ void ResourcesManager::unbindResource(NetResource *resource)
 void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
                                            const String &oldName)
 {
-    if (resource.resourceManager != this || resource.isOwned())
+    if (resource.resourceManager_ != this || resource.isOwned())
         return;
 
-    const bool ownerChanged = oldOwner.deviceName != resource.ownerDevice.deviceName;
+    const bool ownerChanged = oldOwner.deviceName != resource.ownerDevice_.deviceName;
 
     if (subscriber_ != nullptr)
     {
@@ -508,19 +511,19 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     // owner it matches no topic, stays registered, and can be pointed somewhere
     // valid later. Left addressable, it could shadow the resource that holds
     // that address legitimately, since ingress routes to the first match.
-    const String newOwner = resource.ownerDevice.deviceName;
+    const String newOwner = resource.ownerDevice_.deviceName;
     const char *refusal = nullptr;
     if (!hasResolvedSource(resource))
         refusal = "not a valid device/resource address";
     else if (newOwner == gDeviceIdentity.getDeviceName())
         refusal = "it names this device";
-    else if (addressTakenByOther(newOwner, resource.name, &resource))
+    else if (addressTakenByOther(newOwner, resource.name_, &resource))
         refusal = "another bound resource already represents it";
     if (refusal != nullptr)
     {
         LOG_ERROR("RM", "Refused source '%s/%s' for remote resource: %s",
-                  newOwner.c_str(), resource.name.c_str(), refusal);
-        resource.ownerDevice.deviceName = String();
+                  newOwner.c_str(), resource.name_.c_str(), refusal);
+        resource.ownerDevice_.deviceName = String();
         return;
     }
 
@@ -557,13 +560,13 @@ bool ResourcesManager::serializeManifest(String &payload) const
         if (!resource.isOwned())
             continue; // Only what this device implements.
         JsonObject item = items.createNestedObject();
-        item["name"] = resource.name;
-        item["kind"] = kindName(resource.kind);
-        if (resource.kind == NetResourceType::VALUE)
+        item["name"] = resource.name_;
+        item["kind"] = kindName(resource.kind_);
+        if (resource.kind_ == NetResourceType::VALUE)
         {
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
-            item["access"] = accessName(value.access);
-            item["type"] = valueTypeName(value.valueType);
+            item["access"] = accessName(value.access_);
+            item["type"] = valueTypeName(value.valueType_);
         }
         else
         {
@@ -591,7 +594,7 @@ bool ResourcesManager::serializeManifest(String &payload) const
 
 bool ResourcesManager::publishState(const NetValueResource &resource)
 {
-    if (publisher_ == nullptr || !resource.isOwned() || !resource.hasAuthoritativeValue() ||
+    if (publisher_ == nullptr || !resource.isOwned() || !resource.hasAuthoritativeValue_ ||
         !hasResolvedSource(resource))
         return false;
     // The wire format is the codec's own representation: "23.5", "true", raw
@@ -601,7 +604,7 @@ bool ResourcesManager::publishState(const NetValueResource &resource)
     if (encoded.length() == 0 || encoded.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Not publishing '%s': encoded length %u is outside 1..%u",
-                    resource.name.c_str(), (unsigned)encoded.length(), (unsigned)MaxValueLength);
+                    resource.name_.c_str(), (unsigned)encoded.length(), (unsigned)MaxValueLength);
         return false;
     }
     return publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::STATE),
@@ -610,37 +613,75 @@ bool ResourcesManager::publishState(const NetValueResource &resource)
 
 ActionResult ResourcesManager::listResources() const
 {
-    DynamicJsonDocument doc(MaxManifestLength);
-    JsonArray items = doc.to<JsonArray>();
+    auto displayName = [](const NetResource &resource) -> String {
+        return resource.name_.length() == 0 ? String("<unnamed>") : resource.name_;
+    };
+    auto shortNameIsAmbiguous = [this](const NetResource &candidate) -> bool {
+        if (candidate.name_.length() == 0)
+            return false;
+        int matches = 0;
+        for (int i = 0; i < resourceCount_; ++i)
+            if (resources_[i]->name_ == candidate.name_ && ++matches > 1)
+                return true;
+        return false;
+    };
+    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> String {
+        String value;
+        if (resource.kind_ == NetResourceType::ACTION)
+            value = "-";
+        else
+        {
+            const NetValueResource &typed = static_cast<const NetValueResource &>(resource);
+            value = typed.hasValueImpl() ? typed.encodedCurrentValue()
+                                         : String("<unavailable>");
+            value.replace("\r", "\\r");
+            value.replace("\n", "\\n");
+            value.replace("\t", "\\t");
+        }
+        if (!resource.isOwned() && shortNameIsAmbiguous(resource) &&
+            resource.ownerDevice_.deviceName.length() != 0)
+        {
+            value += " @";
+            value += resource.ownerDevice_.deviceName;
+        }
+        return value;
+    };
+
+    size_t typeWidth = 4;
+    size_t nameWidth = 4;
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
-        JsonObject item = items.createNestedObject();
-        item["name"] = resource.name;
-        item["kind"] = kindName(resource.kind);
-        item["role"] = resource.isOwned() ? "managed" : "remote";
-        item["owner"] = resolveResourceOwner(resource);
-
-        if (resource.kind == NetResourceType::VALUE)
-        {
-            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
-            item["access"] = accessName(value.access);
-            item["type"] = valueTypeName(value.valueType);
-            item["available"] = value.hasCurrentValue();
-            item["freshness"] = freshnessName(value.freshness);
-        }
-        else
-        {
-            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
-            item["arguments"] = action.argumentCount();
-        }
+        const size_t typeLength = strlen(kindName(resource.kind_));
+        const size_t nameLength = displayName(resource).length();
+        if (typeLength > typeWidth)
+            typeWidth = typeLength;
+        if (nameLength > nameWidth)
+            nameWidth = nameLength;
     }
-    if (doc.overflowed())
-        return {false, String("Resource list too large")};
 
     String response;
-    if (serializeJson(doc, response) == 0)
-        return {false, String("Could not serialize resource list")};
+    auto appendColumn = [&response](const String &text, size_t width) {
+        response += text;
+        for (size_t i = text.length(); i < width; ++i)
+            response += ' ';
+    };
+    appendColumn("TYPE", typeWidth);
+    response += "  ";
+    appendColumn("NAME", nameWidth);
+    response += "  VALUE";
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        response += '\n';
+        appendColumn(kindName(resource.kind_), typeWidth);
+        response += "  ";
+        appendColumn(displayName(resource), nameWidth);
+        response += "  ";
+        response += displayValue(resource);
+        if (response.length() > MaxManifestLength)
+            return {false, String("Resource list too large")};
+    }
     return {true, response};
 }
 
@@ -652,10 +693,10 @@ bool ResourcesManager::announceAll()
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (!resource->isOwned() || resource->kind != NetResourceType::VALUE)
+        if (!resource->isOwned() || resource->kind_ != NetResourceType::VALUE)
             continue;
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (value.hasAuthoritativeValue() && !publishState(value))
+        if (value.hasAuthoritativeValue_ && !publishState(value))
             published = false;
     }
     return published;
@@ -673,10 +714,10 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
-        if (!resource.isOwned() || resource.kind != NetResourceType::VALUE ||
-            !validSegment(resource.name))
+        if (!resource.isOwned() || resource.kind_ != NetResourceType::VALUE ||
+            !validSegment(resource.name_))
             continue;
-        if (!publisher_->publish(resolveResourceTopic(oldDeviceName, resource.name,
+        if (!publisher_->publish(resolveResourceTopic(oldDeviceName, resource.name_,
                                                       ResourceTopicOperation::STATE),
                                  String(), true))
             withdrawn = false;
@@ -689,7 +730,7 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
 
 bool ResourcesManager::setValue(NetValueResource &resource, const String &encoded)
 {
-    if (resource.resourceManager != this || encoded.length() == 0 ||
+    if (resource.resourceManager_ != this || encoded.length() == 0 ||
         encoded.length() > MaxValueLength)
         return false;
 
@@ -697,7 +738,7 @@ bool ResourcesManager::setValue(NetValueResource &resource, const String &encode
     {
         // A remote write only counts once the transport took it; otherwise the
         // caller would start an optimistic window over a request nobody sent.
-        if (resource.access != AccessPolicy::READ_WRITE || publisher_ == nullptr ||
+        if (resource.access_ != AccessPolicy::READ_WRITE || publisher_ == nullptr ||
             !hasResolvedSource(resource))
             return false;
         return publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::SET),
@@ -714,7 +755,7 @@ bool ResourcesManager::setValue(NetValueResource &resource, const String &encode
 
 bool ResourcesManager::invoke(NetActionResource &resource, const String &payload)
 {
-    if (resource.resourceManager != this || payload.length() > MaxValueLength)
+    if (resource.resourceManager_ != this || payload.length() > MaxValueLength)
         return false;
     // Only a remote action is dispatched; a managed one is executed instead.
     if (resource.isOwned() || !hasResolvedSource(resource) || publisher_ == nullptr)
@@ -727,8 +768,8 @@ bool ResourcesManager::invoke(NetActionResource &resource, const String &payload
         String error;
         if (!assertActionPayload(resource, payload, error))
         {
-            LOG_WARNING("RM", "Not invoking '%s/%s': %s", resource.ownerDevice.deviceName.c_str(),
-                        resource.name.c_str(), error.c_str());
+            LOG_WARNING("RM", "Not invoking '%s/%s': %s", resource.ownerDevice_.deviceName.c_str(),
+                        resource.name_.c_str(), error.c_str());
             return false;
         }
     }
@@ -758,7 +799,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     LOG("RM", "Executing command: '%s'", expression.c_str());
     const ParsedCommand command = parseCommand(expression);
     if (expression.length() == 0)
-        return {false, String("Usage: >list | >manifest | >drop <name> | >raw <topic> [payload] | > <name> [verb [payload]]")};
+        return {false, String("Usage: >list | >manifest | >drop <name|owner/name> | >raw <topic> [payload] | > <name|owner/name> [verb [payload]]")};
 
     if (command.internalSyntax)
     {
@@ -793,12 +834,12 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
                                : String();
             extra.trim();
             if (name.length() == 0 || extra.length() != 0)
-                return {false, String("Usage: >drop <name>")};
+                return {false, String("Usage: >drop <name|owner/name>")};
 
             bool ambiguous = false;
-            NetResource *resource = findResourceByName(name, ambiguous);
+            NetResource *resource = findCommandResource(name, ambiguous);
             if (ambiguous)
-                return {false, String("Resource name is ambiguous")};
+                return {false, String("Resource name is ambiguous; use owner/name")};
             if (resource == nullptr)
                 return {false, String("Resource not found")};
 
@@ -818,7 +859,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     }
 
     if (command.target.length() == 0)
-        return {false, String("Usage: > <name> [get|set|invoke] [payload]")};
+        return {false, String("Usage: > <name|owner/name> [get|set|invoke] [payload]")};
 
     auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult {
         if (action.isOwned())
@@ -833,9 +874,9 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     };
 
     bool ambiguous = false;
-    NetResource *resource = findResourceByName(command.target, ambiguous);
+    NetResource *resource = findCommandResource(command.target, ambiguous);
     if (ambiguous)
-        return {false, String("Resource name is ambiguous")};
+        return {false, String("Resource name is ambiguous; use owner/name")};
     if (resource == nullptr)
         return {false, String("Resource not found")};
 
@@ -843,18 +884,18 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     verb.toUpperCase();
     if (verb.length() == 0)
     {
-        if (resource->kind == NetResourceType::ACTION)
+        if (resource->kind_ == NetResourceType::ACTION)
             return invokeAction(*static_cast<NetActionResource *>(resource), String());
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (!value.hasCurrentValue())
+        if (!value.hasValueImpl())
             return {false, String("Value unavailable")};
         return {true, value.encodedCurrentValue()};
     }
 
     if (verb == "GET")
     {
-        if (resource->kind != NetResourceType::VALUE)
+        if (resource->kind_ != NetResourceType::VALUE)
             return {false, String("GET requires a value resource")};
         String unexpected = command.payload;
         unexpected.trim();
@@ -862,14 +903,14 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
             return {false, String("GET does not accept a payload")};
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (!value.hasCurrentValue())
+        if (!value.hasValueImpl())
             return {false, String("Value unavailable")};
         return {true, value.encodedCurrentValue()};
     }
 
     if (verb == "SET")
     {
-        if (resource->kind != NetResourceType::VALUE)
+        if (resource->kind_ != NetResourceType::VALUE)
             return {false, String("SET requires a value resource")};
         if (command.payload.length() == 0)
             return {false, String("SET requires a payload")};
@@ -889,7 +930,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
 
     if (verb != "INVOKE" && verb != "ACTION")
         return {false, String("Unknown resource verb: ") + command.verb};
-    if (resource->kind != NetResourceType::ACTION)
+    if (resource->kind_ != NetResourceType::ACTION)
         return {false, String("INVOKE requires an action resource")};
 
     if (command.payload.length() > MaxValueLength)
@@ -904,13 +945,13 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
         // The retained state was deleted. The last known value stays readable;
         // only setSource() discards it, because only that changes what the
         // resource represents.
-        value.freshness = ResourceFreshness::STALE;
+        value.freshness_ = ResourceFreshness::STALE;
         return true;
     }
     if (message.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Ignored oversized state for '%s/%s' (%u bytes)",
-                    value.ownerDevice.deviceName.c_str(), value.name.c_str(),
+                    value.ownerDevice_.deviceName.c_str(), value.name_.c_str(),
                     (unsigned)message.length());
         return false;
     }
@@ -918,7 +959,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
     if (!value.applyEncodedOwnerValue(message))
     {
         LOG_WARNING("RM", "Ignored undecodable state for '%s/%s'",
-                    value.ownerDevice.deviceName.c_str(), value.name.c_str());
+                    value.ownerDevice_.deviceName.c_str(), value.name_.c_str());
         return false;
     }
     return true;
@@ -926,21 +967,21 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
 
 bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &message)
 {
-    if (value.access != AccessPolicy::READ_WRITE)
+    if (value.access_ != AccessPolicy::READ_WRITE)
     {
-        LOG_WARNING("RM", "Ignored write to read-only '%s'", value.name.c_str());
+        LOG_WARNING("RM", "Ignored write to read-only '%s'", value.name_.c_str());
         return false;
     }
     if (message.length() > MaxValueLength)
     {
-        LOG_WARNING("RM", "Ignored oversized write to '%s' (%u bytes)", value.name.c_str(),
+        LOG_WARNING("RM", "Ignored oversized write to '%s' (%u bytes)", value.name_.c_str(),
                     (unsigned)message.length());
         return false;
     }
     // Rejected or undecodable: state is unchanged, so there is nothing to publish.
     if (!value.applyEncodedWrite(message))
     {
-        LOG("RM", "Write to '%s' was not applied", value.name.c_str());
+        LOG("RM", "Write to '%s' was not applied", value.name_.c_str());
         return false;
     }
     publishState(value);
@@ -983,13 +1024,13 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resource->isOwned() || resource->ownerDevice.deviceName != deviceName)
+        if (resource->isOwned() || resource->ownerDevice_.deviceName != deviceName)
             continue;
 
         JsonObject declaration;
         for (JsonObject item : items)
         {
-            if (item["name"].as<String>() == resource->name)
+            if (item["name"].as<String>() == resource->name_)
             {
                 declaration = item;
                 break;
@@ -999,18 +1040,18 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         // The local declaration is intentional and is never rewritten from a
         // remote manifest. A disagreement is reported, and that is all.
         bool compatible = !declaration.isNull() &&
-                          declaration["kind"].as<String>() == kindName(resource->kind);
-        if (resource->kind == NetResourceType::VALUE)
+                          declaration["kind"].as<String>() == kindName(resource->kind_);
+        if (resource->kind_ == NetResourceType::VALUE)
         {
             const NetValueResource &value = *static_cast<NetValueResource *>(resource);
-            if (compatible && declaration["type"].as<String>() != valueTypeName(value.valueType))
+            if (compatible && declaration["type"].as<String>() != valueTypeName(value.valueType_))
                 compatible = false;
-            else if (compatible && value.access == AccessPolicy::READ_WRITE &&
+            else if (compatible && value.access_ == AccessPolicy::READ_WRITE &&
                      declaration["access"].as<String>() != accessName(AccessPolicy::READ_WRITE))
                 compatible = false;
             if (!compatible)
                 LOG_WARNING("RM", "Source '%s/%s' is missing or incompatible with the local declaration",
-                            deviceName.c_str(), resource->name.c_str());
+                            deviceName.c_str(), resource->name_.c_str());
             continue;
         }
 
@@ -1019,7 +1060,7 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         if (!compatible)
         {
             LOG_WARNING("RM", "Action '%s/%s' is not declared by its device", deviceName.c_str(),
-                        resource->name.c_str());
+                        resource->name_.c_str());
             continue;
         }
         const NetActionResource &action = *static_cast<NetActionResource *>(resource);
@@ -1037,13 +1078,13 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
                 found = true;
                 if (remoteArg["type"].as<String>() != valueTypeName(expected.type))
                     LOG_WARNING("RM", "Action '%s/%s' argument '%s' is %s remotely, expected %s",
-                                deviceName.c_str(), resource->name.c_str(), expected.name,
+                                deviceName.c_str(), resource->name_.c_str(), expected.name,
                                 remoteArg["type"].as<String>().c_str(), valueTypeName(expected.type));
                 break;
             }
             if (!found)
                 LOG_WARNING("RM", "Action '%s/%s' does not declare expected argument '%s'",
-                            deviceName.c_str(), resource->name.c_str(), expected.name);
+                            deviceName.c_str(), resource->name_.c_str(), expected.name);
         }
         for (JsonObject remoteArg : remoteArgs)
         {
@@ -1055,7 +1096,7 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
             const bool required = remoteArg["required"] | true;
             if (!known && required)
                 LOG_WARNING("RM", "Action '%s/%s' requires argument '%s' this caller does not know",
-                            deviceName.c_str(), resource->name.c_str(), remoteName.c_str());
+                            deviceName.c_str(), resource->name_.c_str(), remoteName.c_str());
         }
     }
     if (manifestHandler_ != nullptr)
@@ -1102,17 +1143,17 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     // From here the topic addresses a known resource with an operation that
     // fits its role, so the message is consumed whatever happens next.
     // Mismatches (this device's own /state echo, say) are left alone.
-    if (operation == "state" && resource->kind == NetResourceType::VALUE && !resource->isOwned())
+    if (operation == "state" && resource->kind_ == NetResourceType::VALUE && !resource->isOwned())
     {
         applyRemoteState(*static_cast<NetValueResource *>(resource), message);
         return true;
     }
-    if (operation == "set" && resource->kind == NetResourceType::VALUE && resource->isOwned())
+    if (operation == "set" && resource->kind_ == NetResourceType::VALUE && resource->isOwned())
     {
         applyManagedWrite(*static_cast<NetValueResource *>(resource), message);
         return true;
     }
-    if (operation == "invoke" && resource->kind == NetResourceType::ACTION && resource->isOwned())
+    if (operation == "invoke" && resource->kind_ == NetResourceType::ACTION && resource->isOwned())
     {
         // Raw MQTT has nowhere to put a result; correlated callers use
         // executeAction() directly and keep it.
