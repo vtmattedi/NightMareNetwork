@@ -9,7 +9,10 @@ export function Home() {
     <>
       <Head>
         <title>NightMare Network · ESP32 devices that speak the same language</title>
-        <meta name="description" content="A C++ library and a set of conventions for ESP32 devices on a home MQTT network, with an MCP server so AI assistants answer from the source." />
+        <meta
+          name="description"
+          content="NightMare Network is an ESP32 C++ framework and MQTT resource protocol for devices that expose, discover and use each other's state and capabilities."
+        />
         <meta property="og:title" content="NightMare Network" />
       </Head>
 
@@ -20,10 +23,13 @@ export function Home() {
             ESP32 devices that speak <span className="accent">the same language</span>.
           </h1>
           <p className="lede">
-            NightMare Network is a C++ library and the conventions around it: one line in{" "}
-            <code>platformio.ini</code> gives a device identity, a console, request/response over MQTT,
-            timers, a scheduler and persistent config. The wall panel, the backend and an AI assistant
-            then all talk to it the same way.
+            NightMare Network standardizes the plumbing that otherwise gets rebuilt in every
+            networked firmware project: identity, MQTT addressing, retained state, Resources,
+            commands, scheduling and device telemetry.
+          </p>
+          <p className="lede">
+            <strong>Register once, participate automatically.</strong> Your application still owns
+            the hardware and business logic; NightMare owns the repeated network behavior around it.
           </p>
           <div className="cta">
             <Link className="btn btn-primary" to="/docs/getting-started">
@@ -41,53 +47,65 @@ export function Home() {
       </section>
 
       <section className="wrap features">
-        <Feature title="Identity for free" to="/docs/protocols/telemetry">
-          Retained <code>status</code>, a last-will, telemetry every 15 s. A device is discoverable
-          the moment it joins the broker, and adoptable with one console command.
+        <Feature title="Resources are the application contract" to="/docs/modules/resources">
+          Expose typed Values and Actions as <code>Managed</code> Resources, or bind{" "}
+          <code>Remote</code> Resources implemented by another device. The framework handles
+          manifests, retained state, subscriptions and reconnect.
         </Feature>
-        <Feature title="One grammar, three transports" to="/docs/protocols/commands">
-          The same command line works over serial, the MQTT console and MQTTP request/response.
-          Fourteen built-ins before you write one of your own.
+
+        <Feature title="Identity and presence stay separate" to="/docs/protocols/status-info">
+          Retained <code>status</code> carries logical name, physical hardware signature and
+          online state. Resource freshness comes from each Value&apos;s retained{" "}
+          <code>/state</code>, not from device presence.
         </Feature>
-        <Feature title="Sensors the backend understands" to="/docs/protocols/sensors">
-          Readings as one JSON object, a declaration the ingest parser reads, and network sensors so a
-          controller can use a reading that lives on another device.
+
+        <Feature title="One command grammar, several transports" to="/docs/protocols/commands">
+          The same command handler serves serial, the MQTT console, correlated MQTTP requests and
+          persisted Scheduler command jobs.
         </Feature>
-        <Feature title="Controllers and Services" to="/docs/protocols/actuators-controllers">
-          Device-side policy that survives the cloud going away, and client-side proxies built on{" "}
-          <code>ServerVariable</code>: optimistic, asserted, rolled back if the device never agreed.
+
+        <Feature title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
+          Wall or monotonic, one-shot or recurring, String command or callback. USER jobs stay
+          separate from MANAGED framework/application jobs.
         </Feature>
-        <Feature title="A scheduler, not a clock compare" to="/docs/modules/scheduler">
-          Persisted wall-clock tasks that fire commands. <code>SCHEDULER LIST</code> shows an operator
-          what will happen and when.
+
+        <Feature title="Local and remote MQTT are transport choices" to="/docs/modules/network">
+          Devices normally share a Local MQTT cluster and can bridge toward Remote MQTT/backend
+          services. Broker choice is independent of Resource ownership.
         </Feature>
-        <Feature title="Board revisions that never get lost" to="/docs/architecture">
-          An append-only pin registry per device: every hardware revision keeps its map forever, and
-          unselected ones cost zero flash.
+
+        <Feature title="Docs and source share one MCP" to="/docs/mcp">
+          The MCP server searches the same <code>docs/</code>, active <code>src/</code> and
+          examples in the repository and stamps answers with the revision they came from.
         </Feature>
       </section>
 
       <section className="wrap wire">
         <h2>What goes on the wire</h2>
         <p>
-          Everything a device says is under its own name. Two consumers — the Dashboard and the
-          backend — were read line by line to write down exactly what each expects.
+          Device-scoped state is rooted under the logical device name. Descriptions and current
+          state are retained; writes, Action invocations and commands are transient.
         </p>
         <pre className="code">
-          <code>{`Adler/status        online                                   retained
-Adler/telemetry     {"System":{"Uptime":3612,"FreeHeap":18.2,...}}
-Adler/sensors       {"temperature":23.44,"door":false}
-Adler/state         {"AcState":1,"Temp":24,"Settemp":23.5,"CurrTemp":23.44,...}
+          <code>{`bedroom-ac/status                         {"name":"bedroom-ac","hardware":"Esp32-nm-6ca172e0","online":true}   retained
+bedroom-ac/info                           {"identity":{...},"hardware":{...},"build":{...},"boot":{...}}        retained
+bedroom-ac/telemetry/system               {"uptime_ms":3612000,"free_heap_bytes":...}                            retained
 
-→ Adler/console/in                         SETTEMP 24
-← Adler/console/out                        {"Temp":24}
+bedroom-ac/resources                      {"version":2,"resources":[...]}                                        retained
+bedroom-ac/resources/temperature/state    23.44                                                                 retained
+bedroom-ac/resources/power/state          true                                                                  retained
 
-→ Adler/console/controlled/9f1c/in         HARDWAREINFO
-← Adler/console/controlled/9f1c/out        {"ChipModel":"ESP32-C3",...}`}</code>
+→ bedroom-ac/resources/power/set          false
+→ bedroom-ac/resources/identify/invoke
+
+→ bedroom-ac/console/controlled/req-42/in   INFO SYSTEM
+← bedroom-ac/console/controlled/req-42/out  {"uptime_ms":3612000,"cpu_mhz":160,...}`}</code>
         </pre>
         <p>
-          <Link to="/docs/protocols/topics">Topics</Link> · <Link to="/docs/protocols/mqttp">MQTTP</Link> ·{" "}
-          <Link to="/docs/protocols/commands">Commands</Link> · <Link to="/docs/protocols/sensors">Sensors</Link>
+          <Link to="/docs/protocols/topics">Topics</Link> ·{" "}
+          <Link to="/docs/protocols/resources">Resources</Link> ·{" "}
+          <Link to="/docs/protocols/mqttp">MQTTP</Link> ·{" "}
+          <Link to="/docs/protocols/commands">Commands</Link>
         </p>
       </section>
 
@@ -107,9 +125,9 @@ Adler/state         {"AcState":1,"Temp":24,"Settemp":23.5,"CurrTemp":23.44,...}
                               Humans        AI`}</code>
         </pre>
         <p>
-          The library, its documentation, this site and the MCP server live in one repository. A
-          change to a module and the paragraph describing it land in the same commit, and the AI reads
-          the same paragraph you do — at the revision it came from.
+          The library, documentation, website and MCP server live together. The website and MCP
+          consume the same Markdown corpus, while the MCP can also inspect the active C++ source
+          when exact implementation behavior matters.
         </p>
       </section>
 
@@ -117,14 +135,14 @@ Adler/state         {"AcState":1,"Temp":24,"Settemp":23.5,"CurrTemp":23.44,...}
         <div className="mcp-card">
           <h2>Let your assistant read the source</h2>
           <p>
-            A Streamable HTTP MCP endpoint with search over the docs, <code>get_api</code> for any
-            declaration, and the examples. No accounts, no keys.
+            A read-only Streamable HTTP MCP endpoint provides documentation search, exact API
+            lookup, source inspection, examples and revision information.
           </p>
           <pre className="code">
             <code>{`claude mcp add --transport http nightmare ${MCP_URL}`}</code>
           </pre>
           <Link className="btn btn-primary" to="/docs/mcp">
-            Setup for Claude Code, Cursor, VS Code and Claude Desktop
+            MCP documentation
           </Link>
         </div>
       </section>
@@ -132,7 +150,15 @@ Adler/state         {"AcState":1,"Temp":24,"Settemp":23.5,"CurrTemp":23.44,...}
   );
 }
 
-function Feature({ title, to, children }: { title: string; to: string; children: React.ReactNode }) {
+function Feature({
+  title,
+  to,
+  children,
+}: {
+  title: string;
+  to: string;
+  children: React.ReactNode;
+}) {
   return (
     <Link to={to} className="feature">
       <h3>{title}</h3>

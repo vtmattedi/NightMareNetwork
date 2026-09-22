@@ -68,7 +68,7 @@ export function createServer(repo: Repo): McpServer {
       description:
         "Returns one documentation page in full, as markdown. Paths are relative to docs/ without " +
         "the extension, e.g. 'protocols/mqttp' or 'getting-started'. Use list_docs to see them.",
-      inputSchema: { path: z.string().min(1).describe("Document path, e.g. 'protocols/sensors'") },
+      inputSchema: { path: z.string().min(1).describe("Document path, e.g. 'protocols/resources'") },
     },
     async ({ path }) => {
       const p = path.replace(/^\/?docs\//, "").replace(/\.md$/, "").replace(/^\/+|\/+$/g, "");
@@ -134,7 +134,7 @@ export function createServer(repo: Repo): McpServer {
         "Returns a file from src/, or a line range of it. Paths are relative to the repository " +
         "root, e.g. 'src/Core/MQTT.h'. Whole files can be long; prefer a range once you know where to look.",
       inputSchema: {
-        path: z.string().min(1).describe("e.g. 'src/Core/Timers.h'"),
+        path: z.string().min(1).describe("e.g. 'src/Core/Scheduler.h'"),
         from: z.number().int().min(1).optional().describe("First line, 1-based"),
         to: z.number().int().min(1).optional().describe("Last line, inclusive"),
       },
@@ -156,8 +156,8 @@ export function createServer(repo: Repo): McpServer {
       title: "Look up an API",
       description:
         "Finds where a function, method, class, struct, enum, macro or extern is declared and " +
-        "returns the declaration with the doc comment above it. Exact identifier, e.g. 'MQTT_Send', " +
-        "'ServerVariable', 'COMPILE_MQTT', 'Timers'.",
+        "returns the declaration with the doc comment above it. Exact identifier, e.g. 'MQTT_Publish', " +
+        "'ManagedState', 'SchedulerRunMode', 'NM_ENABLE_TELEMETRY'.",
       inputSchema: { name: z.string().min(1).describe("The identifier") },
     },
     async ({ name }) => {
@@ -226,7 +226,7 @@ export function createServer(repo: Repo): McpServer {
         "",
         "Consumers on Git track the latest revision:",
         "  lib_deps = https://github.com/vtmattedi/NightMareNetwork.git",
-        "Pin a release with a tag suffix: ...NightMareNetwork.git#v1.2.0",
+        "Pin a release with a tag suffix: ...NightMareNetwork.git#v0.2.0",
       ];
       return text(lines.join("\n"));
     }

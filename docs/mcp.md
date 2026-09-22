@@ -294,23 +294,11 @@ other text files in the example
 
 Binary/image/font files are excluded from the loaded example corpus.
 
-## Important example caveat
+## Example authority
 
-The MCP exposes whatever is actually under `examples/`.
+The public examples are kept against the active Resource API and are loaded directly from `examples/`.
 
-At the current documentation revision, the existing example projects still contain an older Resource/Runtime architecture and should **not** be treated as authoritative for the active `src/` API.
-
-Until those examples are rewritten, use:
-
-```text
-docs/getting-started
-docs/modules/*
-src/
-```
-
-before relying on `get_example`.
-
-This is exactly the kind of case where the MCP rule applies:
+Examples are still illustrative rather than normative. When an exact declaration or edge-case behavior matters, use `get_api` / `get_source` and apply the MCP rule:
 
 > source wins when repository material disagrees.
 

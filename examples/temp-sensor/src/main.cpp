@@ -1,67 +1,86 @@
 #include <Arduino.h>
 #include <NightMare.h>
-#include <creds.h>
 #include <TempSensor.h>
 
-using namespace NightMare;
+static ManagedSensor<float> temperature("temperature");
+static ManagedSensor<bool> connected("connected");
+static ManagedSensor<String> sensorAddress("sensor_address");
+static ManagedAction rescan("rescan");
 
-static constexpr char DEVICE_ID[] = "temperature-node";
-static MqttTransport transport;
-static NightMare::Network network(DEVICE_ID, transport);
-static WifiStation wifi;
-static Runtime runtime;
-static bool mqttStarted = false;
-static ResourceMetadata temperatureMetadata = {"Room temperature", "C"};
-static NetValue<float> temperature("temperature", NetAccess::READ, &temperatureMetadata);
-static NetValue<bool> connected("connected");
-static NetValue<String> sensorAddress("sensorAddress");
-static NetAction<void> rescan("rescan", ActionResponse::ACK);
-static NetEvent<void> sensorLost("sensorLost");
+static uint32_t publishedReadMs = 0;
+static String publishedAddress;
 
-static ActionStatus handleRescan(void*, NetResource&, const String& arguments, String&) {
-    if (arguments.length()) return ActionStatus::INVALID_ARGUMENT;
+static ActionResult onRescan(ManagedAction &, const String &payload)
+{
+    if (payload.length() != 0)
+        return {false, "rescan takes no arguments"};
+
     rescanTempSensor();
-    return ActionStatus::OK;
+    connected.setValue(false);
+    return {true, "OK"};
 }
 
-static void pollSensor(void*) {
+static void pollSensor()
+{
     tickTempSensor();
-    TempSensorStatus status = tempSensorStatus();
-    bool wasConnected = connected.get();
-    network.resources().set(connected, status.connected);
-    if (wasConnected && !status.connected) network.resources().emit(sensorLost);
-    if (status.connected) {
-        network.resources().set(sensorAddress, String(status.address));
-        if (!isnan(status.tempC)) network.resources().set(temperature, status.tempC);
+    const TempSensorStatus status = tempSensorStatus();
+
+    if (!connected.hasAuthoritativeValue() ||
+        connected.getValue() != status.connected)
+    {
+        connected.setValue(status.connected);
+    }
+
+    if (status.connected && status.address[0] != '\0')
+    {
+        const String address(status.address);
+        if (address != publishedAddress)
+        {
+            publishedAddress = address;
+            sensorAddress.setValue(address);
+        }
+    }
+
+    if (status.connected &&
+        !isnan(status.tempC) &&
+        status.lastReadMs != 0 &&
+        status.lastReadMs != publishedReadMs)
+    {
+        publishedReadMs = status.lastReadMs;
+        temperature.setValue(status.tempC);
     }
 }
 
-static void pollWifi(void*) {
-    static uint32_t lastMqttAttemptMs = 0;
-    bool newlyConnected = wifi.tick();
-    uint32_t nowMs = millis();
-    if (wifi.connected() && !mqttStarted &&
-        (newlyConnected || static_cast<uint32_t>(nowMs - lastMqttAttemptMs) >= 10000)) {
-        lastMqttAttemptMs = nowMs;
-        mqttStarted = transport.begin(MQTT_URI, MQTT_USER, MQTT_PASSWD);
-    }
+static void preferLocalBroker(bool firstConnection)
+{
+    if (firstConnection)
+        MQTT_change_to(LOCAL_MQTT);
 }
 
-void setup() {
+void setup()
+{
     Serial.begin(115200);
+
     setupTempSensor();
-    transport.attach(network);
-    auto& resources = network.resources();
-    resources.add(temperature, {true, 60000});
-    resources.add(connected);
-    resources.add(sensorAddress);
-    resources.add(rescan);
-    resources.add(sensorLost);
-    resources.onAction(rescan, handleRescan);
-    runtime.add(pollWifi);
-    runtime.add([](void*) { network.tick(); });
-    runtime.add(pollSensor);
-    wifi.begin(DEFAULT_SSID, DEFAULT_PASSWORD, DEVICE_ID);
+
+    rescan.onInvoke = onRescan;
+
+    gResourcesManager.bindResource(&temperature);
+    gResourcesManager.bindResource(&connected);
+    gResourcesManager.bindResource(&sensorAddress);
+    gResourcesManager.bindResource(&rescan);
+
+    connected.setValue(false);
+
+    // The DS18B20 driver is non-blocking; service its state machine regularly.
+    gScheduler.timer("app.temp.poll", pollSensor, 100);
+
+    WiFi_onConnected(preferLocalBroker);
+
+    startNightMareESP();
 }
 
-void loop() { runtime.tick(); }
+void loop()
+{
+    tickNightMareESP();
+}

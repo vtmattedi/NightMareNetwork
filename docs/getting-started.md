@@ -27,16 +27,16 @@ ArduinoJson ^6.21.3
 ArduinoOTA
 ```
 
-A normal project also needs:
+With the default WiFi/MQTT feature set, a normal project needs:
 
 ```text
-include/NightMareConfig.h
 include/creds.h
 ```
 
-and may optionally provide:
+A project may optionally provide:
 
 ```text
+include/NightMareConfig.h
 include/NightMareHardware.h
 ```
 
@@ -110,7 +110,7 @@ A useful explicit default configuration is:
 #define NM_LOG_LEVEL 0
 ```
 
-`Features.h` supplies defaults for these macros, but the current `Logs.h` still includes `NightMareConfig.h` directly. Providing the project header avoids that current implementation mismatch and gives the build one explicit configuration file.
+`Features.h` supplies defaults for these macros, so `NightMareConfig.h` is optional. Providing it gives the consuming firmware one explicit place to record its feature choices and firmware version.
 
 ## Configure WiFi and MQTT credentials
 

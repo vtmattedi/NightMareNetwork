@@ -1,12 +1,79 @@
 # Basic Resource device
 
-A small ESP32 participant exposing writable brightness, read-only uptime and firmware version, RGB color state, two Actions and a transient button Event. The `setColor` Action shows a structured argument codec and ordered schema fields. The same registered Actions can be invoked through MQTT, `<device>/console/in`, or the serial Console.
+This example uses the active NightMare Network API.
 
-1. Copy `include/creds.example.h` to `include/creds.h` and set WiFi and local MQTT values.
-2. Set `DEVICE_ID` in `src/main.cpp` to a stable, unique device ID.
-3. From this directory, run `pio run -e esp32c3-supermini` or `pio run -e esp32doit-devkit-v1`.
-4. Upload and monitor with `pio run -e esp32c3-supermini -t upload -t monitor`.
+It exposes:
 
-The build uses the repository's current library through `symlink://../..`. The example calls `runtime.tick()` in `loop()`. WiFi and Console are pollable, and MQTT callbacks only enqueue messages; resource handlers run from the Runtime loop.
+```text
+uptime_s
+    ManagedSensor<uint32_t>
 
-On connection the schema and initialized Values are published under `nm/default/<device>/r/<id>/...`. Try `toggle` or `setColor [255,120,0]` on the serial Console. An Action `ACK` sent through MQTT includes a request ID and produces a status reply on `nm/default/<caller>/reply`.
+brightness
+    ManagedState<uint8_t>, accepted range 0..100
+
+identify
+    ManagedAction
+```
+
+The application declares and binds the Resources once. NightMare handles the retained manifest, retained Value state, `/set` and `/invoke` routing, reconnect subscriptions, status, INFO/telemetry and command plumbing.
+
+## Setup
+
+1. Copy `include/creds.example.h` to `include/creds.h`.
+2. Set WiFi, Local MQTT and Remote MQTT values.
+3. If Remote MQTT is used, replace the placeholder `ROOT_CA` with the broker CA certificate.
+4. Build with `pio run -e esp32c3-supermini` or `pio run -e esp32doit-devkit-v1`.
+5. Upload/monitor with the usual PlatformIO targets.
+
+The project uses this repository checkout through:
+
+```ini
+symlink://../..
+```
+
+## What to try
+
+Once connected, inspect:
+
+```text
+<device>/resources
+<device>/resources/uptime_s/state
+<device>/resources/brightness/state
+```
+
+Request a brightness change:
+
+```text
+<device>/resources/brightness/set
+```
+
+with payload:
+
+```text
+75
+```
+
+Invoke:
+
+```text
+<device>/resources/identify/invoke
+```
+
+with an empty payload.
+
+The example also enables the serial console, so commands such as:
+
+```text
+PING
+INFO
+INFO SYSTEM
+JOB LIST
+```
+
+can be entered over Serial.
+
+## Broker selection
+
+The standard ESP lifecycle initializes Remote MQTT on the first WiFi connection. This example registers a WiFi callback that immediately switches to Local MQTT so a local development broker is the default demonstration path.
+
+Remove that callback if the project should keep the framework's normal remote-first behavior.

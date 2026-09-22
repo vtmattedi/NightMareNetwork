@@ -5,7 +5,6 @@
 #endif
 
 #include <Arduino.h>
-#include <NightMareConfig.h>
 // NM_LOG_LEVEL can be supplied by the project's configuration.
 // 0 disables logging; 1-5 enable Error, Warning, Info, Debug, and Trace.
 #define NM_LOG_LEVEL_OFF 0
