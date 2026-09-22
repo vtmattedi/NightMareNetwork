@@ -15,3 +15,4 @@ mcp/dist/
 .env
 .env.*
 !.env.example
+a.py
