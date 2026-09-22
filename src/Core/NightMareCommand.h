@@ -52,7 +52,9 @@ bool ensureSize(const String &str, size_t maxLength, String &error);
 /// @return The parsed message, or one with `valid` false and `error` set.
 NightMareMessage parseNightMareMessage2(const String &message);
 
-/// @brief Parses and executes a command on the calling task.
+/// @brief Parses and executes a command on the calling task. With resources enabled, `> name`
+/// reads a value or invokes a no-payload action, `> name action payload` invokes by short name,
+/// and `> device/resources/name/invoke payload` uses the MQTT-shaped topic form.
 /// @param message The raw command string, e.g. `"WIFI SCAN -s"`. Callers that only have a message
 /// string can omit context entirely, e.g. `handleNightMareCommand("PING")`.
 /// @param context Execution context; defaults to an anonymous synchronous context.

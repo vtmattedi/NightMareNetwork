@@ -2,6 +2,9 @@
 #if NM_ENABLE_CONSOLE
 #include "NightMareCommand.h"
 #include "Time.h"
+#if NM_ENABLE_RESOURCES
+#include "ResourcesManager.h"
+#endif
 #if NM_ENABLE_SCHEDULER
 #include "Scheduler.h"
 #endif
@@ -466,6 +469,30 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         result.response = "Empty command";
         return result;
     }
+
+#if NM_ENABLE_RESOURCES
+    // Resource commands deliberately bypass the generic command parser: the
+    // text after the routing separator is an opaque MQTT-compatible payload,
+    // not a list of console arguments, and may use the resource payload limit.
+    size_t commandStart = 0;
+    while (commandStart < message.length() && isTokenSeparator(message[commandStart]))
+        ++commandStart;
+    if (commandStart < message.length() && message[commandStart] == '>')
+    {
+        constexpr size_t MaxResourceCommandLength = NetResourceMaxPayloadLength + 256;
+        const String expression = message.substring(commandStart + 1);
+        if (!ensureSize(expression, MaxResourceCommandLength, result.response))
+        {
+            result.result = false;
+            return result;
+        }
+        const ActionResult resourceResult = gResourcesManager.executeCommand(expression);
+        result.result = resourceResult.success;
+        result.response = resourceResult.result;
+        return result;
+    }
+#endif
+
     // ensureSize returns true when the message fits, so the rejection is the negated case.
     if (!ensureSize(message, NM_MAX_MESSAGE_LEN, result.response))
     {

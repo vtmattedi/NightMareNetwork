@@ -68,6 +68,12 @@ public:
     /// execution is never implemented twice.
     ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
 
+    /// @brief Executes the resource-command expression after a leading `>`.
+    /// Full topics preserve MQTT topic/payload semantics. A bare unique name
+    /// reads a value or invokes an action with an empty payload; `name action`
+    /// invokes an action with the remainder as its payload.
+    ActionResult executeCommand(const String &expression);
+
     /// @brief Removes the retained resource footprint of a previous identity:
     /// the manifest and the state of every currently declared managed value.
     /// Only values declared now can be found, so one declared under the old name
@@ -97,6 +103,7 @@ private:
     static bool sourceConfigured(const NetResource &resource);
     static bool hasResolvedSource(const NetResource &resource);
     NetResource *findResource(const String &deviceName, const String &name) const;
+    NetResource *findResourceByName(const String &name, bool &ambiguous) const;
     bool addressTakenByOther(const String &deviceName, const String &name,
                              const NetResource *self) const;
 
@@ -114,10 +121,10 @@ private:
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);
 
-    // Consumers for recognised traffic. Outcomes are logged, not returned: the
-    // message is consumed either way.
-    void applyRemoteState(NetValueResource &value, const String &message);
-    void applyManagedWrite(NetValueResource &value, const String &message);
+    // Consumers for recognised traffic. MQTT ingress consumes the message
+    // either way; correlated command callers also use the returned outcome.
+    bool applyRemoteState(NetValueResource &value, const String &message);
+    bool applyManagedWrite(NetValueResource &value, const String &message);
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;

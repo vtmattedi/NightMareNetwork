@@ -169,12 +169,14 @@ struct NetValueResource : public NetResource
     ResourceFreshness freshness = ResourceFreshness::UNKNOWN;
     bool isStale() const { return freshness == ResourceFreshness::STALE; }
     bool hasAuthoritativeValue() const { return hasAuthoritativeValue_; }
+    bool hasCurrentValue() const { return hasAuthoritativeValue_ || optimisticActive(); }
     uint32_t lastUpdateMs() const { return lastUpdateMs_; }
     uint32_t lastWriteMs() const { return lastWriteMs_; }
 
     // Type-erasure boundary. These are the only value operations the transport
     // layer needs, and all three speak the encoded wire format.
     virtual String encodedValue() const = 0;
+    virtual String encodedCurrentValue() const = 0;
     // Ingress of owner state: this value is now the truth.
     virtual bool applyEncodedOwnerValue(const String &encoded) = 0;
     // Ingress of a /set request aimed at a value this device owns.
@@ -274,6 +276,7 @@ struct NetValue : public NetValueResource
     }
 
     String encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
+    String encodedCurrentValue() const override { return NetCodec<T>::encode(getValue()); }
 
     bool applyEncodedOwnerValue(const String &encoded) override
     {
