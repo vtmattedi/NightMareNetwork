@@ -57,7 +57,7 @@ export function Layout() {
             <NavLink to="/docs/getting-started">Get started</NavLink>
             <NavLink to="/docs/protocols/topics">Protocols</NavLink>
             <NavLink to="/docs/architecture">Architecture</NavLink>
-            <NavLink to="/docs/modules/mqtt">Modules</NavLink>
+            <NavLink to="/docs/modules/resources">Modules</NavLink>
             <NavLink to="/docs/mcp" className="nav-mcp">MCP</NavLink>
             <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
             <button className="theme-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
