@@ -12,6 +12,27 @@ constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
 constexpr size_t MaxManifestLength = 16384;
 constexpr int ManifestVersion = 2;
 
+bool commandSpace(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
+
+size_t skipCommandSpace(const String &text, size_t position)
+{
+    while (position < text.length() && commandSpace(text[position]))
+        ++position;
+    return position;
+}
+
+String commandToken(const String &text, size_t &position)
+{
+    position = skipCommandSpace(text, position);
+    const size_t start = position;
+    while (position < text.length() && !commandSpace(text[position]))
+        ++position;
+    return text.substring(start, position);
+}
+
 const char *kindName(NetResourceType kind)
 {
     return kind == NetResourceType::VALUE ? "value" : "action";
@@ -257,6 +278,25 @@ NetResource *ResourcesManager::findResource(const String &deviceName, const Stri
             return resource;
     }
     return nullptr;
+}
+
+NetResource *ResourcesManager::findResourceByName(const String &name, bool &ambiguous) const
+{
+    ambiguous = false;
+    NetResource *match = nullptr;
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        NetResource *resource = resources_[i];
+        if (resource->name != name)
+            continue;
+        if (match != nullptr)
+        {
+            ambiguous = true;
+            return nullptr;
+        }
+        match = resource;
+    }
+    return match;
 }
 
 // Unlike findResource(), this cannot be fooled by `self` appearing first.
@@ -598,7 +638,114 @@ ActionResult ResourcesManager::executeAction(NetActionResource &action, const St
     return action.execute(canonicalPayload);
 }
 
-void ResourcesManager::applyRemoteState(NetValueResource &value, const String &message)
+ActionResult ResourcesManager::executeCommand(const String &expression)
+{
+    size_t position = 0;
+    const String target = commandToken(expression, position);
+    if (target.length() == 0)
+        return {false, String("Usage: > <topic> [payload] | > <name> [action [payload]]")};
+
+    auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult {
+        if (action.isOwned())
+        {
+            ActionResult result = executeAction(action, payload);
+            if (result.result.length() == 0)
+                result.result = result.success ? String("OK") : String("Action failed");
+            return result;
+        }
+        const bool accepted = invoke(action, payload);
+        return {accepted, accepted ? String("OK") : String("Could not publish action")};
+    };
+
+    // A slash selects the MQTT-shaped form. The first token is the complete
+    // topic; everything after its separating whitespace is one opaque payload.
+    if (target.indexOf('/') >= 0)
+    {
+        const String payload = position < expression.length()
+                                   ? expression.substring(position + 1)
+                                   : String();
+        if (payload.length() > MaxValueLength)
+            return {false, String("Payload too large")};
+
+        const int firstSlash = target.indexOf('/');
+        if (firstSlash <= 0)
+            return {false, String("Invalid resource topic")};
+        const String deviceName = target.substring(0, firstSlash);
+        const String path = target.substring(firstSlash + 1);
+        if (!DeviceIdentity::validDeviceName(deviceName) || !path.startsWith("resources/"))
+            return {false, String("Invalid resource topic")};
+
+        const String tail = path.substring(sizeof("resources/") - 1);
+        const int finalSlash = tail.indexOf('/');
+        if (finalSlash <= 0)
+            return {false, String("Invalid resource topic")};
+        const String name = tail.substring(0, finalSlash);
+        const String operation = tail.substring(finalSlash + 1);
+        if (!validSegment(name) || operation.indexOf('/') >= 0)
+            return {false, String("Invalid resource topic")};
+
+        NetResource *resource = findResource(deviceName, name);
+        if (resource == nullptr)
+            return {false, String("Resource not found")};
+
+        if (operation == "invoke" && resource->kind == NetResourceType::ACTION)
+            return invokeAction(*static_cast<NetActionResource *>(resource), payload);
+
+        if (operation == "set" && resource->kind == NetResourceType::VALUE)
+        {
+            NetValueResource &value = *static_cast<NetValueResource *>(resource);
+            if (value.isOwned())
+            {
+                if (!applyManagedWrite(value, payload))
+                    return {false, String("Value write rejected")};
+                return {true, value.encodedCurrentValue()};
+            }
+            const bool accepted = setValue(value, payload);
+            return {accepted, accepted ? String("OK") : String("Could not publish value")};
+        }
+
+        if (operation == "state" && resource->kind == NetResourceType::VALUE &&
+            !resource->isOwned())
+        {
+            const bool applied = applyRemoteState(*static_cast<NetValueResource *>(resource), payload);
+            return {applied, applied ? String("OK") : String("Invalid state payload")};
+        }
+
+        return {false, String("Operation does not match resource")};
+    }
+
+    bool ambiguous = false;
+    NetResource *resource = findResourceByName(target, ambiguous);
+    if (ambiguous)
+        return {false, String("Resource name is ambiguous; use its full topic")};
+    if (resource == nullptr)
+        return {false, String("Resource not found")};
+
+    position = skipCommandSpace(expression, position);
+    if (position >= expression.length())
+    {
+        if (resource->kind == NetResourceType::ACTION)
+            return invokeAction(*static_cast<NetActionResource *>(resource), String());
+
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (!value.hasCurrentValue())
+            return {false, String("Value unavailable")};
+        return {true, value.encodedCurrentValue()};
+    }
+
+    const String verb = commandToken(expression, position);
+    if (!verb.equalsIgnoreCase("action") || resource->kind != NetResourceType::ACTION)
+        return {false, String("Usage: > <name> action [payload]")};
+
+    const String payload = position < expression.length()
+                               ? expression.substring(position + 1)
+                               : String();
+    if (payload.length() > MaxValueLength)
+        return {false, String("Payload too large")};
+    return invokeAction(*static_cast<NetActionResource *>(resource), payload);
+}
+
+bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &message)
 {
     if (message.length() == 0)
     {
@@ -606,41 +753,46 @@ void ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
         // only setSource() discards it, because only that changes what the
         // resource represents.
         value.freshness = ResourceFreshness::STALE;
-        return;
+        return true;
     }
     if (message.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Ignored oversized state for '%s/%s' (%u bytes)",
                     value.ownerDevice.deviceName.c_str(), value.name.c_str(),
                     (unsigned)message.length());
-        return;
+        return false;
     }
     // The decode belongs to NetValue<T>/NetCodec<T>, never here.
     if (!value.applyEncodedOwnerValue(message))
+    {
         LOG_WARNING("RM", "Ignored undecodable state for '%s/%s'",
                     value.ownerDevice.deviceName.c_str(), value.name.c_str());
+        return false;
+    }
+    return true;
 }
 
-void ResourcesManager::applyManagedWrite(NetValueResource &value, const String &message)
+bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &message)
 {
     if (value.access != AccessPolicy::READ_WRITE)
     {
         LOG_WARNING("RM", "Ignored write to read-only '%s'", value.name.c_str());
-        return;
+        return false;
     }
     if (message.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Ignored oversized write to '%s' (%u bytes)", value.name.c_str(),
                     (unsigned)message.length());
-        return;
+        return false;
     }
     // Rejected or undecodable: state is unchanged, so there is nothing to publish.
     if (!value.applyEncodedWrite(message))
     {
         LOG("RM", "Write to '%s' was not applied", value.name.c_str());
-        return;
+        return false;
     }
     publishState(value);
+    return true;
 }
 
 // A manifest is description: it feeds discovery and compatibility diagnostics

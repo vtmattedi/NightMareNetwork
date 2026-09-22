@@ -42,6 +42,18 @@
 #ifndef NM_ENABLE_TIME_SYNC
 #define NM_ENABLE_TIME_SYNC 1
 #endif
+#ifndef NM_TIMEZONE
+#define NM_TIMEZONE "UTC0"
+#endif
+#ifndef NM_NTP_SERVER_1
+#define NM_NTP_SERVER_1 "pool.ntp.org"
+#endif
+#ifndef NM_NTP_SERVER_2
+#define NM_NTP_SERVER_2 "time.nist.gov"
+#endif
+#ifndef NM_NTP_SERVER_3
+#define NM_NTP_SERVER_3 "time.google.com"
+#endif
 #ifndef NM_ENABLE_OTA
 #define NM_ENABLE_OTA 0
 #endif
