@@ -28,7 +28,8 @@ void wifiConnectedInternal()
         MQTT_Init(false);
 #endif
 #if NM_ENABLE_TIME_SYNC
-        autoSyncTime();
+        if (!startSntpTimeSync())
+            LOG_ERROR("Time", "Could not start SNTP synchronization");
 #endif
     }
     LOG("WiFi", "WiFi connected to SSID: %s, IP: %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());

@@ -10,6 +10,9 @@
 #if NM_ENABLE_WIFI
 #include "NightMareWIFI.h"
 #endif
+#if NM_ENABLE_TIME_SYNC
+#include <Util/TimeSyncronization.h>
+#endif
 #if NM_ENABLE_MQTT
 #include <Network/IdentityCleanup.h>
 #endif
@@ -61,6 +64,9 @@ void startNightMareESP()
 
 void tickNightMareESP()
 {
+#if NM_ENABLE_TIME_SYNC
+    processTimeSyncEvents();
+#endif
 #if NM_ENABLE_SCHEDULER
     // In TASK mode the Scheduler's own task does this; ticking here too would
     // only contend for the same lock.

@@ -1,95 +1,79 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_TIME_SYNC
-#include "TimeSyncronization.h"
-#include <Core/Time.h>
 
+#include "TimeSyncronization.h"
+
+#include <Core/Logs.h>
+#include <Core/StateStore.h>
+#include <Core/Time.h>
+#include <WiFi.h>
+#include <atomic>
+#include <esp_sntp.h>
+
+namespace
+{
+std::atomic<bool> syncPending{false};
 void (*timeSyncCallback)(void) = nullptr;
-bool _setTime(unsigned long timestamp);
-/// @brief Attempts to get the time synced using worldtimeapi.
-/// @return True if successful or false otherwise.
+
+void sntpTimeAvailable(timeval *)
+{
+    // This runs on lwIP's task. RuntimeState owns Arduino Strings and is not
+    // thread-safe, so defer all bookkeeping and user callbacks to loop().
+    syncPending.store(true, std::memory_order_release);
+}
+
+bool recordSynchronizedClock()
+{
+    const time_t timestamp = NightMare::Time::now();
+    if (!NightMare::Time::valid())
+        return false;
+
+    SystemState.setFlag("time_synced", true);
+    SystemState.set("boot_time", String(static_cast<unsigned long>(timestamp - millis() / 1000)));
+    if (timeSyncCallback != nullptr)
+        timeSyncCallback();
+    return true;
+}
+}
+
+bool startSntpTimeSync()
+{
+    if (WiFi.status() != WL_CONNECTED)
+        return false;
+
+    const char *timezone = getenv("TZ");
+    if (timezone == nullptr || timezone[0] == '\0')
+        timezone = NM_TIMEZONE;
+
+    SystemState.setFlag("time_synced", false);
+    esp_sntp_set_time_sync_notification_cb(sntpTimeAvailable);
+    configTzTime(timezone, NM_NTP_SERVER_1, NM_NTP_SERVER_2, NM_NTP_SERVER_3);
+    LOG("Time", "SNTP synchronization started (%s)", timezone);
+    return true;
+}
+
 bool autoSyncTime()
 {
-  /*Sample response:
-  {
-  "utc_iso": "2026-09-08T12:49:00Z",
-  "utc_rfc3339": "2026-09-08T12:49:00+00:00",
-  "utc_datetime": "2026-09-08T12:49:00.746867+00:00",
-  "unix": 1788871740,
-  "unix_ms": 1788871740746,
-  "day_of_week": 2,
-  "day_of_year": 251,
-  "week_number": 37,
-  "timezone": "America/Bahia",
-  "datetime": "2026-09-08T09:49:00.746867-03:00",
-  "local_iso": "2026-09-08T09:49:00-03:00",
-  "abbreviation": "UTC-03:00",
-  "utc_offset": "-03:00",
-  "utc_offset_minutes": -180,
-  "dst": false,
-  "dst_next_transition": null,
-  "dst_next_abbreviation": null,
-  "dst_next_offset": null
-}
-  */
-  bool result = false;
-  WiFiClient client;
-  HTTPClient http;
-  http.begin(client, API_URL); // HTTP
-  int httpCode = http.GET();
-
-  // httpCode will be negative on error
-  if (httpCode > 0)
-  {
-    // HTTP header has been send and Server response header has been handled
-    // file found at server
-    if (httpCode == HTTP_CODE_OK)
-    {
-      String payload = http.getString();
-      DynamicJsonDocument doc(1024);
-      DeserializationError error = deserializeJson(doc, payload);
-      if (error)
-      {
-        http.end();
-        return false;
-      }
-      if (!doc.containsKey("unix") || !doc["unix"].is<unsigned long>())
-      {
-        http.end();
-        return false;
-      }
-      unsigned long _timestamp = doc["unix"].as<unsigned long>();
-      // Epoch seconds are UTC; timezone offsets belong in display formatting.
-      result = _setTime(_timestamp);
-    }
-  }
-  http.end();
-  return result;
+    return startSntpTimeSync();
 }
 
-/// @brief Manually syncs the time to a specific timestamp.
-/// @param timestamp The timestamp to set the time to.
 void manualSyncTime(unsigned long timestamp)
 {
-  _setTime(timestamp);
-}
-
-/// @brief Internal function to set the time and handle related tasks.
-/// @param timestamp The timestamp to set the time to.
-bool _setTime(unsigned long timestamp)
-{
-  if (!NightMare::Time::setEpoch(timestamp))
-    return false;
-  SystemState.setFlag("time_synced", true);
-  SystemState.set("boot_time", String(timestamp - (millis() / 1000)));
-  if (timeSyncCallback)
-  {
-    timeSyncCallback();
-  }
-  return true;
+    if (NightMare::Time::setEpoch(timestamp) && recordSynchronizedClock())
+        LOG("Time", "Clock synchronized manually");
 }
 
 void onTimeSync(void (*callback)(void))
 {
-  timeSyncCallback = callback;
+    timeSyncCallback = callback;
 }
+
+void processTimeSyncEvents()
+{
+    if (!syncPending.exchange(false, std::memory_order_acq_rel))
+        return;
+    if (recordSynchronizedClock())
+        LOG("Time", "Clock synchronized by SNTP");
+}
+
 #endif // NM_ENABLE_TIME_SYNC
