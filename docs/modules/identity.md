@@ -35,7 +35,7 @@ It is used as the root of device-scoped MQTT topics:
 
 ```text
 bedroom-ac/status
-bedroom-ac/resources
+bedroom-ac/manifest
 bedroom-ac/info
 ```
 
@@ -201,7 +201,7 @@ Example for `bedroom-ac`:
 ```text
 bedroom-ac
 bedroom-ac/status
-bedroom-ac/resources/power/state
+bedroom-ac/resource/power/state
 ```
 
 ## Relative topic

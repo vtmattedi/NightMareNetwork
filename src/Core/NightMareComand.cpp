@@ -579,6 +579,47 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         return executeJobCommand(parsedMsg, context);
 #endif
 #if NM_ENABLE_TELEMETRY
+    // HW [PUBLISH] [JSON|MSGPACK]. Binary MessagePack is never returned through
+    // a text command transport; requesting it republishes the retained topic.
+    if (parsedMsg.command == "HW")
+    {
+        String formatText;
+        bool publish = false;
+        if (parsedMsg.subcommand == "PUBLISH")
+        {
+            publish = true;
+            formatText = parsedMsg.args[1];
+        }
+        else
+            formatText = parsedMsg.subcommand;
+        formatText.toUpperCase();
+
+        if (parsedMsg.argc > (publish ? 2 : 1) ||
+            (formatText.length() != 0 && formatText != "JSON" && formatText != "MSGPACK" &&
+             formatText != "MPACK"))
+        {
+            result.result = false;
+            result.response = "Usage: HW [PUBLISH] [JSON|MSGPACK]";
+            return result;
+        }
+
+        if (publish && formatText.length() == 0)
+            result.result = Telemetry.publishHardware();
+        else if (formatText == "MSGPACK" || formatText == "MPACK")
+            result.result = Telemetry.publishHardware(HardwareFormat::MSGPACK);
+        else if (publish)
+            result.result = Telemetry.publishHardware(HardwareFormat::JSON);
+        else
+        {
+            const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
+            result.result = hardware.valid;
+            result.response = hardware.valid ? hardware.data : "Could not serialize hardware topology.";
+            return result;
+        }
+        result.response = result.result ? "Republished to MQTT." : "Hardware publish failed.";
+        return result;
+    }
+
     // INFO [section]            query: the aggregate, or one section of it
     // INFO PUBLISH [document]   publish INFO (default), SYSTEM or NETWORK
     if (parsedMsg.command == "INFO")
@@ -605,7 +646,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             result.result = info.valid;
             result.response = info.valid
                                   ? info.data
-                                  : "Usage: INFO [IDENTITY|HARDWARE|HWCONNECTIONS|BUILD|BOOT|SYSTEM|NETWORK]"
+                                  : "Usage: INFO [IDENTITY|HARDWARE|BUILD|BOOT|SYSTEM|NETWORK]"
                                     " | INFO PUBLISH [SYSTEM|NETWORK]";
         }
         return result;

@@ -7,21 +7,17 @@ namespace NMHardware
 {
 inline Profile projectProfile()
 {
+    static const Device devices[] = {
+        {"temperature", "DS18B20"},
+    };
     static const Connection connections[] = {
-        {
-            "DS18B20 data",
-            PIN_ONE_WIRE,
-            Direction::Bidirectional,
-            Pull::External,
-            false,
-            "1-Wire data; external 4.7 kOhm pull-up to 3.3 V"
-        },
+        {PIN_ONE_WIRE, 0, "data", 0, SignalType::OneWire,
+         Direction::Bidirectional, Pull::ExternalUp, false, Resistor("4k7")},
     };
 
     return {
-        BOARD_NAME,
-        connections,
-        sizeof(connections) / sizeof(connections[0])
+        BOARD_NAME, devices, sizeof(devices) / sizeof(devices[0]),
+        connections, sizeof(connections) / sizeof(connections[0])
     };
 }
 }

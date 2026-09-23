@@ -167,7 +167,7 @@ mqtt://
 
 ## Optional hardware profile
 
-To make INFO report the board and physical connections, create:
+To make INFO report the board and to publish physical topology, create:
 
 ```text
 include/NightMareHardware.h
@@ -184,27 +184,20 @@ namespace NMHardware
 {
 inline Profile projectProfile()
 {
+    static const Device devices[] = {
+        {"button", "momentary-switch"},
+        {"status", "LED"},
+    };
     static const Connection connections[] = {
-        {
-            "button",
-            9,
-            Direction::Input,
-            Pull::Up,
-            true,
-            "user button"
-        },
-        {
-            "status LED",
-            8,
-            Direction::Output,
-            Pull::None,
-            false,
-            "application status"
-        },
+        {9, 0, "pressed", NoBus, SignalType::Gpio,
+         Direction::Input, Pull::Up, true},
+        {8, 1, "light", NoBus, SignalType::Gpio,
+         Direction::Output},
     };
 
     return {
-        "ESP32-C3 SuperMini",
+        "esp32-c3-supermini:v1",
+        devices, sizeof(devices) / sizeof(devices[0]),
         connections,
         sizeof(connections) / sizeof(connections[0])
     };
@@ -216,6 +209,7 @@ If this file is absent, NightMare reports:
 
 ```text
 board: unspecified
+devices: none
 connections: none
 ```
 
@@ -417,7 +411,7 @@ void publishTemperature(float value)
 For a bound ManagedSensor, NightMare publishes the encoded Value retained at:
 
 ```text
-<device>/resources/temperature/state
+<device>/resource/temperature/state
 ```
 
 The application does not need to assemble that MQTT topic.
@@ -454,8 +448,8 @@ gResourcesManager.bindResource(&outsideTemperature);
 NightMare automatically subscribes to:
 
 ```text
-weather-node/resources
-weather-node/resources/temperature/state
+weather-node/manifest
+weather-node/resource/temperature/state
 ```
 
 and restores those subscriptions after MQTT reconnect.
@@ -636,7 +630,7 @@ A space after `>` selects a bound Resource by unique short name. A bare Value re
 `>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
 
 ```text
->raw bedroom-ac/resources/power/set true
+>raw bedroom-ac/resource/power/set true
 ```
 
 See [Commands](protocols/commands.md) and [Time](modules/time.md).
@@ -656,16 +650,16 @@ living-room/status
 living-room/info
 living-room/telemetry/system
 living-room/telemetry/network
-living-room/resources
-living-room/resources/temperature/state
-living-room/resources/power/state
+living-room/manifest
+living-room/resource/temperature/state
+living-room/resource/power/state
 ```
 
 Requests arrive at:
 
 ```text
-living-room/resources/power/set
-living-room/resources/identify/invoke
+living-room/resource/power/set
+living-room/resource/identify/invoke
 living-room/console/in
 living-room/console/controlled/<id>/in
 ```

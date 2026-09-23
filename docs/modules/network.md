@@ -504,7 +504,7 @@ MQTT_SetDiscovery(true);
 NightMare subscribes to:
 
 ```text
-+/resources
++/manifest
 +/status
 ```
 

@@ -22,10 +22,12 @@ Examples include:
 ```text
 <device>/status
 <device>/info
+<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
-<device>/resources
-<device>/resources/<name>/state
+<device>/manifest
+<device>/resource/<name>/state
 ```
 
 **Reason:** MQTT already provides delivery, retained last-known state, subscriptions, broker fan-out, and reconnect behavior. Reimplementing a separate state synchronization layer would duplicate those mechanisms.
@@ -66,11 +68,16 @@ Examples include:
 
 ## `/info` groups static data by lifecycle
 
-**Decision:** identity, hardware, hardware connections, build information, and boot-scoped information are aggregated under one retained `/info` document.
+**Decision:** `/info` aggregates identity, hardware facts, build information,
+and boot-scoped information. Hardware connections are published separately at
+`/hardware` and `/hardware/msgpack`.
 
-**Reason:** those sections normally change together: at boot or firmware replacement. Separate MQTT topics would increase protocol surface without providing meaningful independent refresh behavior.
+**Reason:** topology has a compact positional schema and a separate consumer
+lifecycle, while ordinary device information remains readable JSON.
 
-**Consequence:** individual sections remain queryable through the INFO API, but they do not each get their own retained MQTT topic.
+**Consequence:** INFO no longer contains `hwconnections`. Hardware topology is
+available in retained JSON and MessagePack, and rendering metadata remains a
+server concern.
 
 ## Status is presence, not Resource freshness
 

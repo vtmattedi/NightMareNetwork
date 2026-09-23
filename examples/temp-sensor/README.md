@@ -47,7 +47,7 @@ The application registers a MANAGED Scheduler callback every 100 ms to service t
 A valid measurement updates:
 
 ```text
-<device>/resources/temperature/state
+<device>/resource/temperature/state
 ```
 
 `connected` reports whether a DS18B20 is currently available.

@@ -19,7 +19,10 @@ The data is split by lifecycle:
 
 ```text
 INFO
-    identity, hardware, physical connections, build, boot
+    identity, hardware, build, boot
+
+HARDWARE TOPOLOGY
+    board, devices, buses/signals, pins and electrical attributes
 
 SYSTEM
     changing runtime system health
@@ -28,7 +31,8 @@ NETWORK
     changing network bookkeeping
 ```
 
-Only those three aggregate document types have MQTT topics.
+INFO, SYSTEM and NETWORK have JSON MQTT topics. Hardware topology has both JSON
+and MessagePack retained topics.
 
 ## InfoType
 
@@ -39,7 +43,6 @@ enum class InfoType : uint8_t
     INFO,
     IDENTITY,
     HARDWARE,
-    HW_CONNECTIONS,
     BUILD,
     BOOT,
     SYSTEM,
@@ -61,7 +64,6 @@ Recognized names are case-insensitive:
 INFO
 IDENTITY
 HARDWARE
-HWCONNECTIONS
 BUILD
 BOOT
 SYSTEM
@@ -112,7 +114,6 @@ The result contains:
 ```text
 identity
 hardware
-hwconnections
 build
 boot
 ```
@@ -130,8 +131,6 @@ Telemetry.getInfo("SYSTEM");
 ```
 
 Section queries return the section value directly rather than wrapping it under its aggregate key.
-
-For example, `HWCONNECTIONS` returns the JSON array itself.
 
 ## INFO section contents
 
@@ -156,19 +155,6 @@ revision
 flash_bytes
 heap_bytes
 psram_bytes
-```
-
-### Hardware connections
-
-Each declared hardware connection includes:
-
-```text
-name
-pin
-direction
-pull
-active_low
-note     optional
 ```
 
 ### Build
@@ -259,7 +245,6 @@ These are queryable:
 ```text
 IDENTITY
 HARDWARE
-HWCONNECTIONS
 BUILD
 BOOT
 ```
@@ -280,17 +265,19 @@ returns `false`.
 Telemetry.publishAll();
 ```
 
-attempts all three documents:
+attempts the INFO, both hardware, and both telemetry documents:
 
 ```text
 INFO
+HARDWARE JSON
+HARDWARE MSGPACK
 SYSTEM
 NETWORK
 ```
 
 even if an earlier publication fails.
 
-The return value is `true` only if all three publications succeed.
+The return value is `true` only if all five publications succeed.
 
 ## Automatic startup
 
@@ -403,9 +390,9 @@ Resources already define:
 
 Duplicating those fields into telemetry would create a second source of application truth.
 
-## HardwareProfile dependency
+## Hardware topology
 
-Aggregate INFO and the `HWCONNECTIONS` query use:
+Hardware topology uses:
 
 ```cpp
 NMHardware::getProfile();
@@ -418,6 +405,39 @@ board: unspecified
 connections: none
 ```
 
-The current telemetry implementation bounds hardware connections to 128 entries.
+The retained topics are:
 
-An unusable profile causes INFO/HWCONNECTIONS generation to fail rather than silently serialize invalid memory.
+```text
+<device>/hardware
+<device>/hardware/msgpack
+```
+
+The readable form is available through:
+
+```cpp
+Telemetry.getHardware(HardwareFormat::JSON);
+```
+
+Publication methods are:
+
+```cpp
+Telemetry.publishHardware(HardwareFormat::JSON);
+Telemetry.publishHardware(HardwareFormat::MSGPACK);
+Telemetry.publishHardware(); // both
+```
+
+The compact schema is `[version, boardId, devices[], connections[]]`. Devices
+are `[id, model]`; connections use positional pin, device index, signal, bus
+index, numeric signal type, numeric direction, numeric pull, active-low, and an
+optional resistor.
+
+A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
+`a.b × 10^c` ohms. Constructors accept numeric ohms and strings such as
+`"3k3"`, `"4.7k"`, `"4M7"`, and `"0.33"`.
+
+Pull modes are `None`, `Up`, `Down`, `ExternalUp`, and `ExternalDown`.
+Rendering coordinates, SVG, icons, footprints, and artwork remain server-side.
+
+The implementation bounds hardware connections to 128 entries and devices to
+255. An unusable profile causes topology generation to fail rather than
+silently serialize invalid memory.

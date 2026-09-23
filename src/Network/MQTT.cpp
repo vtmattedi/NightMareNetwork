@@ -134,13 +134,13 @@ namespace
         }
         if (discover)
         {
-            NmMqttEsp::subscribe("+/resources");
+            NmMqttEsp::subscribe("+/manifest");
             NmMqttEsp::subscribe("+/status");
         }
         for (const String &filter : filters)
             if (filter.length() != 0 && !isDefaultSubscription(filter) &&
                 !gResourcesManager.needsSubscription(filter) &&
-                !(discover && (filter == "+/resources" || filter == "+/status")))
+                !(discover && (filter == "+/manifest" || filter == "+/status")))
                 NmMqttEsp::subscribe(filter);
     }
 
@@ -298,7 +298,7 @@ bool MQTT_SubscribeTopic(const String &topicFilter)
             if (!NmMqttEsp::connected() || isDefaultSubscription(topicFilter) ||
                 gResourcesManager.needsSubscription(topicFilter) ||
                 (MQTT_DiscoveryEnabled() &&
-                 (topicFilter == "+/resources" || topicFilter == "+/status")))
+                 (topicFilter == "+/manifest" || topicFilter == "+/status")))
             {
                 LOG("MQTT", "Existing subscription requires no broker action: %s", topicFilter.c_str());
                 return true;
@@ -324,7 +324,7 @@ bool MQTT_SubscribeTopic(const String &topicFilter)
     if (!NmMqttEsp::connected() || isDefaultSubscription(topicFilter) ||
         gResourcesManager.needsSubscription(topicFilter) ||
         (MQTT_DiscoveryEnabled() &&
-         (topicFilter == "+/resources" || topicFilter == "+/status")))
+         (topicFilter == "+/manifest" || topicFilter == "+/status")))
     {
         LOG("MQTT", "Subscription accepted without broker action: %s", topicFilter.c_str());
         return true;
@@ -364,7 +364,7 @@ bool MQTT_UnsubscribeTopic(const String &topicFilter)
     if (NmMqttEsp::connected() && !isDefaultSubscription(topicFilter) &&
         !gResourcesManager.needsSubscription(topicFilter) &&
         !(MQTT_DiscoveryEnabled() &&
-          (topicFilter == "+/resources" || topicFilter == "+/status")) &&
+          (topicFilter == "+/manifest" || topicFilter == "+/status")) &&
         !NmMqttEsp::unsubscribe(topicFilter))
         return false;
     xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
@@ -386,9 +386,9 @@ bool MQTT_SetDiscovery(bool enabled)
     xSemaphoreGive(subscriptionMutex);
     if (!NmMqttEsp::connected() || (!changed && !retry))
         return true;
-    const bool manifests = isCustomSubscription("+/resources") ||
-                           (enabled ? NmMqttEsp::subscribe("+/resources")
-                                    : NmMqttEsp::unsubscribe("+/resources"));
+    const bool manifests = isCustomSubscription("+/manifest") ||
+                           (enabled ? NmMqttEsp::subscribe("+/manifest")
+                                    : NmMqttEsp::unsubscribe("+/manifest"));
     const bool statuses = isCustomSubscription("+/status") ||
                           (enabled ? NmMqttEsp::subscribe("+/status")
                                    : NmMqttEsp::unsubscribe("+/status"));

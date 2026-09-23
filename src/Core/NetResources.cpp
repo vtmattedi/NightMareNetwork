@@ -36,25 +36,29 @@ const String &NetResource::owner() const
 
 String resolveResourceManifestTopic(const String &deviceName)
 {
-    return deviceName + "/resources";
+    return deviceName + "/manifest";
 }
 
 String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format)
 {
     String topic = resolveResourceManifestTopic(deviceName);
-    // One segment below the manifest, which cannot collide with a resource:
-    // a value lives at resources/<name>/state, three segments deep, and this is
-    // two. A device may still own a resource called "msgpack" without either
-    // topic shadowing the other.
     if (format == ManifestFormat::MSGPACK)
         topic += "/msgpack";
     return topic;
 }
 
+String resolveResourceRootTopic(const String &deviceName)
+{
+    return deviceName + "/resource";
+}
+
+// Built from the resource root, not from the manifest topic. They were the same
+// string once, and a resource address silently following a change to where the
+// manifest lives is exactly the coupling that separating them was meant to end.
 String resolveResourceTopic(const String &deviceName, const String &resourceName,
                             ResourceTopicOperation operation)
 {
-    String topic = resolveResourceManifestTopic(deviceName);
+    String topic = resolveResourceRootTopic(deviceName);
     topic += '/';
     topic += resourceName;
     topic += '/';

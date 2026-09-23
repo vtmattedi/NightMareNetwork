@@ -68,7 +68,7 @@ The Resource manifest is descriptive metadata.
 For Values, authoritative runtime state comes from:
 
 ```text
-<device>/resources/<name>/state
+<device>/resource/<name>/state
 ```
 
 Do not make Value freshness depend on receiving a manifest first.

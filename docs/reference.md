@@ -842,7 +842,6 @@ enum class InfoType
     INFO,
     IDENTITY,
     HARDWARE,
-    HW_CONNECTIONS,
     BUILD,
     BOOT,
     SYSTEM,
@@ -853,6 +852,12 @@ struct TelemetryResult
 {
     bool valid;
     String data;
+};
+
+enum class HardwareFormat
+{
+    JSON,
+    MSGPACK
 };
 ```
 
@@ -874,6 +879,12 @@ bool Telemetry.publishInfo(
 
 bool Telemetry.publishInfo(
     const String &type);
+
+TelemetryResult Telemetry.getHardware(
+    HardwareFormat format = HardwareFormat::JSON) const;
+
+bool Telemetry.publishHardware(HardwareFormat format);
+bool Telemetry.publishHardware();
 
 bool Telemetry.publishAll();
 ```
@@ -1067,22 +1078,54 @@ enum class Pull
     None,
     Up,
     Down,
-    External
+    ExternalUp,
+    ExternalDown
+};
+
+enum class SignalType
+{
+    Gpio, SpiClock, SpiMosi, SpiMiso, SpiChipSelect,
+    I2cData, I2cClock, UartTransmit, UartReceive,
+    Pwm, Analog, OneWire, Power, Ground
+};
+
+class Resistor
+{
+public:
+    explicit Resistor(double ohms);
+    explicit Resistor(const char *value);
+    bool valid() const;
+    uint8_t firstDigit() const;
+    uint8_t secondDigit() const;
+    int8_t exponent() const;
+    uint16_t encoded() const;
+    double ohms() const;
+};
+
+struct Device
+{
+    const char *id;
+    const char *model;
 };
 
 struct Connection
 {
-    const char *name;
     int16_t pin;
+    uint8_t device;
+    const char *signal;
+    uint8_t bus;
+    SignalType type;
     Direction direction;
     Pull pull;
     bool activeLow;
-    const char *note;
+    Resistor resistor;
 };
 
 struct Profile
 {
-    const char *boardName;
+    const char *boardId;
+    const Device *devices;
+    size_t deviceCount;
     const Connection *connections;
     size_t connectionCount;
 };

@@ -133,7 +133,7 @@ void updateTemperature(float value)
 If the Resource is bound and MQTT transport is available, NightMare publishes the state retained at:
 
 ```text
-<device>/resources/temperature/state
+<device>/resource/temperature/state
 ```
 
 If transport is unavailable, the local value still changes. Reconnect re-announcement publishes the authoritative state later.
@@ -196,7 +196,7 @@ ManagedState<bool> power("power");
 It publishes retained state exactly like a ManagedSensor, but also subscribes to:
 
 ```text
-<device>/resources/power/set
+<device>/resource/power/set
 ```
 
 Remote requests are decoded before application code sees them.
@@ -258,7 +258,7 @@ bedroomPower.setValue(true);
 publishes:
 
 ```text
-bedroom-ac/resources/power/set
+bedroom-ac/resource/power/set
 ```
 
 The call returns `true` only if the request was accepted for transport.
@@ -435,7 +435,7 @@ void setup()
 The Action is described in the manifest and subscribes to:
 
 ```text
-<device>/resources/set_timer/invoke
+<device>/resource/set_timer/invoke
 ```
 
 ## ActionResult
@@ -574,6 +574,8 @@ No space after `>` selects an operation owned by the manager itself:
 
 ```text
 >list
+>manifest [publish] [json|msgpack]
+>drop <name|owner/name>
 >raw <topic> [payload]
 ```
 
@@ -603,10 +605,17 @@ Action entries include:
 arguments
 ```
 
+`>manifest json` returns the named-key manifest. A MessagePack selection
+republishes `<device>/manifest/msgpack` and responds `Republished to MQTT.`;
+raw binary is not returned through the text command channel. `publish` makes
+publication explicit, and with no format republishes both retained forms.
+
+`>drop` unbinds the addressed Resource.
+
 `>raw` feeds the supplied topic and opaque payload through the same Resource ingress path used for MQTT messages:
 
 ```text
->raw bedroom-ac/resources/power/set true
+>raw bedroom-ac/resource/power/set true
 ```
 
 This is an ingress/testing/control facility. It is not the normal short-name Resource syntax.

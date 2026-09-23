@@ -12,10 +12,10 @@ Resources are the application-level contract between NightMare devices.
 The current Resource protocol has four topic shapes:
 
 ```text
-<device>/resources
-<device>/resources/<name>/state
-<device>/resources/<name>/set
-<device>/resources/<name>/invoke
+<device>/manifest
+<device>/resource/<name>/state
+<device>/resource/<name>/set
+<device>/resource/<name>/invoke
 ```
 
 The central rule is:
@@ -55,7 +55,7 @@ A resolved `(device, resource-name)` address may only be represented once in the
 A device publishes its retained manifest at:
 
 ```text
-<device>/resources
+<device>/manifest
 ```
 
 Only Resources **Managed by that device** appear in its manifest. Remote Resources are local references and are not announced as capabilities of the current device.
@@ -100,6 +100,28 @@ The current manifest payload limit is:
 ```text
 16384 bytes
 ```
+
+### Compact manifest
+
+The same manifest is also retained as MessagePack at:
+
+```text
+<device>/manifest/msgpack
+```
+
+Its positional schema is:
+
+```text
+[encodingVersion, manifestVersion, resources[]]
+
+value  = [0, name, accessEnum, typeEnum]
+action = [1, name, arguments[]]
+arg    = [name, typeEnum, required]
+```
+
+Encoding version `1` is current. Array positions and numeric enums are
+append-only. Readers that do not recognize the encoding version use the JSON
+manifest at `<device>/manifest`.
 
 ## Resource kinds
 
@@ -167,7 +189,7 @@ Unsupported Value C++ types fail at the codec boundary rather than degrading to 
 A Managed Value publishes its state at:
 
 ```text
-<device>/resources/<name>/state
+<device>/resource/<name>/state
 ```
 
 The state is retained.
@@ -304,7 +326,7 @@ Disagreements are logged. They do not rewrite the local declaration and do not d
 A writable Value receives requests at:
 
 ```text
-<device>/resources/<name>/set
+<device>/resource/<name>/set
 ```
 
 The message is transient.
@@ -315,7 +337,7 @@ Example:
 
 ```text
 topic:
-bedroom-ac/resources/target_temperature/set
+bedroom-ac/resource/target_temperature/set
 
 payload:
 23.5
@@ -354,7 +376,7 @@ This reflects the ownership rule:
 Calling `setValue()` on a RemoteState publishes:
 
 ```text
-<owner>/resources/<name>/set
+<owner>/resource/<name>/set
 ```
 
 The call only reports success if the request was accepted by the transport.
@@ -406,7 +428,7 @@ The schema is self-description first. It is published whether or not runtime pay
 An Action is invoked at:
 
 ```text
-<device>/resources/<name>/invoke
+<device>/resource/<name>/invoke
 ```
 
 The message is transient.

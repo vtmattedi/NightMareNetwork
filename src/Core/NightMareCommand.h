@@ -53,7 +53,8 @@ bool ensureSize(const String &str, size_t maxLength, String &error);
 NightMareMessage parseNightMareMessage2(const String &message);
 
 /// @brief Parses and executes a command on the calling task. With resources enabled, `>list`
-/// lists resources, `>manifest` returns the local manifest, `>drop name` unbinds a resource,
+/// lists resources, `>manifest json` returns the local manifest (MessagePack republishes),
+/// `>drop name` unbinds a resource,
 /// `>raw topic payload` enters MQTT ingress, and `> name [get|set|invoke] [payload]` addresses
 /// a resource by its unique name.
 /// @param message The raw command string, e.g. `"WIFI SCAN -s"`. Callers that only have a message

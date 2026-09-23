@@ -124,10 +124,11 @@ private:
  * name itself without a ResourcesManager, and the Manager builds nothing of its
  * own. These only assemble strings: callers validate the segments first.
  *
- *   <device>/resources                  manifest, retained
- *   <device>/resources/<name>/state     value state, retained
- *   <device>/resources/<name>/set       write request, transient
- *   <device>/resources/<name>/invoke    action request, transient
+ *   <device>/manifest                   manifest, retained
+ *   <device>/manifest/msgpack           compact manifest, retained
+ *   <device>/resource/<name>/state      value state, retained
+ *   <device>/resource/<name>/set        write request, transient
+ *   <device>/resource/<name>/invoke     action request, transient
  */
 enum class ResourceTopicOperation : uint8_t
 {
@@ -139,9 +140,16 @@ enum class ResourceTopicOperation : uint8_t
 /// @brief How a manifest is encoded on the wire. The same document either way:
 /// this chooses the encoding, never the content.
 ///
-///   JSON     <device>/resources          readable, self-describing, large
-///   MSGPACK  <device>/resources/msgpack  compact, enums written as their
-///                                        numeric value rather than their name
+///   JSON     <device>/manifest          readable, self-describing, large
+///   MSGPACK  <device>/manifest/msgpack  compact: positions instead of keys,
+///                                       enums as their value, not their name
+///
+/// Both live under <device>/manifest, which is a sibling of <device>/resource
+/// and not inside it. What a device declares and what its resources currently
+/// read are two different things, and keeping them in separate subtrees means a
+/// reader can subscribe to one without the other -- `+/manifest` for discovery,
+/// `+/resource/+/state` for values -- instead of filtering the manifest back
+/// out of a resource wildcard.
 ///
 /// Both are published and both are retained, so a reader picks whichever it can
 /// decode and nothing has to negotiate. A manifest is the largest routine
@@ -221,11 +229,18 @@ String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation 
 String resolveResourceTopic(const String &deviceName, const String &resourceName,
                             ResourceTopicOperation operation);
 
+/// @brief `<device>/manifest`: the JSON manifest, and the root of the subtree
+/// the compact one hangs below.
 String resolveResourceManifestTopic(const String &deviceName);
 
-/// @brief The manifest topic for one encoding. JSON keeps the plain
-/// `<device>/resources`, so nothing that already reads it has to change.
+/// @brief The manifest topic for one encoding. JSON is the bare
+/// `<device>/manifest`; MSGPACK adds `/msgpack` below it. This encoding-named
+/// path leaves room for siblings such as `/manifest/cbor`.
 String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format);
+
+/// @brief `<device>/resource`: the root every resource hangs below. Separate
+/// from the manifest topic, deliberately -- see ManifestFormat.
+String resolveResourceRootTopic(const String &deviceName);
 
 enum class NetSyncStrategy : uint8_t
 {

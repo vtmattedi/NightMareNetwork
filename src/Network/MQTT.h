@@ -34,7 +34,7 @@ bool MQTT_Queue_Async_Message(String topic, String message,
 bool MQTT_SubscribeTopic(const String &topicFilter);
 bool MQTT_UnsubscribeTopic(const String &topicFilter);
 
-// Opt-in dashboard discovery: +/resources (retained manifests) and +/status.
+// Opt-in dashboard discovery: +/manifest (retained manifests) and +/status.
 // Manifests go to gResourcesManager.setManifestHandler(); statuses arrive as
 // ordinary messages through MQTT_onMessage(..., false).
 bool MQTT_SetDiscovery(bool enabled);

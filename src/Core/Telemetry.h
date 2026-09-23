@@ -5,16 +5,14 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-// The sections that can be asked for. Only INFO, SYSTEM and NETWORK are also
-// MQTT documents; the others are parts of INFO, queryable on their own without
-// a topic each.
+// The sections that can be asked for. Hardware topology has its own retained
+// documents and HW command, so it is deliberately not an INFO section.
 enum class InfoType : uint8_t
 {
     INVALID,
     INFO,
     IDENTITY,
     HARDWARE,
-    HW_CONNECTIONS,
     BUILD,
     BOOT,
     SYSTEM,
@@ -22,7 +20,7 @@ enum class InfoType : uint8_t
 };
 
 /// @brief Maps a section name to its type, ignoring case: INFO, IDENTITY,
-/// HARDWARE, HWCONNECTIONS, BUILD, BOOT, SYSTEM, NETWORK. Empty means INFO;
+/// HARDWARE, BUILD, BOOT, SYSTEM, NETWORK. Empty means INFO;
 /// anything else is INVALID.
 InfoType getInfoType(const String &type);
 
@@ -32,8 +30,16 @@ struct TelemetryResult
     String data;
 };
 
+enum class HardwareFormat : uint8_t
+{
+    JSON,
+    MSGPACK
+};
+
 // Device-wide information, split by how often it changes. Three retained documents:
-//   <device>/info               identity, hardware, connections, build, boot: fixed per boot
+//   <device>/info               identity, hardware, build, boot: fixed per boot
+//   <device>/hardware           hardware topology as retained JSON
+//   <device>/hardware/msgpack   the same topology as retained MessagePack
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
 // All three are also refreshed on every MQTT connection. Sensors, actuators and
@@ -55,7 +61,18 @@ public:
     bool publishInfo(InfoType type = InfoType::INFO);
     bool publishInfo(const String &type);
 
-    /// @brief /info, /telemetry/system and /telemetry/network. True only if all three went out.
+    /// @brief Builds the hardware-only topology document in readable JSON or
+    /// compact positional MessagePack form.
+    TelemetryResult getHardware(HardwareFormat format = HardwareFormat::JSON) const;
+
+    /// @brief Publishes one retained hardware topology encoding.
+    bool publishHardware(HardwareFormat format);
+
+    /// @brief Publishes both retained hardware topology encodings.
+    bool publishHardware();
+
+    /// @brief /info, both /hardware encodings, and both telemetry documents.
+    /// True only if all five went out.
     bool publishAll();
 
 private:
@@ -64,11 +81,12 @@ private:
     // serialized only to be parsed back.
     void appendIdentity(JsonObject dst) const;
     void appendHardware(JsonObject dst) const;
-    void appendHwConnections(JsonArray dst) const;
     void appendBuild(JsonObject dst) const;
     void appendBoot(JsonObject dst) const;
     void appendSystem(JsonObject dst) const;
     void appendNetwork(JsonObject dst) const;
+    void buildNamedHardware(JsonDocument &doc) const;
+    void buildPositionalHardware(JsonDocument &doc) const;
 
     bool started_ = false;
 };

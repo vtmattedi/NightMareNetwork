@@ -93,7 +93,7 @@ mode
 Value state is published at:
 
 ```text
-<device>/resources/<name>/state
+<device>/resource/<name>/state
 ```
 
 and is retained.
@@ -117,7 +117,7 @@ An Action may publish runtime argument metadata in the manifest, but it does not
 Invocation uses:
 
 ```text
-<device>/resources/<name>/invoke
+<device>/resource/<name>/invoke
 ```
 
 Ordinary MQTT invocation is fire-and-forget. The transport accepting the message is not proof that the remote Action executed successfully.
@@ -232,7 +232,7 @@ Optimism does not change ownership. The remote device remains the source of trut
 The retained topic:
 
 ```text
-<device>/resources
+<device>/manifest
 ```
 
 contains the device's Resource manifest.
@@ -246,7 +246,7 @@ It does not gate Resource state. A missing, stale, incompatible, or withdrawn ma
 A Value's retained state lives at:
 
 ```text
-<device>/resources/<name>/state
+<device>/resource/<name>/state
 ```
 
 For Remote Values, receiving owner state updates authoritative state and freshness.
@@ -258,7 +258,7 @@ For Managed Values, publishing state exposes the owner's current truth to the ne
 A write request to a writable Value uses:
 
 ```text
-<device>/resources/<name>/set
+<device>/resource/<name>/set
 ```
 
 For a ManagedState, the application handler decides whether the decoded requested value is accepted.
@@ -270,7 +270,7 @@ If accepted, the requested value becomes authoritative state.
 An Action request uses:
 
 ```text
-<device>/resources/<name>/invoke
+<device>/resource/<name>/invoke
 ```
 
 A ManagedAction routes the canonical payload to its application handler.
@@ -325,12 +325,26 @@ It aggregates sections such as:
 ```text
 identity
 hardware
-hwconnections
 build
 boot
 ```
 
 The sections can be queried individually through the INFO interface without creating a separate MQTT topic for each section.
+
+## Hardware topology
+
+Hardware wiring is published separately from `/info` because it has its own
+compact representation. The two retained forms are:
+
+```text
+<device>/hardware
+<device>/hardware/msgpack
+```
+
+They describe only the board ID, attached devices, buses/signals, pins,
+directions, pull modes, optional pull resistors, and active-low behavior.
+Artwork, footprints, coordinates, icons, and other rendering data remain
+server-side.
 
 ## Telemetry
 

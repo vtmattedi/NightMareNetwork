@@ -47,16 +47,53 @@ namespace
             return "up";
         case NMHardware::Pull::Down:
             return "down";
-        case NMHardware::Pull::External:
-            return "external";
+        case NMHardware::Pull::ExternalUp:
+            return "external_up";
+        case NMHardware::Pull::ExternalDown:
+            return "external_down";
+        }
+        return "unknown";
+    }
+
+    const char *signalTypeName(NMHardware::SignalType type)
+    {
+        switch (type)
+        {
+        case NMHardware::SignalType::Gpio: return "gpio";
+        case NMHardware::SignalType::SpiClock: return "spi_clock";
+        case NMHardware::SignalType::SpiMosi: return "spi_mosi";
+        case NMHardware::SignalType::SpiMiso: return "spi_miso";
+        case NMHardware::SignalType::SpiChipSelect: return "spi_chip_select";
+        case NMHardware::SignalType::I2cData: return "i2c_data";
+        case NMHardware::SignalType::I2cClock: return "i2c_clock";
+        case NMHardware::SignalType::UartTransmit: return "uart_transmit";
+        case NMHardware::SignalType::UartReceive: return "uart_receive";
+        case NMHardware::SignalType::Pwm: return "pwm";
+        case NMHardware::SignalType::Analog: return "analog";
+        case NMHardware::SignalType::OneWire: return "one_wire";
+        case NMHardware::SignalType::Power: return "power";
+        case NMHardware::SignalType::Ground: return "ground";
         }
         return "unknown";
     }
 
     bool profileUsable(const NMHardware::Profile &profile)
     {
-        return profile.connectionCount <= MaxConnections &&
-               (profile.connectionCount == 0 || profile.connections != nullptr);
+        if (profile.deviceCount > 255 || profile.connectionCount > MaxConnections ||
+            (profile.deviceCount != 0 && profile.devices == nullptr) ||
+            (profile.connectionCount != 0 && profile.connections == nullptr))
+            return false;
+        for (size_t i = 0; i < profile.connectionCount; ++i)
+        {
+            const NMHardware::Connection &connection = profile.connections[i];
+            if ((connection.device != NMHardware::NoDevice &&
+                 connection.device >= profile.deviceCount) ||
+                connection.signal == nullptr)
+                return false;
+            if (connection.resistor.valid() && connection.pull == NMHardware::Pull::None)
+                return false;
+        }
+        return true;
     }
 
     // The retained topic of each document; null for sections that have none.
@@ -91,7 +128,6 @@ InfoType getInfoType(const String &type)
         {"INFO", InfoType::INFO},
         {"IDENTITY", InfoType::IDENTITY},
         {"HARDWARE", InfoType::HARDWARE},
-        {"HWCONNECTIONS", InfoType::HW_CONNECTIONS},
         {"BUILD", InfoType::BUILD},
         {"BOOT", InfoType::BOOT},
         {"SYSTEM", InfoType::SYSTEM},
@@ -132,7 +168,7 @@ void TelemetryService::appendIdentity(JsonObject dst) const
 void TelemetryService::appendHardware(JsonObject dst) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
-    dst["board"] = profile.boardName != nullptr ? profile.boardName : "unspecified";
+    dst["board"] = profile.boardId != nullptr ? profile.boardId : "unspecified";
     dst["chip"] = ESP.getChipModel();
     dst["cores"] = ESP.getChipCores();
     dst["revision"] = ESP.getChipRevision();
@@ -141,22 +177,75 @@ void TelemetryService::appendHardware(JsonObject dst) const
     dst["psram_bytes"] = ESP.getPsramSize();
 }
 
-void TelemetryService::appendHwConnections(JsonArray dst) const
+void TelemetryService::buildNamedHardware(JsonDocument &doc) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
-    if (!profileUsable(profile))
-        return;
+    doc["version"] = NMHardware::TopologyVersion;
+    doc["board_id"] = profile.boardId != nullptr ? profile.boardId : "unspecified";
+    JsonArray devices = doc["devices"].to<JsonArray>();
+    for (size_t i = 0; i < profile.deviceCount; ++i)
+    {
+        JsonObject item = devices.add<JsonObject>();
+        item["id"] = profile.devices[i].id != nullptr ? profile.devices[i].id : "";
+        item["model"] = profile.devices[i].model != nullptr ? profile.devices[i].model : "";
+    }
+    JsonArray connections = doc["connections"].to<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)
     {
         const NMHardware::Connection &connection = profile.connections[i];
-        JsonObject pin = dst.add<JsonObject>();
-        pin["name"] = connection.name != nullptr ? connection.name : "";
+        JsonObject pin = connections.add<JsonObject>();
         pin["pin"] = connection.pin;
+        if (connection.device == NMHardware::NoDevice)
+            pin["device"] = nullptr;
+        else
+            pin["device"] = connection.device;
+        pin["signal"] = connection.signal;
+        if (connection.bus == NMHardware::NoBus)
+            pin["bus"] = nullptr;
+        else
+            pin["bus"] = connection.bus;
+        pin["type"] = signalTypeName(connection.type);
         pin["direction"] = directionName(connection.direction);
         pin["pull"] = pullName(connection.pull);
         pin["active_low"] = connection.activeLow;
-        if (connection.note != nullptr && connection.note[0] != '\0')
-            pin["note"] = connection.note;
+        if (connection.resistor.valid())
+        {
+            JsonArray resistor = pin["resistor"].to<JsonArray>();
+            resistor.add(connection.resistor.firstDigit());
+            resistor.add(connection.resistor.secondDigit());
+            resistor.add(connection.resistor.exponent());
+        }
+    }
+}
+
+void TelemetryService::buildPositionalHardware(JsonDocument &doc) const
+{
+    const NMHardware::Profile profile = NMHardware::getProfile();
+    JsonArray root = doc.to<JsonArray>();
+    root.add(NMHardware::TopologyVersion);
+    root.add(profile.boardId != nullptr ? profile.boardId : "unspecified");
+    JsonArray devices = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.deviceCount; ++i)
+    {
+        JsonArray item = devices.add<JsonArray>();
+        item.add(profile.devices[i].id != nullptr ? profile.devices[i].id : "");
+        item.add(profile.devices[i].model != nullptr ? profile.devices[i].model : "");
+    }
+    JsonArray connections = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.connectionCount; ++i)
+    {
+        const NMHardware::Connection &connection = profile.connections[i];
+        JsonArray item = connections.add<JsonArray>();
+        item.add(connection.pin);
+        item.add(connection.device);
+        item.add(connection.signal);
+        item.add(connection.bus);
+        item.add(static_cast<uint8_t>(connection.type));
+        item.add(static_cast<uint8_t>(connection.direction));
+        item.add(static_cast<uint8_t>(connection.pull));
+        item.add(connection.activeLow);
+        if (connection.resistor.valid())
+            item.add(connection.resistor.encoded());
     }
 }
 
@@ -223,10 +312,6 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     if (type == InfoType::INVALID)
         return result;
 
-    const bool withConnections = type == InfoType::INFO || type == InfoType::HW_CONNECTIONS;
-    const NMHardware::Profile profile = NMHardware::getProfile();
-    if (withConnections && !profileUsable(profile))
-        return result;
     // Sizes itself as it is filled; the old fixed capacity asked for
     // 2048 + connections * 256 bytes contiguous, which on a board describing
     // eighteen pins was a 6.6KB block demanded on every MQTT connect.
@@ -236,7 +321,6 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     case InfoType::INFO:
         appendIdentity(doc["identity"].to<JsonObject>());
         appendHardware(doc["hardware"].to<JsonObject>());
-        appendHwConnections(doc["hwconnections"].to<JsonArray>());
         appendBuild(doc["build"].to<JsonObject>());
         appendBoot(doc["boot"].to<JsonObject>());
         break;
@@ -245,9 +329,6 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
         break;
     case InfoType::HARDWARE:
         appendHardware(doc.to<JsonObject>());
-        break;
-    case InfoType::HW_CONNECTIONS:
-        appendHwConnections(doc.to<JsonArray>());
         break;
     case InfoType::BUILD:
         appendBuild(doc.to<JsonObject>());
@@ -264,9 +345,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     case InfoType::INVALID:
         return result;
     }
-    // No overflow check: an ArduinoJson 7 document has no capacity, and the only
-    // unbounded section here is hwconnections, which profileUsable() already
-    // caps at MaxConnections.
+    // No overflow check: an ArduinoJson 7 document has no fixed capacity.
     serializeJson(doc, result.data);
     result.valid = result.data.length() != 0;
     return result;
@@ -291,13 +370,47 @@ bool TelemetryService::publishInfo(const String &type)
     return publishInfo(getInfoType(type));
 }
 
+TelemetryResult TelemetryService::getHardware(HardwareFormat format) const
+{
+    TelemetryResult result;
+    const NMHardware::Profile profile = NMHardware::getProfile();
+    if (!profileUsable(profile))
+        return result;
+
+    JsonDocument doc;
+    if (format == HardwareFormat::MSGPACK)
+        buildPositionalHardware(doc);
+    else
+        buildNamedHardware(doc);
+    const size_t written = format == HardwareFormat::MSGPACK
+                               ? serializeMsgPack(doc, result.data)
+                               : serializeJson(doc, result.data);
+    result.valid = written != 0;
+    return result;
+}
+
+bool TelemetryService::publishHardware(HardwareFormat format)
+{
+    const TelemetryResult hardware = getHardware(format);
+    const char *topic = format == HardwareFormat::MSGPACK ? "hardware/msgpack" : "hardware";
+    return hardware.valid && MQTT_Publish(topic, hardware.data, true, true);
+}
+
+bool TelemetryService::publishHardware()
+{
+    const bool json = publishHardware(HardwareFormat::JSON);
+    const bool msgpack = publishHardware(HardwareFormat::MSGPACK);
+    return json && msgpack;
+}
+
 bool TelemetryService::publishAll()
 {
     // Each is attempted even if an earlier one fails.
     const bool info = publishInfo(InfoType::INFO);
+    const bool hardware = publishHardware();
     const bool system = publishInfo(InfoType::SYSTEM);
     const bool network = publishInfo(InfoType::NETWORK);
-    return info && system && network;
+    return info && hardware && system && network;
 }
 
 #endif // NM_ENABLE_TELEMETRY

@@ -192,17 +192,20 @@ Current retained families include:
 ```text
 <device>/status
 <device>/info
+<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
-<device>/resources
-<device>/resources/<value>/state
+<device>/manifest
+<device>/manifest/msgpack
+<device>/resource/<value>/state
 ```
 
 Write requests and Action invocations are transient:
 
 ```text
-<device>/resources/<value>/set
-<device>/resources/<action>/invoke
+<device>/resource/<value>/set
+<device>/resource/<action>/invoke
 ```
 
 This distinction is intentional. A state topic answers “what is true now?” A request topic asks work to happen now.
@@ -238,7 +241,7 @@ The Resource Manager consumes recognized Resource traffic even if the specific o
 ## Message flow: write to a ManagedState
 
 ```text
-<device>/resources/<name>/set
+<device>/resource/<name>/set
     │
     ▼
 ResourcesManager
@@ -312,6 +315,9 @@ Telemetry is separated by lifecycle rather than by every possible category.
 ```text
 /info
     mostly static / boot-scoped aggregate
+
+/hardware, /hardware/msgpack
+    hardware-only topology, readable and compact encodings
 
 /telemetry/system
     regular runtime health

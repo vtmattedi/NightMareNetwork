@@ -16,6 +16,9 @@ NightMare separates device-level information according to lifecycle:
 /info
     boot-scoped / effectively static description
 
+/hardware, /hardware/msgpack
+    hardware-only topology in readable and compact forms
+
 /telemetry/system
     changing runtime system health
 
@@ -135,7 +138,6 @@ It is an aggregate of facts that are static or boot-scoped enough that they do n
 ```text
 identity
 hardware
-hwconnections
 build
 boot
 ```
@@ -159,7 +161,6 @@ A representative structure is:
     "heap_bytes": 327680,
     "psram_bytes": 0
   },
-  "hwconnections": [],
   "build": {},
   "boot": {
     "reset_reason": 1
@@ -206,46 +207,46 @@ psram_bytes
 
 The remaining hardware fields come from the ESP runtime.
 
-## Hardware connections
+## Hardware topology
 
-`hwconnections` is an array built from the active hardware profile.
+Topology is not embedded in `/info`. It is retained separately as readable
+JSON at `<device>/hardware` and compact MessagePack at
+`<device>/hardware/msgpack`.
 
-Each connection contains:
-
-```json
-{
-  "name": "IR RX demodulator",
-  "pin": 7,
-  "direction": "input",
-  "pull": "none",
-  "active_low": true,
-  "note": "optional note"
-}
-```
-
-`note` is omitted when no note is declared.
-
-Direction values are:
+The MessagePack schema is versioned and positional:
 
 ```text
-input
-output
-bidirectional
-power
-ground
-bus
+[
+  version,
+  boardId,
+  devices[],
+  connections[]
+]
+
+device     = [id, model]
+connection = [pin, deviceIndex, signal, busIndex,
+              signalTypeEnum, directionEnum, pullEnum, activeLow,
+              resistor?]
 ```
 
-Pull values are:
+`255` means no device or no bus. Numeric enums are append-only:
 
 ```text
-none
-up
-down
-external
+direction:  0 input, 1 output, 2 bidirectional, 3 power, 4 ground, 5 bus
+pull:       0 none, 1 up, 2 down, 3 external-up, 4 external-down
+signal:     0 gpio, 1 SPI clock, 2 SPI MOSI, 3 SPI MISO, 4 SPI chip-select,
+            5 I2C data, 6 I2C clock, 7 UART transmit, 8 UART receive,
+            9 PWM, 10 analog, 11 one-wire, 12 power, 13 ground
 ```
 
-The current telemetry implementation accepts at most 128 hardware-profile connections when constructing INFO/HWCONNECTIONS output.
+The optional resistor is a two-byte value. Its first byte contains two BCD
+digits `a` and `b`; its second byte is signed exponent `c`, representing
+`a.b × 10^c` ohms. Thus 330 Ω is `(3,3,2)`, 3k3 is `(3,3,3)`, and
+0.33 Ω is `(3,3,-1)`.
+
+The JSON document uses named keys and enum names while describing the same
+topology. Footprint coordinates, SVG artwork, icons, and rendering metadata are
+not device payload data and remain server-side.
 
 ## Build section
 
@@ -450,10 +451,12 @@ Use network telemetry as last-known bookkeeping.
 
 ## Publication on MQTT connection
 
-Every MQTT connection or broker switch refreshes the three retained information documents:
+Every MQTT connection or broker switch refreshes the five retained information documents:
 
 ```text
 <device>/info
+<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 ```
@@ -487,7 +490,6 @@ Supported sections are:
 INFO
 IDENTITY
 HARDWARE
-HWCONNECTIONS
 BUILD
 BOOT
 SYSTEM
@@ -506,11 +508,14 @@ INFO HARDWARE
 
 returns an object containing only hardware fields.
 
+Hardware connections use the separate command:
+
 ```text
-INFO HWCONNECTIONS
+HW [PUBLISH] [JSON|MSGPACK]
 ```
 
-returns the connection array directly.
+JSON can be returned directly. A MessagePack request republishes the retained
+MQTT document and answers `Republished to MQTT.`
 
 ## Publishable documents
 

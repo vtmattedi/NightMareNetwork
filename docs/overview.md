@@ -103,10 +103,11 @@ That distinction is permanent for the Resource object. Retargeting a Remote Reso
 The network representation is intentionally small:
 
 ```text
-<device>/resources
-<device>/resources/<name>/state
-<device>/resources/<name>/set
-<device>/resources/<name>/invoke
+<device>/manifest
+<device>/manifest/msgpack
+<device>/resource/<name>/state
+<device>/resource/<name>/set
+<device>/resource/<name>/invoke
 ```
 
 The manifest describes Resources. Retained `/state` is the authoritative freshness signal for Values.
@@ -139,6 +140,10 @@ NightMare separates information by lifecycle.
 ```text
 <device>/info
     mostly static / boot-scoped description
+
+<device>/hardware
+<device>/hardware/msgpack
+    hardware topology in JSON and MessagePack
 
 <device>/telemetry/system
     runtime system health

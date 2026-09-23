@@ -38,13 +38,16 @@ The current standard topic families are:
 <device>/status
 
 <device>/info
+<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 
-<device>/resources
-<device>/resources/<name>/state
-<device>/resources/<name>/set
-<device>/resources/<name>/invoke
+<device>/manifest
+<device>/manifest/msgpack
+<device>/resource/<name>/state
+<device>/resource/<name>/set
+<device>/resource/<name>/invoke
 
 <device>/console/in
 <device>/console/out
@@ -67,10 +70,13 @@ NightMare uses retained messages for current state and current description.
 |---|---:|---|
 | `<device>/status` | yes | name, hardware signature, timezone + online/offline presence |
 | `<device>/info` | yes | boot-scoped/static device information |
+| `<device>/hardware` | yes | readable hardware topology JSON |
+| `<device>/hardware/msgpack` | yes | compact positional hardware topology |
 | `<device>/telemetry/system` | yes | last published runtime system telemetry |
 | `<device>/telemetry/network` | yes | last published network bookkeeping |
-| `<device>/resources` | yes | Resource manifest |
-| `<device>/resources/<name>/state` | yes | authoritative Value state |
+| `<device>/manifest` | yes | Resource manifest |
+| `<device>/manifest/msgpack` | yes | compact positional Resource manifest |
+| `<device>/resource/<name>/state` | yes | authoritative Value state |
 
 An empty retained payload is used as a tombstone where NightMare needs to remove retained state.
 
@@ -82,8 +88,8 @@ Requests, commands, and command responses are not retained.
 
 | Topic | Retained | Purpose |
 |---|---:|---|
-| `<device>/resources/<name>/set` | no | request a writable Value change |
-| `<device>/resources/<name>/invoke` | no | invoke an Action |
+| `<device>/resource/<name>/set` | no | request a writable Value change |
+| `<device>/resource/<name>/invoke` | no | invoke an Action |
 | `<device>/console/in` | no | ordinary command request |
 | `<device>/console/out` | no | ordinary command response/status |
 | `<device>/console/controlled/<id>/in` | no | correlated command request |
@@ -97,7 +103,7 @@ Requests, commands, and command responses are not retained.
 ### Manifest
 
 ```text
-<device>/resources
+<device>/manifest
 ```
 
 The manifest is retained and describes the Resources implemented by the device.
@@ -107,7 +113,7 @@ It is descriptive metadata. It does not make Value state fresh and does not gate
 ### Value state
 
 ```text
-<device>/resources/<name>/state
+<device>/resource/<name>/state
 ```
 
 Retained owner state for a Value.
@@ -126,7 +132,7 @@ cool
 ### Value write request
 
 ```text
-<device>/resources/<name>/set
+<device>/resource/<name>/set
 ```
 
 Transient request to a Managed `READ_WRITE` Value.
@@ -136,7 +142,7 @@ The payload uses the same Value codec representation as `/state`.
 ### Action invocation
 
 ```text
-<device>/resources/<name>/invoke
+<device>/resource/<name>/invoke
 ```
 
 Transient Action request.
@@ -163,7 +169,7 @@ NightMare subscribes only where a bound Resource needs ingress.
 For Remote Resources, the manager also subscribes once to:
 
 ```text
-<remote-device>/resources
+<remote-device>/manifest
 ```
 
 per remote owner so it can receive descriptive manifest information.
@@ -234,11 +240,11 @@ Global device discovery is opt-in through `MQTT_SetDiscovery(true)`.
 When enabled, NightMare subscribes to:
 
 ```text
-+/resources
++/manifest
 +/status
 ```
 
-`+/resources` feeds valid other-device manifests to the configured Resource manifest handler.
+`+/manifest` feeds valid other-device manifests to the configured Resource manifest handler.
 
 `+/status` is ordinary MQTT traffic; when the project message callback is configured to receive external topics, status messages can reach that callback.
 

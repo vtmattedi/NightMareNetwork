@@ -15,9 +15,9 @@ constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
 constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
 constexpr int ManifestVersion = 2;
 /// Every device's manifest, for a handler that wants the whole network.
-constexpr const char *AllManifestsFilter = "+/resources";
+constexpr const char *AllManifestsFilter = "+/manifest";
 /// The same, in the compact encoding. Taken only when an encoded handler is set.
-constexpr const char *AllEncodedManifestsFilter = "+/resources/msgpack";
+constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
 /// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
@@ -399,10 +399,12 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
     // A remote owner's manifest is only worth a subscription if something is
     // going to read it. With verification compiled out nothing here does, and a
     // handler -- which wants every device, not just the bound ones -- has its
-    // own subscription.
+    // own subscription. The compact encoding, because that is the one the
+    // manager reads; a JSON reader is a handler and subscribes for itself.
     if (verifiesRemoteManifests() && includeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
-        subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
+        subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
+                                                     ManifestFormat::MSGPACK));
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->subscribe(ingress);
@@ -417,7 +419,8 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
         subscriber_->unsubscribe(ingress);
     if (verifiesRemoteManifests() && removeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
-        subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
+        subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
+                                                     ManifestFormat::MSGPACK));
 }
 
 void ResourcesManager::subscribeAll()
@@ -459,7 +462,8 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
         if (ingressTopicFor(resource) == topicFilter)
             return true;
         if (verifiesRemoteManifests() && !resource.isOwned() && hasResolvedSource(resource) &&
-            resolveResourceManifestTopic(resource.ownerDevice_.deviceName) == topicFilter)
+            resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
+                                                     ManifestFormat::MSGPACK) == topicFilter)
             return true;
     }
     return false;
@@ -639,7 +643,8 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
         // towards the old one.
         if (ownerChanged && DeviceIdentity::validDeviceName(oldOwner.deviceName) &&
             !remoteOwnerInUse(oldOwner.deviceName, nullptr))
-            subscriber_->unsubscribe(resolveResourceManifestTopic(oldOwner.deviceName));
+            subscriber_->unsubscribe(
+                resolveResourceManifestTopic(oldOwner.deviceName, ManifestFormat::MSGPACK));
     }
 
     if (!sourceConfigured(resource))
@@ -669,7 +674,8 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     if (subscriber_ != nullptr)
     {
         if (verifiesRemoteManifests() && ownerChanged && !remoteOwnerInUse(newOwner, &resource))
-            subscriber_->subscribe(resolveResourceManifestTopic(newOwner));
+            subscriber_->subscribe(
+                resolveResourceManifestTopic(newOwner, ManifestFormat::MSGPACK));
         const String ingress = ingressTopicFor(resource);
         if (ingress.length() != 0)
             subscriber_->subscribe(ingress);
@@ -701,6 +707,16 @@ bool ResourcesManager::publishManifest()
                              packed, true))
         LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
     return true;
+}
+
+bool ResourcesManager::publishManifest(ManifestFormat format)
+{
+    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
+        return false;
+    String payload;
+    return serializeManifest(payload, format) &&
+           publisher_->publish(resolveResourceManifestTopic(thisDevice, format), payload, true);
 }
 
 // The JSON manifest, unchanged since the protocol first defined it: named keys,
@@ -1042,13 +1058,38 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
 
         if (command.internalCommand == InternalCommands::MANIFEST)
         {
-            // `>manifest [json|mpack]`, defaulting to NM_DEFAULT_MANIFEST_FORMAT.
-            // Asking for mpack over a serial console returns binary and will
-            // look like noise; over MQTT, where the response topic carries a
-            // length rather than a terminator, it arrives intact.
+            // Binary MessagePack is not useful through a text response. Asking
+            // for it republishes the retained compact manifest instead.
+            String arguments = command.payload;
+            arguments.trim();
+            size_t position = 0;
+            String first = commandToken(arguments, position);
+            String firstUpper = first;
+            firstUpper.toUpperCase();
+            const bool explicitPublish = firstUpper == "PUBLISH";
+            String formatArgument = explicitPublish ? commandToken(arguments, position) : first;
+            String extra = position < arguments.length() ? arguments.substring(position) : String();
+            extra.trim();
+            if (extra.length() != 0)
+                return {false, String("Usage: >manifest [publish] [json|msgpack]")};
+
+            if (explicitPublish && formatArgument.length() == 0)
+            {
+                const bool published = publishManifest();
+                return {published, published ? String("Republished to MQTT.")
+                                             : String("Manifest publish failed.")};
+            }
+
             ManifestFormat format = ManifestFormat::JSON;
-            if (!parseManifestFormat(command.payload, format))
-                return {false, String("Usage: >manifest [json|mpack]")};
+            if (!parseManifestFormat(formatArgument, format))
+                return {false, String("Usage: >manifest [publish] [json|msgpack]")};
+
+            if (explicitPublish || format == ManifestFormat::MSGPACK)
+            {
+                const bool published = publishManifest(format);
+                return {published, published ? String("Republished to MQTT.")
+                                             : String("Manifest publish failed.")};
+            }
 
             String manifest;
             if (!serializeManifest(manifest, format))
@@ -1219,6 +1260,11 @@ bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
     return true;
 }
 
+// The JSON manifest, for a handler that asked for it. Nothing in the library
+// reads this topic any more -- verification moved to the compact encoding -- so
+// this path exists to hand a validated payload to a consumer and does nothing
+// else with it.
+//
 // A manifest is description: it feeds discovery and compatibility diagnostics
 // and nothing else. Value freshness belongs to /state alone, so no outcome here
 // (missing, mismatched, withdrawn or malformed) touches it, and nothing here
@@ -1271,45 +1317,64 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         return;
     }
 
+    manifestHandler_(deviceName, message);
+}
+
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
-    JsonArray items = doc["resources"].as<JsonArray>();
+// Positional throughout: entry[0] kind, entry[1] name, then the shape kind
+// chose. Rule 4 governs the enum comparisons -- a value this build does not
+// recognise is reported as the number it is, never translated through a name
+// table that would quietly read it as something else.
+void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArrayConst items)
+{
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
         if (resource->isOwned() || resource->ownerDevice_.deviceName != deviceName)
             continue;
 
-        JsonObject declaration;
-        for (JsonObject item : items)
+        JsonArrayConst declaration;
+        for (JsonVariantConst element : items)
         {
-            if (item["name"].as<String>() == resource->name_)
+            JsonArrayConst entry = element.as<JsonArrayConst>();
+            if (entry.size() < 2)
+                continue;
+            const char *name = entry[1].as<const char *>();
+            if (name != nullptr && resource->name_ == name)
             {
-                declaration = item;
+                declaration = entry;
                 break;
             }
         }
 
         // The local declaration is intentional and is never rewritten from a
         // remote manifest. A disagreement is reported, and that is all.
-        bool compatible = !declaration.isNull() &&
-                          declaration["kind"].as<String>() == kindName(resource->kind_);
+        const bool declared =
+            declaration.size() >= 2 &&
+            declaration[0].as<uint8_t>() == static_cast<uint8_t>(resource->kind_);
+
         if (resource->kind_ == NetResourceType::VALUE)
         {
             const NetValueResource &value = *static_cast<NetValueResource *>(resource);
-            if (compatible && declaration["type"].as<String>() != valueTypeName(value.valueType_))
-                compatible = false;
-            else if (compatible && value.access_ == AccessPolicy::READ_WRITE &&
-                     declaration["access"].as<String>() != accessName(AccessPolicy::READ_WRITE))
+            bool compatible = declared && declaration.size() >= 4 &&
+                              declaration[3].as<uint8_t>() ==
+                                  static_cast<uint8_t>(value.valueType_);
+            // Asymmetric on purpose: reading a read_write resource is fine,
+            // writing a read-only one is not.
+            if (compatible && value.access_ == AccessPolicy::READ_WRITE &&
+                declaration[2].as<uint8_t>() !=
+                    static_cast<uint8_t>(AccessPolicy::READ_WRITE))
                 compatible = false;
             if (!compatible)
-                LOG_WARNING("RM", "Source '%s/%s' is missing or incompatible with the local declaration",
+                LOG_WARNING("RM",
+                            "Source '%s/%s' is missing or incompatible with the local declaration",
                             deviceName.c_str(), resource->name_.c_str());
             continue;
         }
 
         // For an action the manifest is description, never a gate: invoke()
         // keeps working however this comparison turns out.
-        if (!compatible)
+        if (!declared)
         {
             LOG_WARNING("RM", "Action '%s/%s' is not declared by its device", deviceName.c_str(),
                         resource->name_.c_str());
@@ -1318,51 +1383,64 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         const NetActionResource &action = *static_cast<NetActionResource *>(resource);
         if (!action.hasSchema())
             continue;
-        JsonArray remoteArgs = declaration["arguments"].as<JsonArray>();
+        JsonArrayConst remoteArgs =
+            declaration.size() >= 3 ? declaration[2].as<JsonArrayConst>() : JsonArrayConst();
         for (size_t a = 0; a < action.argumentCount(); ++a)
         {
             const ActionArgMetadata &expected = action.argument(a);
             bool found = false;
-            for (JsonObject remoteArg : remoteArgs)
+            for (JsonVariantConst argumentElement : remoteArgs)
             {
-                if (remoteArg["name"].as<String>() != expected.name)
+                JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+                if (argument.size() < 2)
+                    continue;
+                const char *name = argument[0].as<const char *>();
+                if (name == nullptr || strcmp(name, expected.name) != 0)
                     continue;
                 found = true;
-                if (remoteArg["type"].as<String>() != valueTypeName(expected.type))
-                    LOG_WARNING("RM", "Action '%s/%s' argument '%s' is %s remotely, expected %s",
+                const uint8_t remoteType = argument[1].as<uint8_t>();
+                if (remoteType != static_cast<uint8_t>(expected.type))
+                    LOG_WARNING("RM", "Action '%s/%s' argument '%s' is type %u remotely, expected %s",
                                 deviceName.c_str(), resource->name_.c_str(), expected.name,
-                                remoteArg["type"].as<String>().c_str(), valueTypeName(expected.type));
+                                (unsigned)remoteType, valueTypeName(expected.type));
                 break;
             }
             if (!found)
                 LOG_WARNING("RM", "Action '%s/%s' does not declare expected argument '%s'",
                             deviceName.c_str(), resource->name_.c_str(), expected.name);
         }
-        for (JsonObject remoteArg : remoteArgs)
+        for (JsonVariantConst argumentElement : remoteArgs)
         {
-            const String remoteName = remoteArg["name"].as<String>();
+            JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+            if (argument.size() < 1)
+                continue;
+            const char *remoteName = argument[0].as<const char *>();
+            if (remoteName == nullptr)
+                continue;
             bool known = false;
             for (size_t a = 0; a < action.argumentCount() && !known; ++a)
-                known = remoteName == action.argument(a).name;
-            // "required" absent means required, as it did before the field existed.
-            const bool required = remoteArg["required"] | true;
+                known = strcmp(remoteName, action.argument(a).name) == 0;
+            // A missing "required" means required, as it did before the field existed.
+            const bool required = argument.size() >= 3 ? argument[2].as<bool>() : true;
             if (!known && required)
                 LOG_WARNING("RM", "Action '%s/%s' requires argument '%s' this caller does not know",
-                            deviceName.c_str(), resource->name_.c_str(), remoteName.c_str());
+                            deviceName.c_str(), resource->name_.c_str(), remoteName);
         }
     }
+}
 #endif // NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
 
-    // Always, and independently of verification: a handler asked for every
-    // device's manifest, not for this manager's opinion of it.
-    if (manifestHandler_ != nullptr)
-        manifestHandler_(deviceName, message);
-}
-
-// Validate, then deliver. The handler is promised a payload that is well formed
-// and in an encoding this build understands, so it never has to re-check either.
-// An empty payload is a retained withdrawal and is passed straight through,
-// matching how the JSON manifest reports the same thing.
+// Validate, then verify, then deliver. This is the manifest the manager itself
+// reads: verification compares against the compact form because that is the
+// cheap one, and on a real 20-resource manifest it is 375 bytes against 1753.
+// The saving is a parse, not just a transfer -- and it lands during the connect
+// burst, when retained manifests replay while the TLS session is still holding
+// its record buffers, which is the exact moment this device has least to spare.
+//
+// The handler is promised a payload that is well formed and in an encoding this
+// build understands, so it never has to re-check either. An empty payload is a
+// retained withdrawal and is passed straight through, matching how the JSON
+// manifest reports the same thing.
 void ResourcesManager::applyEncodedManifest(const String &deviceName, const String &message)
 {
     if (message.length() > MaxManifestLength)
@@ -1371,9 +1449,12 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
                     deviceName.c_str(), (unsigned)message.length());
         return;
     }
+    // A withdrawal removes declarations and nothing else: values keep whatever
+    // freshness their own /state gave them, so there is nothing to verify.
     if (message.length() == 0)
     {
-        encodedManifestHandler_(deviceName, message);
+        if (encodedManifestHandler_ != nullptr)
+            encodedManifestHandler_(deviceName, message);
         return;
     }
 
@@ -1394,7 +1475,15 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
                     deviceName.c_str(), (unsigned)encoding, (unsigned)ManifestEncodingVersion);
         return;
     }
-    encodedManifestHandler_(deviceName, message);
+
+#if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
+    verifyAgainstManifest(deviceName, root[2].as<JsonArrayConst>());
+#endif
+
+    // Independently of verification: a handler asked for every device's
+    // manifest, not for this manager's opinion of it.
+    if (encodedManifestHandler_ != nullptr)
+        encodedManifestHandler_(deviceName, message);
 }
 
 bool ResourcesManager::handleIngressMessage(const String &topic, const String &message)
@@ -1406,38 +1495,37 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     if (!DeviceIdentity::validDeviceName(deviceName))
         return false;
     const String path = topic.substring(firstSlash + 1);
-    if (path == "resources")
+    // Manifests are a sibling subtree of resource, not a member of it, so the
+    // two are told apart by prefix and never by counting segments.
+    if (path == "manifest")
+    {
+        // Consumed only when a handler wants every device's manifest. The
+        // manager's own verification reads the compact form now, so nothing
+        // inside the library needs this topic; without a handler it falls
+        // through to the project callback rather than being parsed here.
+        if (manifestHandler_ == nullptr || deviceName == gDeviceIdentity.getDeviceName())
+            return false;
+        applyOtherDeviceManifest(deviceName, message);
+        return true;
+    }
+    if (path == "manifest/msgpack")
     {
         // Consumed when verification wants it for a resource bound from that
         // device, or when a handler wants every manifest; whether the payload
         // then turns out to be valid does not change that. This device's own
         // manifest is not other-device traffic and is left alone.
-        //
-        // With verification compiled out the first reason disappears, and a
-        // manifest nobody asked for falls through to the project callback like
-        // any other unconsumed topic rather than being parsed here.
         const bool wantedForVerification =
             verifiesRemoteManifests() && remoteOwnerInUse(deviceName, nullptr);
         if (deviceName == gDeviceIdentity.getDeviceName() ||
-            (!wantedForVerification && manifestHandler_ == nullptr))
-            return false;
-        applyOtherDeviceManifest(deviceName, message);
-        return true;
-    }
-    if (path == "resources/msgpack")
-    {
-        // Consumed only when something asked for the compact form. Without a
-        // handler this is not our traffic and falls through to the project
-        // callback, exactly as any other unrecognised topic does.
-        if (encodedManifestHandler_ == nullptr || deviceName == gDeviceIdentity.getDeviceName())
+            (!wantedForVerification && encodedManifestHandler_ == nullptr))
             return false;
         applyEncodedManifest(deviceName, message);
         return true;
     }
-    if (!path.startsWith("resources/"))
+    if (!path.startsWith("resource/"))
         return false;
 
-    const String tail = path.substring(sizeof("resources/") - 1);
+    const String tail = path.substring(sizeof("resource/") - 1);
     const int finalSlash = tail.indexOf('/');
     if (finalSlash <= 0)
         return false;

@@ -87,7 +87,7 @@ public:
     /// @brief Install a handler for every device's manifest, and subscribe to
     /// them. Setting one is the request: a handler wants the whole network, not
     /// only the devices this one happens to bind resources from, so the manager
-    /// takes "+/resources" on its behalf and gives it back when the handler is
+    /// takes "+/manifest" on its behalf and gives it back when the handler is
     /// cleared. Independent of NM_ENABLE_REMOTE_RESOURCE_VERIFICATION, which
     /// governs only the manager's own checking of its own Remote resources.
     ///
@@ -105,9 +105,9 @@ public:
     using EncodedManifestHandler = void (*)(const String &deviceName, const String &encoded);
 
     /// @brief Install a handler for every device's compact manifest, and
-    /// subscribe to them. Nothing subscribes to or decodes the MessagePack form
-    /// unless one is set -- the library's own verification still reads the JSON
-    /// manifest -- so this is what turns the compact form on for a reader.
+    /// subscribe to them. This is the encoding the manager itself reads, so a
+    /// build with verification on is already decoding the manifests of the
+    /// devices it binds from; a handler widens that to the whole network.
     ///
     /// The payload handed over is the raw MessagePack, already checked to be
     /// well formed and to carry an encoding version this build understands. A
@@ -184,6 +184,7 @@ private:
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
     bool publishManifest();
+    bool publishManifest(ManifestFormat format);
     // One builder per encoding rather than one with branches: the JSON form is
     // frozen and the compact form is free to change, and keeping them apart is
     // what stops a change to the second quietly altering the first.
@@ -201,6 +202,17 @@ private:
     bool publishState(const NetValueResource &resource);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
+#if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
+    /// @brief Compare every Remote resource bound from one device against what
+    /// that device declares, reading the compact manifest in place.
+    ///
+    /// Positions and enum values are read directly rather than expanded back
+    /// into named keys first. Expanding would cost about what parsing the JSON
+    /// manifest cost, which is the expense this moved off the connect burst;
+    /// comparing integers also removes the String built per field per resource
+    /// that the named comparison needed.
+    void verifyAgainstManifest(const String &deviceName, JsonArrayConst items);
+#endif
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);
 

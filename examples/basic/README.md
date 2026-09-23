@@ -36,15 +36,15 @@ symlink://../..
 Once connected, inspect:
 
 ```text
-<device>/resources
-<device>/resources/uptime_s/state
-<device>/resources/brightness/state
+<device>/manifest
+<device>/resource/uptime_s/state
+<device>/resource/brightness/state
 ```
 
 Request a brightness change:
 
 ```text
-<device>/resources/brightness/set
+<device>/resource/brightness/set
 ```
 
 with payload:
@@ -56,7 +56,7 @@ with payload:
 Invoke:
 
 ```text
-<device>/resources/identify/invoke
+<device>/resource/identify/invoke
 ```
 
 with an empty payload.

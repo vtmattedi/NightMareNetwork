@@ -23,10 +23,16 @@ No space after `>` selects an internal ResourceManager operation:
 
 ```text
 >list
+>manifest [publish] [json|msgpack]
 >raw <topic> [payload]
 ```
 
 `>list` returns the manager's currently bound Resources as JSON.
+
+`>manifest json` returns the readable manifest. `>manifest msgpack` republishes
+the retained compact manifest and returns `Republished to MQTT.` because raw
+MessagePack is not useful on a text command response. `publish` explicitly
+requests MQTT publication; with no format it republishes both encodings.
 
 `>raw` sends the supplied MQTT-shaped topic and opaque payload through `ResourcesManager::handleIngressMessage()`.
 
@@ -34,8 +40,8 @@ Examples:
 
 ```text
 >list
->raw bedroom-ac/resources/power/set true
->raw weather-node/resources/temperature/state 23.5
+>raw bedroom-ac/resource/power/set true
+>raw weather-node/resource/temperature/state 23.5
 ```
 
 ### Bound Resource operations
@@ -281,6 +287,9 @@ JOB
 INFO
     requires NM_ENABLE_TELEMETRY
 
+HW
+    requires NM_ENABLE_TELEMETRY
+
 MQTT
     requires NM_ENABLE_MQTT
 
@@ -386,7 +395,6 @@ Query one section:
 ```text
 INFO IDENTITY
 INFO HARDWARE
-INFO HWCONNECTIONS
 INFO BUILD
 INFO BOOT
 INFO SYSTEM
@@ -414,6 +422,17 @@ NETWORK
 are MQTT documents. The other section names are query-only.
 
 See [Status, info, and telemetry](status-info.md).
+
+## HW
+
+```text
+HW [PUBLISH] [JSON|MSGPACK]
+```
+
+`HW` or `HW JSON` returns the readable topology. `HW PUBLISH` republishes both
+retained encodings. Selecting `MSGPACK`, with or without `PUBLISH`, republishes
+`<device>/hardware/msgpack` and returns `Republished to MQTT.` rather than raw
+binary on the text command transport.
 
 ## TIME
 

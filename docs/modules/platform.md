@@ -211,17 +211,22 @@ The model is:
 ```cpp
 struct Connection
 {
-    const char *name;
     int16_t pin;
+    uint8_t device;
+    const char *signal;
+    uint8_t bus;
+    SignalType type;
     Direction direction;
     Pull pull;
     bool activeLow;
-    const char *note;
+    Resistor resistor;
 };
 
 struct Profile
 {
-    const char *boardName;
+    const char *boardId;
+    const Device *devices;
+    size_t deviceCount;
     const Connection *connections;
     size_t connectionCount;
 };
@@ -244,17 +249,21 @@ Pulls:
 None
 Up
 Down
-External
+ExternalUp
+ExternalDown
 ```
 
 If no `NightMareHardware.h` exists, NightMare returns:
 
 ```text
-boardName:   unspecified
+boardId:     unspecified
+devices:     none
 connections: none
 ```
 
-The profile feeds INFO/HARDWARE and INFO/HWCONNECTIONS.
+The board ID also feeds INFO/HARDWARE. The complete topology is published at
+`<device>/hardware` and `<device>/hardware/msgpack` and is available through
+the `HW` command.
 
 ## `startNightMareESP()`
 

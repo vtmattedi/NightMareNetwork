@@ -74,19 +74,22 @@
 #endif
 // Whether a bound Remote resource also fetches and checks its owner's manifest.
 //
-// 1: a Remote resource subscribes to the owner's /resources as well as to
-//    /state, parses the manifest and reports kind/type/access/argument
-//    disagreements. Diagnostics only -- it has never gated traffic.
+// 1: a Remote resource subscribes to the owner's <device>/manifest/msgpack as
+//    well as to /state, decodes the compact manifest and reports
+//    kind/type/access/argument disagreements. Diagnostics only -- it has never
+//    gated traffic.
 //
 // 0: a Remote resource subscribes to /state and nothing else. No manifest
 //    subscription, no manifest parsing, no comparison. Everything else behaves
 //    identically, because a manifest describes and /state tells the truth.
 //
-// Worth turning off on a device that is tight for memory. Verification costs a
-// subscription per remote owner and a JSON parse of whatever arrives on it, and
-// both land during the connect burst, when retained manifests are replayed and
-// the TLS session is still holding its record buffers. A manifest handler set
-// with setManifestHandler() is independent of this and still works.
+// Worth turning off on a device that is tight for memory, though it costs much
+// less than it did: verification reads the compact manifest, which is roughly a
+// fifth of the JSON one to transfer and to parse. What remains is a
+// subscription per remote owner and that parse, landing during the connect
+// burst, when retained manifests are replayed and the TLS session is still
+// holding its record buffers. Manifest handlers are independent of this and
+// still work either way.
 #ifndef NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
 #define NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
 #endif

@@ -5,9 +5,12 @@ namespace NMHardware
 {
 inline Profile projectProfile()
 {
-    static const Connection pins[] = {
-        {"button", 0, Direction::Input, Pull::Up, true, "test pin"},
+    static const Device devices[] = {
+        {"button", "momentary-switch"},
     };
-    return {"ESP32 DevKit test board", pins, 1};
+    static const Connection pins[] = {
+        {0, 0, "pressed", NoBus, SignalType::Gpio, Direction::Input, Pull::Up, true},
+    };
+    return {"esp32-devkit:test", devices, 1, pins, 1};
 }
 }

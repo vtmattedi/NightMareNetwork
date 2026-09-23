@@ -85,8 +85,8 @@ void setup()
     gResourcesManager.bindResource(&remoteState);
     gResourcesManager.bindResource(&managedAction);
     gResourcesManager.bindResource(&remoteAction);
-    gResourcesManager.handleIngressMessage("outside-node/resources/temperature/state", "18");
-    gResourcesManager.handleIngressMessage("inside-node/resources/temperature/state", "24");
+    gResourcesManager.handleIngressMessage("outside-node/resource/temperature/state", "18");
+    gResourcesManager.handleIngressMessage("inside-node/resource/temperature/state", "24");
 
     const ActionResult list = gResourcesManager.executeCommand("list");
     const ActionResult ambiguous = gResourcesManager.executeCommand(" temperature");
@@ -115,6 +115,27 @@ void setup()
                         timezoneQuery.result && timezoneQuery.response.indexOf(timezone) >= 0 &&
                             timezoneSet.result && gDeviceIdentity.getTimezone() == timezone &&
                             !invalidAdopt.result);
+    const NMHardware::Resistor r330(330);
+    const NMHardware::Resistor r3k3("3k3");
+    const NMHardware::Resistor r4k7("4.7k");
+    const NMHardware::Resistor rSub("0.33");
+    const NMHardware::Resistor rSubNumeric(0.33);
+    const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
+    const TelemetryResult info = Telemetry.getInfo();
+    const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
+    const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
+    SystemState.setFlag("hardware_topology",
+                        sizeof(NMHardware::Resistor) == 2 &&
+                            r330.firstDigit() == 3 && r330.secondDigit() == 3 &&
+                            r330.exponent() == 2 && r3k3.exponent() == 3 &&
+                            r4k7.firstDigit() == 4 && r4k7.secondDigit() == 7 &&
+                            r4k7.exponent() == 3 &&
+                            rSub.exponent() == -1 && rSubNumeric.exponent() == -1 &&
+                            hardware.valid &&
+                            hardware.data.indexOf("esp32-devkit:test") >= 0 &&
+                            hardware.data.indexOf("\"connections\"") >= 0 && info.valid &&
+                            info.data.indexOf("hwconnections") < 0 &&
+                            hardwareCommand.result && !removedConnections.result);
     Telemetry.start();
 }
 

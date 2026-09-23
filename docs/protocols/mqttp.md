@@ -254,7 +254,7 @@ Broadcast console is therefore useful for fan-out commands, but it is not one co
 Raw Resource Action MQTT still uses:
 
 ```text
-<device>/resources/<action>/invoke
+<device>/resource/<action>/invoke
 ```
 
 and remains fire-and-forget.
