@@ -234,8 +234,9 @@ connection = [pin, deviceIndex, signal, busIndex,
 Version 2 makes every physical board or module a first-class topology entry.
 `boards[0]` is the main board. A board `id` identifies that instance in this
 topology, while `model` selects its stable board/footprint definition. Every
-device belongs to a board by numeric index, so multiple instances of the same
-board model remain distinct.
+integrated device belongs to a board by numeric index, so multiple instances
+of the same board model remain distinct. Standalone components such as wired
+probes use `255` in MessagePack and `null` in readable JSON.
 
 The readable JSON form names the same fields:
 
@@ -248,13 +249,15 @@ The readable JSON form names the same fields:
   ],
   "devices": [
     {"id": "display", "model": "ST7796", "board": 0},
-    {"id": "pcf", "model": "PCF8574", "board": 1}
+    {"id": "pcf", "model": "PCF8574", "board": 1},
+    {"id": "temperature", "model": "DS18B20", "board": null}
   ],
   "connections": []
 }
 ```
 
-`255` means no device or no bus. Numeric enums are append-only:
+`255` means no owning board, no connection device, or no bus in the applicable
+positional field. Numeric enums are append-only:
 
 ```text
 direction:  0 input, 1 output, 2 bidirectional, 3 power, 4 ground, 5 bus

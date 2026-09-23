@@ -137,6 +137,7 @@ void setup()
                             hardware.data.indexOf("button-board:test") >= 0 &&
                             hardware.data.indexOf("\"boards\"") >= 0 &&
                             hardware.data.indexOf("\"board\":1") >= 0 &&
+                            hardware.data.indexOf("\"board\":null") >= 0 &&
                             hardware.data.indexOf("\"connections\"") >= 0 &&
                             packedHardware.valid && packedHardware.data.length() > 0 && info.valid &&
                             info.data.indexOf("hwconnections") < 0 &&

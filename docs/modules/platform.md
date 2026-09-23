@@ -219,7 +219,7 @@ struct Device
 {
     const char *id;
     const char *model;
-    uint8_t board;
+    uint8_t board; // board index, or NoBoard for a standalone component
 };
 
 struct Connection
@@ -278,6 +278,10 @@ connections: none
 The model of `boards[0]` also feeds INFO/HARDWARE. The complete topology is
 published at `<device>/hardware` and `<device>/hardware/msgpack` and is
 available through the `HW` command.
+
+Use `NoBoard` for a sensor, termination, or other discrete component that is
+physically connected to the topology but is not integrated into a declared
+board or module.
 
 ## `startNightMareESP()`
 

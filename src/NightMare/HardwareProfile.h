@@ -5,6 +5,7 @@
 namespace NMHardware
 {
 constexpr uint8_t TopologyVersion = 2;
+constexpr uint8_t NoBoard = 0xff;
 constexpr uint8_t NoDevice = 0xff;
 constexpr uint8_t NoBus = 0xff;
 
@@ -89,6 +90,8 @@ struct Device
 {
     const char *id;
     const char *model;
+    // NoBoard means a standalone component connected to the topology rather
+    // than one physically integrated into a board or module.
     uint8_t board;
 };
 
@@ -133,10 +136,11 @@ struct Profile
  *   connection := [pin, deviceIndex, signal, busIndex, signalType,
  *                  direction, pull, activeLow, resistor?]
  *
- * boards[0] is the main board. Connection device and bus indices use 0xff for
- * "none". Enums and array fields are append-only. The optional resistor is the
- * two-byte value returned by Resistor::encoded(). Rendering coordinates,
- * artwork and icons never belong in this profile.
+ * boards[0] is the main board. A device board index of 0xff means the component
+ * is standalone. Connection device and bus indices also use 0xff for "none".
+ * Enums and array fields are append-only. The optional resistor is the two-byte
+ * value returned by Resistor::encoded(). Rendering coordinates, artwork and
+ * icons never belong in this profile.
  */
 
 // If the project has no NightMareHardware.h, this returns one "main" board

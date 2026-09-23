@@ -11,7 +11,7 @@ inline Profile projectProfile()
         {"main", BOARD_NAME},
     };
     static const Device devices[] = {
-        {"temperature", "DS18B20", 0},
+        {"temperature", "DS18B20", NoBoard},
     };
     static const Connection connections[] = {
         {PIN_ONE_WIRE, 0, "data", 0, SignalType::OneWire,

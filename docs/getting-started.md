@@ -219,7 +219,9 @@ connections: none
 
 `boards[0]` is always the main board. Board IDs identify instances in this
 topology; board models select stable board or footprint definitions. A device's
-numeric board field identifies the physical board that owns it.
+numeric board field identifies the physical board that owns it. Use `NoBoard`
+for a discrete sensor or other component connected to, but not physically part
+of, one of those boards.
 
 ## Declare Resources
 

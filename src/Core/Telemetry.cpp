@@ -95,7 +95,8 @@ namespace
             (profile.connectionCount != 0 && profile.connections == nullptr))
             return false;
         for (size_t i = 0; i < profile.deviceCount; ++i)
-            if (profile.devices[i].board >= profile.boardCount)
+            if (profile.devices[i].board != NMHardware::NoBoard &&
+                profile.devices[i].board >= profile.boardCount)
                 return false;
         for (size_t i = 0; i < profile.connectionCount; ++i)
         {
@@ -208,7 +209,10 @@ void TelemetryService::buildNamedHardware(JsonDocument &doc) const
         JsonObject item = devices.add<JsonObject>();
         item["id"] = profile.devices[i].id != nullptr ? profile.devices[i].id : "";
         item["model"] = profile.devices[i].model != nullptr ? profile.devices[i].model : "";
-        item["board"] = profile.devices[i].board;
+        if (profile.devices[i].board == NMHardware::NoBoard)
+            item["board"] = nullptr;
+        else
+            item["board"] = profile.devices[i].board;
     }
     JsonArray connections = doc["connections"].to<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)

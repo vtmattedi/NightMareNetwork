@@ -1109,6 +1109,8 @@ struct Device
     uint8_t board;
 };
 
+constexpr uint8_t NoBoard = 0xff;
+
 struct Board
 {
     const char *id;
