@@ -141,6 +141,9 @@ private:
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
     bool publishManifest();
+    // Counted from the resources bound here, so publishing a small manifest
+    // does not ask for the protocol's 16KB ceiling.
+    size_t manifestBuildPool() const;
     bool serializeManifest(String &payload) const;
     bool publishState(const NetValueResource &resource);
     ActionResult listResources() const;

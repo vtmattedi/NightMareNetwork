@@ -4,6 +4,9 @@
 #include "DeviceIdentity.h"
 
 #include <ArduinoJson.h>
+#if NM_PLATFORM_ESP32
+#include <esp_heap_caps.h>
+#endif
 
 namespace
 {
@@ -11,6 +14,26 @@ constexpr size_t MaxSegmentLength = 64;
 constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
 constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
 constexpr int ManifestVersion = 2;
+
+/// @brief The parse pool a manifest of this many bytes needs.
+///
+/// MaxManifestLength is the protocol's ceiling on what may arrive, not a
+/// sensible thing to hand the allocator: a typical manifest is one or two KB,
+/// and asking for 16KB of contiguous heap to parse it is most of a PSRAM-less
+/// device's largest free block. It is also asked for at the worst possible
+/// moment -- manifests arrive on connect, while the TLS session still holds its
+/// record buffers -- and a failure there is indistinguishable, from the log,
+/// from a device publishing something genuinely broken.
+///
+/// Deserializing from a String copies every key and string value into the pool
+/// on top of the parsed structure, so the pool has to be larger than the text.
+/// Three times plus a fixed margin covers the densest manifest shape the
+/// protocol allows with room to spare, and the ceiling still applies.
+size_t manifestParsePool(size_t payloadLength)
+{
+    const size_t wanted = payloadLength * 3 + 1024;
+    return wanted > MaxManifestLength ? MaxManifestLength : wanted;
+}
 
 bool commandSpace(char c)
 {
@@ -549,9 +572,50 @@ bool ResourcesManager::publishManifest()
     return publisher_->publish(resolveResourceManifestTopic(thisDevice), payload, true);
 }
 
+// Unlike a manifest arriving from elsewhere, this one is built from resources
+// already in hand, so its pool is counted rather than estimated. A device that
+// implements nothing -- a dashboard, say, which is all Remote resources -- then
+// asks for a few hundred bytes instead of 16KB to publish an empty array, and
+// it asks on the connect where that block is scarcest.
+//
+// Only the resource names cost pool text. Every other string written below is a
+// literal, and ArduinoJson stores a const char* by pointer rather than copying
+// it. doc.overflowed() below still backs this up.
+size_t ResourcesManager::manifestBuildPool() const
+{
+    size_t owned = 0;
+    size_t slots = JSON_OBJECT_SIZE(2); // version + resources
+    size_t text = 0;
+
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (!resource.isOwned())
+            continue;
+        owned++;
+        text += resource.name_.length() + 1;
+
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            slots += JSON_OBJECT_SIZE(4); // name, kind, access, type
+            continue;
+        }
+        const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+        const size_t args = action.argumentCount();
+        slots += JSON_OBJECT_SIZE(3) +      // name, kind, arguments
+                 JSON_ARRAY_SIZE(args) +
+                 args * JSON_OBJECT_SIZE(3); // name, type, required
+    }
+    slots += JSON_ARRAY_SIZE(owned);
+
+    // Margin for the pool's own alignment and bookkeeping.
+    const size_t wanted = slots + text + 256;
+    return wanted > MaxManifestLength ? MaxManifestLength : wanted;
+}
+
 bool ResourcesManager::serializeManifest(String &payload) const
 {
-    DynamicJsonDocument doc(MaxManifestLength);
+    DynamicJsonDocument doc(manifestBuildPool());
     doc["version"] = ManifestVersion;
     JsonArray items = doc.createNestedArray("resources");
     for (int i = 0; i < resourceCount_; ++i)
@@ -1012,8 +1076,36 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         return;
     }
 
-    DynamicJsonDocument doc(MaxManifestLength);
-    if (deserializeJson(doc, message) || !doc["resources"].is<JsonArray>())
+    const size_t pool = manifestParsePool(message.length());
+    DynamicJsonDocument doc(pool);
+    const DeserializationError error = deserializeJson(doc, message);
+    // Running out of room is reported apart from bad data on purpose. They have
+    // nothing to do with each other -- one is this device's problem and the
+    // other is the sender's -- and a single "malformed" for both sends whoever
+    // reads the log to inspect a manifest that was perfectly good.
+    if (error == DeserializationError::NoMemory)
+    {
+        // The heap is read here rather than left to a periodic sample: this
+        // runs on the MQTT task, in the middle of a burst, and by the time
+        // anything else looks the moment has passed. An allocation that fails
+        // while the largest free block is reportedly far bigger than it means
+        // the caps the allocator uses and the caps being measured are not the
+        // same pool -- which is worth seeing, not inferring.
+        if (doc.capacity() == 0)
+            LOG_WARNING("RM", "Out of memory for the manifest from '%s': could not allocate "
+                              "%u bytes to parse %u bytes of JSON "
+                              "(heap free=%u largest=%u, 8bit free=%u largest=%u)",
+                        deviceName.c_str(), (unsigned)pool, (unsigned)message.length(),
+                        (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        else
+            LOG_WARNING("RM", "Manifest from '%s' did not fit: %u bytes of JSON needed more "
+                              "than a %u byte pool",
+                        deviceName.c_str(), (unsigned)message.length(), (unsigned)pool);
+        return;
+    }
+    if (error || !doc["resources"].is<JsonArray>())
     {
         // Not valid data, so the handler, which is promised only valid data, is not called.
         LOG_WARNING("RM", "Ignored malformed manifest from '%s'", deviceName.c_str());
