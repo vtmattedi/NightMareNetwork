@@ -83,9 +83,12 @@ hardwareSignature
 
 deviceId
     raw machine-oriented hardware ID
+
+timezone
+    persisted POSIX timezone used for local-time presentation
 ```
 
-It also owns the persistence state needed for adoption and old-identity cleanup.
+It also owns timezone application plus the persistence state needed for timezone configuration, adoption, and old-identity cleanup.
 
 It does not own MQTT publication or Resource cleanup. That prevents identity storage from becoming coupled to the transport implementation.
 
@@ -342,6 +345,7 @@ Binding Resources before framework startup matters because pending old-identity 
 
 ```text
 DeviceIdentity.begin()
+    loads and applies the persisted timezone
 
 Scheduler.begin(...)
     TASK or MANUAL according to configuration

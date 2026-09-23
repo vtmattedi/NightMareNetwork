@@ -65,7 +65,7 @@ NightMare uses retained messages for current state and current description.
 
 | Topic | Retained | Purpose |
 |---|---:|---|
-| `<device>/status` | yes | identity + online/offline presence |
+| `<device>/status` | yes | name, hardware signature, timezone + online/offline presence |
 | `<device>/info` | yes | boot-scoped/static device information |
 | `<device>/telemetry/system` | yes | last published runtime system telemetry |
 | `<device>/telemetry/network` | yes | last published network bookkeeping |

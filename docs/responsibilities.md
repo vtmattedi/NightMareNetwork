@@ -22,6 +22,7 @@ It provides:
 - the current adoptable device name,
 - a stable physical hardware signature,
 - a raw device ID,
+- a persisted POSIX timezone for local-time presentation,
 - topic construction relative to the current device,
 - address locking,
 - adoption state,

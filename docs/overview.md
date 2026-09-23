@@ -56,7 +56,7 @@ A NightMare device is built from a few cooperating pieces:
 
 ```text
 DeviceIdentity
-    names the device on the network
+    names the device and owns its local-time timezone
 
 Resources
     describe application capabilities and state
@@ -113,11 +113,12 @@ The manifest describes Resources. Retained `/state` is the authoritative freshne
 
 ## Identity and presence
 
-A device has three related identities:
+A device identity exposes four related values:
 
 - a logical device name used in MQTT topics,
 - a stable hardware signature generated from the physical board,
-- a raw machine-oriented device ID.
+- a raw machine-oriented device ID,
+- a persisted POSIX timezone used for local-time presentation.
 
 The logical name may be adopted. The hardware signature does not change when the device is renamed.
 
@@ -127,7 +128,7 @@ Presence is published separately from application state:
 <device>/status
 ```
 
-The status document is retained and has the same JSON shape for online state, graceful shutdown, and MQTT Last Will.
+The retained status document carries the logical name, hardware signature, timezone, and presence. It has the same JSON shape for online state, graceful shutdown, and MQTT Last Will.
 
 Resource freshness does not depend on status. A device being online and a particular Resource having fresh state are different facts.
 

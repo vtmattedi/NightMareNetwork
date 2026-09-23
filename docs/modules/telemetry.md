@@ -141,7 +141,10 @@ For example, `HWCONNECTIONS` returns the JSON array itself.
 name
 hardware
 id
+timezone
 ```
+
+`timezone` is the active persisted POSIX timezone. A successful timezone command refreshes the retained INFO document when MQTT is connected.
 
 ### Hardware
 

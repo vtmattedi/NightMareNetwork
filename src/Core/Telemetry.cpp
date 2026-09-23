@@ -128,6 +128,7 @@ void TelemetryService::appendIdentity(JsonObject dst) const
     dst["name"] = gDeviceIdentity.getDeviceName();
     dst["hardware"] = gDeviceIdentity.getHardwareSignature();
     dst["id"] = gDeviceIdentity.getDeviceId();
+    dst["timezone"] = gDeviceIdentity.getTimezone();
 }
 
 void TelemetryService::appendHardware(JsonObject dst) const

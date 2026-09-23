@@ -46,7 +46,7 @@ char brokerUri[192] = {};
 char willTopic[96] = {};
 // The offline status JSON. Also what a graceful stop publishes, so the broker
 // ends up with the same retained payload however the device went away.
-char willMessage[256] = {};
+char willMessage[512] = {};
 char clientId[48] = {};
 const char *rootCa = ROOT_CA;
 

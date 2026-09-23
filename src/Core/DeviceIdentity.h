@@ -16,7 +16,8 @@ struct PendingIdentityCleanup
     uint8_t pendingFlags = 0;
 };
 
-// Owns this device's MQTT address. Namespaces are not part of the current topic format.
+// Owns this device's MQTT address and persisted identity configuration.
+// Namespaces are not part of the current topic format.
 //
 // Adopting a new name is a migration, not a rename: the new name is persisted,
 // the old one is remembered along with what still has to be cleaned up under
@@ -35,6 +36,8 @@ public:
     /// generated from the hardware, identical to the default device name, and
     /// never changed by adoption. It says which physical board is behind a name.
     const String &getHardwareSignature();
+    /// @brief The POSIX timezone used for local-time presentation.
+    const String &getTimezone();
     bool isDevice(const String &topic);
     bool relativeTopic(const String &topic, String &relative);
     String topic(const String &relative);
@@ -43,6 +46,13 @@ public:
     /// @brief A usable device name: a valid topic segment that is not the
     /// reserved broadcast name "all".
     static bool validDeviceName(const String &name);
+
+    /// @brief A non-empty printable POSIX timezone string, up to 128 characters.
+    static bool validTimezone(const String &timezone);
+
+    /// @brief Persists and immediately applies a POSIX timezone using TZ/tzset.
+    /// Epoch timestamps remain UTC-based; only local-time presentation changes.
+    bool setTimezone(const String &timezone);
 
     /// @brief Persists newName as this device's identity and records the current
     /// one for cleanup. Once the address is locked the running firmware keeps
@@ -68,6 +78,7 @@ private:
     String deviceName_;
     String deviceId_;
     String hardwareSignature_;
+    String timezone_;
     bool initialized_ = false;
     bool addressLocked_ = false;
     String pendingOldName_;

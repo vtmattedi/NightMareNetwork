@@ -31,7 +31,7 @@ NightMare::Time::year(epoch);
 
 ## Local formatting
 
-Human-facing formatting uses the process `TZ` setting:
+Human-facing formatting uses the process `TZ` setting owned and applied by `DeviceIdentity`:
 
 ```cpp
 String NightMare::Time::timestampToDateString(
@@ -74,7 +74,7 @@ This returns the next local occurrence of `HH:MM`, or `0` if the clock is invali
 
 ## Timezone and NTP configuration
 
-When SNTP starts, NightMare uses an existing process `TZ` value if one is already configured; otherwise it uses:
+`DeviceIdentity::begin()` loads the persisted timezone, applies it to the process, and falls back to:
 
 ```cpp
 NM_TIMEZONE
@@ -103,6 +103,15 @@ time.google.com
 ```
 
 Projects can override these values in `NightMareConfig.h`.
+
+The runtime identity API is:
+
+```cpp
+gDeviceIdentity.getTimezone();
+gDeviceIdentity.setTimezone("EST5EDT,M3.2.0,M11.1.0");
+```
+
+The setter persists and applies the timezone immediately. A timezone is a non-empty printable POSIX `TZ` string up to 128 characters.
 
 ## Automatic SNTP synchronization
 
@@ -185,6 +194,16 @@ uptime_ms
 ```
 
 `valid` reports whether the wall clock is usable. `synced` is true only when the clock is valid and NightMare has recorded a synchronization event. `local` uses the configured process timezone.
+
+Timezone has its own query and mutation commands:
+
+```text
+TIMEZONE
+TIMEZONE SET <posix-tz>
+CHANGE TIMEZONE <posix-tz>
+```
+
+Quote the timezone when it contains spaces. The response is JSON containing the active `timezone`.
 
 ## Relationship to Scheduler
 

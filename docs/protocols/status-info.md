@@ -41,6 +41,7 @@ Its JSON shape is always:
 {
   "name": "bedroom-ac",
   "hardware": "Esp32-nm-6ca172e0",
+  "timezone": "<-03>3",
   "online": true
 }
 ```
@@ -53,6 +54,9 @@ name
 
 hardware
     stable hardware signature of the physical board
+
+timezone
+    persisted POSIX timezone used for local-time presentation
 
 online
     current presence state represented by this publication
@@ -109,6 +113,7 @@ while status still reports:
 {
   "name": "bedroom-ac",
   "hardware": "Esp32-nm-6ca172e0",
+  "timezone": "<-03>3",
   "online": true
 }
 ```
@@ -142,7 +147,8 @@ A representative structure is:
   "identity": {
     "name": "bedroom-ac",
     "hardware": "Esp32-nm-6ca172e0",
-    "id": "0011223344556677"
+    "id": "0011223344556677",
+    "timezone": "<-03>3"
   },
   "hardware": {
     "board": "ESP32-C3 SuperMini rev1",
@@ -171,6 +177,7 @@ Exact values depend on the board and build.
 name
 hardware
 id
+timezone
 ```
 
 `name` is the current logical identity.
@@ -178,6 +185,8 @@ id
 `hardware` is the stable hardware signature.
 
 `id` is the raw machine-oriented device ID.
+
+`timezone` is the persisted POSIX `TZ` string. Changing it refreshes `/status` and `/info` while MQTT is connected.
 
 ## Hardware section
 

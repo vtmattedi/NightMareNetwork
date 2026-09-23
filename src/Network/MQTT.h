@@ -41,7 +41,8 @@ bool MQTT_SetDiscovery(bool enabled);
 bool MQTT_DiscoveryEnabled();
 
 /// @brief The only shape <device>/status ever has, retained:
-///   {"name":"bedroom-ac","hardware":"Esp32-nm-6ca172e0","online":true}
+///   {"name":"bedroom-ac","hardware":"Esp32-nm-6ca172e0",
+///    "timezone":"UTC0","online":true}
 /// Used for going online, graceful shutdown, the MQTT last will and cleaning up
 /// a previous identity, so every observer parses one format. "hardware" is
 /// always this board's signature, whichever name is being reported.

@@ -1,13 +1,13 @@
 ---
 title: Device identity
-description: Logical names, physical hardware signatures, adoption, and old-identity cleanup.
+description: Logical names, physical hardware signatures, timezone, adoption, and old-identity cleanup.
 section: modules
 order: 20
 ---
 
 # Device identity
 
-`DeviceIdentity` owns the address NightMare uses for this device on MQTT.
+`DeviceIdentity` owns the address NightMare uses for this device on MQTT and its persisted local-time timezone.
 
 The public singleton is:
 
@@ -15,7 +15,7 @@ The public singleton is:
 gDeviceIdentity
 ```
 
-Identity is intentionally split into three values because a logical network name and a physical board identity are not the same thing.
+Identity separates the logical network name, physical board identifiers, and local-time presentation because those values answer different questions.
 
 ## Device name
 
@@ -65,6 +65,7 @@ This is why status can identify both:
 {
   "name": "bedroom-ac",
   "hardware": "Esp32-nm-6ca172e0",
+  "timezone": "<-03>3",
   "online": true
 }
 ```
@@ -83,6 +84,28 @@ Use it where a low-level stable identifier is required.
 
 Do not treat it as the human-facing MQTT name.
 
+## Timezone
+
+```cpp
+const String &getTimezone();
+bool setTimezone(const String &timezone);
+static bool validTimezone(const String &timezone);
+```
+
+The timezone is a persisted POSIX `TZ` string. It is applied to the process with `setenv("TZ", ...)` and `tzset()`, so local formatting and local wall-clock calculations change immediately.
+
+Examples:
+
+```text
+UTC0
+<-03>3
+EST5EDT,M3.2.0,M11.1.0
+```
+
+`validTimezone()` accepts a non-empty printable string up to 128 characters. It checks the storage/wire boundary, not the semantic meaning of every POSIX timezone rule.
+
+Unix epoch values remain UTC-based.
+
 ## Initialization
 
 ```cpp
@@ -97,7 +120,8 @@ Initialization:
 4. loads the persisted logical name,
 5. validates it,
 6. falls back to the generated default when invalid,
-7. loads any pending identity-cleanup record.
+7. loads and applies the persisted timezone, falling back to `NM_TIMEZONE`,
+8. loads any pending identity-cleanup record.
 
 The getters call `begin()` internally, so explicit initialization is normally handled by the framework lifecycle.
 
@@ -278,12 +302,34 @@ The current implementation stores framework identity state in PersistentSettings
 
 ```text
 _device_name
+_timezone
 _pending_identity_cleanup
 ```
 
 These are implementation details.
 
 Applications should use the `DeviceIdentity` API rather than editing these keys directly.
+
+## Identity commands
+
+Adopt a logical name with either command spelling:
+
+```text
+ADOPT bedroom-ac
+CHANGE NAME bedroom-ac
+```
+
+Both use `beginAdoption()` and therefore preserve the normal migration and cleanup rules. The JSON response contains `name`, `active_name`, and `reboot_required`.
+
+Query or change timezone with:
+
+```text
+TIMEZONE
+TIMEZONE SET "EST5EDT,M3.2.0,M11.1.0"
+CHANGE TIMEZONE "EST5EDT,M3.2.0,M11.1.0"
+```
+
+Timezone changes are persisted and applied immediately. When MQTT is connected, NightMare refreshes retained `/status` and `/info` identity data.
 
 ## Pending cleanup
 
@@ -341,6 +387,7 @@ First:
 {
   "name": "<old-name>",
   "hardware": "<same-physical-board>",
+  "timezone": "<current-posix-timezone>",
   "online": false
 }
 ```

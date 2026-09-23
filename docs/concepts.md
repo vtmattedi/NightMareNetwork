@@ -23,7 +23,7 @@ The current topic format does not include namespace.
 
 ## Device identity
 
-NightMare keeps three different identity values because they answer different questions.
+NightMare keeps the logical name, physical identifiers, and local timezone together as device identity because they describe how a node is addressed and presented.
 
 ### Device name
 
@@ -54,6 +54,12 @@ It remains stable when the logical device name is adopted.
 The **device ID** is the raw machine-oriented hardware identifier.
 
 It is useful where a stable low-level identifier is needed without treating it as the human/network name.
+
+### Timezone
+
+The **timezone** is the persisted POSIX `TZ` string used for local-time presentation.
+
+It changes formatting and local wall-clock interpretation; Unix epoch values remain UTC-based.
 
 ## Resource
 
@@ -302,6 +308,7 @@ Its job is to answer:
 ```text
 Which logical device is this?
 Which physical board is behind that name?
+Which timezone does it use for local time?
 Is it online?
 ```
 

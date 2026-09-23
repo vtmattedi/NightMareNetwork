@@ -74,11 +74,19 @@ Examples include:
 
 ## Status is presence, not Resource freshness
 
-**Decision:** `<device>/status` contains minimal identity plus online/offline presence.
+**Decision:** `<device>/status` contains the logical name, hardware signature, configured timezone, and online/offline presence.
 
 **Reason:** device presence and individual Resource freshness are different facts. A device may be online while one Resource has never reported state, or retained Resource state may remain available after the device goes offline.
 
 **Consequence:** consumers must not infer Resource freshness solely from `status.online`.
+
+## Timezone belongs to device identity
+
+**Decision:** the configured POSIX timezone is persisted and applied by `DeviceIdentity`, and is reported in `/status` and the `/info` identity section.
+
+**Reason:** timezone is device-wide configuration that affects local-time presentation and wall-clock scheduling. Keeping it with identity gives commands, startup, status, and INFO one source of truth.
+
+**Consequence:** changing timezone applies immediately and refreshes retained identity documents when MQTT is connected. Epoch timestamps remain UTC-based.
 
 ## One status JSON shape for online, offline, and Last Will
 

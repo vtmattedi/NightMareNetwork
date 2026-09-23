@@ -106,6 +106,15 @@ void setup()
                                             !managedSensor.isRemote() && remoteSensor.isRemote() &&
                                             remoteSensor.hasValue() && !remoteSensor.isStale() &&
                                             resourceCommandsWork);
+    const String timezone = gDeviceIdentity.getTimezone();
+    const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");
+    const NightMareResults timezoneSet =
+        handleNightMareCommand(String("TIMEZONE SET \"") + timezone + "\"");
+    const NightMareResults invalidAdopt = handleNightMareCommand("CHANGE NAME all");
+    SystemState.setFlag("identity_commands",
+                        timezoneQuery.result && timezoneQuery.response.indexOf(timezone) >= 0 &&
+                            timezoneSet.result && gDeviceIdentity.getTimezone() == timezone &&
+                            !invalidAdopt.result);
     Telemetry.start();
 }
 

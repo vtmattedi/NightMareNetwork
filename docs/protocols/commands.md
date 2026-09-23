@@ -323,6 +323,56 @@ ESP.restart();
 
 This is an immediate device restart operation.
 
+## ADOPT and CHANGE NAME
+
+```text
+ADOPT <device-name>
+CHANGE NAME <device-name>
+```
+
+These are equivalent spellings for identity adoption. They call `DeviceIdentity::beginAdoption()` rather than editing settings directly, so validation, address locking, reboot behavior, and old-identity cleanup all remain in force.
+
+A successful response is JSON:
+
+```json
+{
+  "name": "bedroom-ac",
+  "active_name": "Esp32-nm-6ca172e0",
+  "reboot_required": true
+}
+```
+
+`active_name` is the name still in use by the current boot. When the address was already locked, `reboot_required` is true and the adopted name becomes active after reboot.
+
+A second adoption is rejected while cleanup from the previous identity remains pending.
+
+## TIMEZONE and CHANGE TIMEZONE
+
+Query the active timezone:
+
+```text
+TIMEZONE
+```
+
+Persist and immediately apply a POSIX timezone:
+
+```text
+TIMEZONE SET <posix-tz>
+CHANGE TIMEZONE <posix-tz>
+```
+
+The two mutation forms are equivalent. Timezones must be non-empty printable strings no longer than 128 characters. Quote an argument when needed by the general command grammar.
+
+The response is:
+
+```json
+{
+  "timezone": "EST5EDT,M3.2.0,M11.1.0"
+}
+```
+
+When MQTT is connected, a successful change refreshes retained `/status` and `/info` identity data. Epoch timestamps remain UTC-based.
+
 ## INFO
 
 Query the complete aggregate:

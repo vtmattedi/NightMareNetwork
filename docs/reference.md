@@ -41,6 +41,7 @@ bool begin();
 const String &getDeviceName();
 const String &getDeviceId();
 const String &getHardwareSignature();
+const String &getTimezone();
 
 bool isDevice(const String &topic);
 bool relativeTopic(const String &topic, String &relative);
@@ -49,6 +50,9 @@ String topic(const String &relative);
 void lockAddress();
 
 static bool validDeviceName(const String &name);
+static bool validTimezone(const String &timezone);
+
+bool setTimezone(const String &timezone);
 
 bool beginAdoption(const String &newName);
 

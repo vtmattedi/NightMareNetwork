@@ -37,14 +37,6 @@ namespace
 
 void introNightMareESP()
 {
-#if NM_ENABLE_SETTINGS
-    PersistentSettings.begin();
-    // Local wall jobs for the deployed Sao Paulo device.
-    setenv("TZ", PersistentSettings.get("ac_timezone", NM_TIMEZONE).c_str(), 1);
-#else
-    setenv("TZ", NM_TIMEZONE, 1);
-#endif
-    tzset();
     Serial.begin(115200);
     gDeviceIdentity.begin();
     Serial.print(MattediWorksPresents);

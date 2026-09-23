@@ -1,6 +1,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_CONSOLE
 #include "NightMareCommand.h"
+#include "DeviceIdentity.h"
 #include "Time.h"
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
@@ -330,6 +331,71 @@ static void listFileTree(JsonArray &files, const String &path, uint8_t depth)
     }
     dir.close();
 }
+
+static NightMareResults executeAdoptCommand(const String &newName, NightmareContext context)
+{
+    NightMareResults result;
+    result.result = false;
+    result.context = context;
+    if (!DeviceIdentity::validDeviceName(newName))
+    {
+        result.response = "Invalid device name.";
+        return result;
+    }
+    if (!gDeviceIdentity.beginAdoption(newName))
+    {
+        result.response = gDeviceIdentity.hasPendingIdentityCleanup()
+                              ? "Cannot adopt while identity cleanup is pending."
+                              : "Could not persist the new device name.";
+        return result;
+    }
+
+    DynamicJsonDocument doc(256);
+    doc["name"] = newName;
+    const bool rebootRequired = gDeviceIdentity.getDeviceName() != newName;
+    doc["active_name"] = gDeviceIdentity.getDeviceName();
+    doc["reboot_required"] = rebootRequired;
+    serializeJson(doc, result.response);
+    result.result = true;
+    return result;
+}
+
+static void refreshIdentityDocuments()
+{
+#if NM_ENABLE_MQTT
+    if (MQTT_Connected())
+    {
+        MQTT_Publish("status", deviceStatusJson(true), true, true);
+#if NM_ENABLE_TELEMETRY
+        Telemetry.publishInfo(InfoType::INFO);
+#endif
+    }
+#endif
+}
+
+static NightMareResults executeTimezoneCommand(const String &timezone,
+                                               NightmareContext context)
+{
+    NightMareResults result;
+    result.result = false;
+    result.context = context;
+    if (!DeviceIdentity::validTimezone(timezone))
+    {
+        result.response = "Invalid timezone: use a non-empty POSIX TZ string up to 128 characters.";
+        return result;
+    }
+    if (!gDeviceIdentity.setTimezone(timezone))
+    {
+        result.response = "Could not persist or apply timezone.";
+        return result;
+    }
+    refreshIdentityDocuments();
+    DynamicJsonDocument doc(192);
+    doc["timezone"] = gDeviceIdentity.getTimezone();
+    serializeJson(doc, result.response);
+    result.result = true;
+    return result;
+}
 #endif
 
 #if NM_ENABLE_JOBS
@@ -548,7 +614,54 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_CONSOLE_BUILTINS
     bool prehandled = true;
     // Basic commands that can be handled without a resolver
-    if (parsedMsg.command == "PING")
+    if (parsedMsg.command == "ADOPT")
+    {
+        if (parsedMsg.argc != 1)
+        {
+            result.result = false;
+            result.response = "Usage: ADOPT <device-name>";
+        }
+        else
+            return executeAdoptCommand(parsedMsg.args[0], context);
+    }
+    else if (parsedMsg.command == "CHANGE" && parsedMsg.subcommand == "NAME")
+    {
+        if (parsedMsg.argc != 2)
+        {
+            result.result = false;
+            result.response = "Usage: CHANGE NAME <device-name>";
+        }
+        else
+            return executeAdoptCommand(parsedMsg.args[1], context);
+    }
+    else if (parsedMsg.command == "TIMEZONE")
+    {
+        if (parsedMsg.argc == 0)
+        {
+            DynamicJsonDocument doc(192);
+            doc["timezone"] = gDeviceIdentity.getTimezone();
+            serializeJson(doc, result.response);
+            result.result = true;
+        }
+        else if (parsedMsg.argc == 2 && parsedMsg.subcommand == "SET")
+            return executeTimezoneCommand(parsedMsg.args[1], context);
+        else
+        {
+            result.result = false;
+            result.response = "Usage: TIMEZONE [SET <posix-tz>]";
+        }
+    }
+    else if (parsedMsg.command == "CHANGE" && parsedMsg.subcommand == "TIMEZONE")
+    {
+        if (parsedMsg.argc != 2)
+        {
+            result.result = false;
+            result.response = "Usage: CHANGE TIMEZONE <posix-tz>";
+        }
+        else
+            return executeTimezoneCommand(parsedMsg.args[1], context);
+    }
+    else if (parsedMsg.command == "PING")
     {
         result.response = "PONG";
     }
@@ -593,8 +706,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                                ? NightMare::Time::timestampToDateString(
                                      epoch, NightMare::Time::DateAndTime)
                                : String();
-            const char *timezone = getenv("TZ");
-            doc["timezone"] = timezone != nullptr ? timezone : "";
+            doc["timezone"] = gDeviceIdentity.getTimezone();
             doc["uptime_ms"] = millis();
             serializeJson(doc, result.response);
             result.result = true;

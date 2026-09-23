@@ -113,7 +113,7 @@ NM_NTP_SERVER_2  "time.nist.gov"
 NM_NTP_SERVER_3  "time.google.com"
 ```
 
-`NM_TIMEZONE` is a POSIX timezone string used for local-time formatting. Epoch timestamps remain UTC-based.
+`NM_TIMEZONE` is the default POSIX timezone string. `DeviceIdentity` persists runtime changes under its private settings and applies the active value for local-time formatting. Epoch timestamps remain UTC-based.
 
 ## Important configurable intervals
 
@@ -527,7 +527,7 @@ The canonical API is:
 startSntpTimeSync();
 ```
 
-It uses the existing process `TZ` value when present, otherwise `NM_TIMEZONE`, plus `NM_NTP_SERVER_1..3`.
+It uses the process `TZ` value applied by `DeviceIdentity`, plus `NM_NTP_SERVER_1..3`.
 
 Synchronization is asynchronous. The SNTP callback marks a pending event; `tickNightMareESP()` later calls `processTimeSyncEvents()` so `SystemState` and application callbacks are not touched from lwIP's task.
 

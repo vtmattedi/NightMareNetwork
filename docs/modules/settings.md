@@ -295,6 +295,7 @@ Examples include:
 
 ```text
 _device_name
+_timezone
 _pending_identity_cleanup
 _ssid
 _password
@@ -327,7 +328,7 @@ The command is a generic store interface.
 
 Module-specific invariants still belong to the module API.
 
-For example, changing `_device_name` directly would bypass adoption/cleanup semantics and should not be used as an identity-management method.
+For example, changing `_device_name` directly would bypass adoption/cleanup semantics, while changing `_timezone` directly would not apply `TZ` or refresh identity publications. Use the identity API or commands instead.
 
 ## SYSTEMCONFIGS command
 

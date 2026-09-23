@@ -4,16 +4,27 @@
 #include "StateStore.h"
 #endif
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 DeviceIdentity gDeviceIdentity;
 
 namespace
 {
 constexpr char DeviceNameKey[] = "_device_name";
+constexpr char TimezoneKey[] = "_timezone";
 // "<oldName>/<flags>". The separator is safe because '/' never appears in a
 // device name, and one record is all v1 allows.
 constexpr char PendingCleanupKey[] = "_pending_identity_cleanup";
 constexpr uint8_t AllCleanupFlags = CLEANUP_RESOURCES | CLEANUP_STATUS;
+
+bool applyTimezone(const String &timezone)
+{
+    if (setenv("TZ", timezone.c_str(), 1) != 0)
+        return false;
+    tzset();
+    return true;
+}
 }
 
 bool DeviceIdentity::validDeviceName(const String &name)
@@ -24,6 +35,19 @@ bool DeviceIdentity::validDeviceName(const String &name)
     {
         const char c = name[i];
         if (c == '/' || c == '+' || c == '#' || static_cast<uint8_t>(c) < 0x20)
+            return false;
+    }
+    return true;
+}
+
+bool DeviceIdentity::validTimezone(const String &timezone)
+{
+    if (timezone.length() == 0 || timezone.length() > 128)
+        return false;
+    for (size_t i = 0; i < timezone.length(); ++i)
+    {
+        const uint8_t c = static_cast<uint8_t>(timezone[i]);
+        if (c < 0x20 || c == 0x7F)
             return false;
     }
     return true;
@@ -44,16 +68,28 @@ bool DeviceIdentity::begin()
     const String defaultName = String("Esp32-nm-") + String(static_cast<uint32_t>(mac), HEX);
     hardwareSignature_ = defaultName;
     String storedName = defaultName;
+    const String configuredTimezone = String(NM_TIMEZONE);
+    const String defaultTimezone = validTimezone(configuredTimezone)
+                                       ? configuredTimezone : String("UTC0");
+    String storedTimezone = defaultTimezone;
 #if NM_ENABLE_SETTINGS
     const bool settingsReady = PersistentSettings.begin();
     if (settingsReady)
+    {
         storedName = PersistentSettings.get(DeviceNameKey, defaultName);
+        storedTimezone = PersistentSettings.get(TimezoneKey, defaultTimezone);
+    }
 #endif
     deviceName_ = validDeviceName(storedName) ? storedName : defaultName;
+    timezone_ = validTimezone(storedTimezone) ? storedTimezone : defaultTimezone;
+    if (!applyTimezone(timezone_))
+        return false;
     initialized_ = true;
 #if NM_ENABLE_SETTINGS
     if (settingsReady && (!PersistentSettings.exists(DeviceNameKey) || storedName != deviceName_))
         PersistentSettings.set(DeviceNameKey, deviceName_);
+    if (settingsReady && (!PersistentSettings.exists(TimezoneKey) || storedTimezone != timezone_))
+        PersistentSettings.set(TimezoneKey, timezone_);
     if (settingsReady)
         loadPendingCleanup();
 #endif
@@ -115,6 +151,35 @@ const String &DeviceIdentity::getHardwareSignature()
 {
     begin();
     return hardwareSignature_;
+}
+
+const String &DeviceIdentity::getTimezone()
+{
+    begin();
+    return timezone_;
+}
+
+bool DeviceIdentity::setTimezone(const String &timezone)
+{
+    if (!begin() || !validTimezone(timezone))
+        return false;
+    if (timezone == timezone_)
+        return true;
+    const String previousTimezone = timezone_;
+    if (!applyTimezone(timezone))
+        return false;
+#if NM_ENABLE_SETTINGS
+    if (!PersistentSettings.set(TimezoneKey, timezone))
+    {
+        // StateStore mutates its in-memory value before saving. Restore both
+        // views even when the first filesystem write failed.
+        PersistentSettings.set(TimezoneKey, previousTimezone);
+        applyTimezone(previousTimezone);
+        return false;
+    }
+#endif
+    timezone_ = timezone;
+    return true;
 }
 
 bool DeviceIdentity::isDevice(const String &fullTopic)

@@ -694,6 +694,14 @@ gDeviceIdentity.getHardwareSignature();
 
 If the logical name is later adopted, the hardware signature remains unchanged.
 
+The persisted POSIX timezone is available through:
+
+```cpp
+gDeviceIdentity.getTimezone();
+```
+
+Use `ADOPT <name>` or `CHANGE NAME <name>` for identity migration, and `TIMEZONE SET <posix-tz>` or `CHANGE TIMEZONE <posix-tz>` to change local-time presentation through the command surface.
+
 ## Next steps
 
 Read these next:
