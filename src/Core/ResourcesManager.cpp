@@ -4,6 +4,9 @@
 #include "DeviceIdentity.h"
 
 #include <ArduinoJson.h>
+#if NM_PLATFORM_ESP32
+#include <esp_heap_caps.h>
+#endif
 
 namespace
 {
@@ -1082,10 +1085,20 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     // reads the log to inspect a manifest that was perfectly good.
     if (error == DeserializationError::NoMemory)
     {
+        // The heap is read here rather than left to a periodic sample: this
+        // runs on the MQTT task, in the middle of a burst, and by the time
+        // anything else looks the moment has passed. An allocation that fails
+        // while the largest free block is reportedly far bigger than it means
+        // the caps the allocator uses and the caps being measured are not the
+        // same pool -- which is worth seeing, not inferring.
         if (doc.capacity() == 0)
             LOG_WARNING("RM", "Out of memory for the manifest from '%s': could not allocate "
-                              "%u bytes to parse %u bytes of JSON",
-                        deviceName.c_str(), (unsigned)pool, (unsigned)message.length());
+                              "%u bytes to parse %u bytes of JSON "
+                              "(heap free=%u largest=%u, 8bit free=%u largest=%u)",
+                        deviceName.c_str(), (unsigned)pool, (unsigned)message.length(),
+                        (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         else
             LOG_WARNING("RM", "Manifest from '%s' did not fit: %u bytes of JSON needed more "
                               "than a %u byte pool",
