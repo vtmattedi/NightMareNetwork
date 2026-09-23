@@ -16,8 +16,6 @@ namespace
     constexpr char SystemJob[] = "nm.telemetry.system";
     constexpr char NetworkJob[] = "nm.telemetry.network";
     constexpr size_t MaxConnections = 128;
-    constexpr size_t BaseCapacity = 2048;
-    constexpr size_t PerConnectionCapacity = 256;
 
     const char *directionName(NMHardware::Direction direction)
     {
@@ -151,7 +149,7 @@ void TelemetryService::appendHwConnections(JsonArray dst) const
     for (size_t i = 0; i < profile.connectionCount; ++i)
     {
         const NMHardware::Connection &connection = profile.connections[i];
-        JsonObject pin = dst.createNestedObject();
+        JsonObject pin = dst.add<JsonObject>();
         pin["name"] = connection.name != nullptr ? connection.name : "";
         pin["pin"] = connection.pin;
         pin["direction"] = directionName(connection.direction);
@@ -170,7 +168,7 @@ void TelemetryService::appendBuild(JsonObject dst) const
     dst["compiler"] = __VERSION__;
     dst["arduino_version"] = ARDUINO;
     dst["esp_idf_version"] = ESP.getSdkVersion();
-    JsonObject features = dst.createNestedObject("features");
+    JsonObject features = dst["features"].to<JsonObject>();
     features["settings"] = NM_ENABLE_SETTINGS != 0;
     features["network"] = NM_ENABLE_NETWORK != 0;
     features["wifi"] = NM_ENABLE_WIFI != 0;
@@ -229,16 +227,18 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     const NMHardware::Profile profile = NMHardware::getProfile();
     if (withConnections && !profileUsable(profile))
         return result;
-    DynamicJsonDocument doc(BaseCapacity +
-                            (withConnections ? profile.connectionCount * PerConnectionCapacity : 0));
+    // Sizes itself as it is filled; the old fixed capacity asked for
+    // 2048 + connections * 256 bytes contiguous, which on a board describing
+    // eighteen pins was a 6.6KB block demanded on every MQTT connect.
+    JsonDocument doc;
     switch (type)
     {
     case InfoType::INFO:
-        appendIdentity(doc.createNestedObject("identity"));
-        appendHardware(doc.createNestedObject("hardware"));
-        appendHwConnections(doc.createNestedArray("hwconnections"));
-        appendBuild(doc.createNestedObject("build"));
-        appendBoot(doc.createNestedObject("boot"));
+        appendIdentity(doc["identity"].to<JsonObject>());
+        appendHardware(doc["hardware"].to<JsonObject>());
+        appendHwConnections(doc["hwconnections"].to<JsonArray>());
+        appendBuild(doc["build"].to<JsonObject>());
+        appendBoot(doc["boot"].to<JsonObject>());
         break;
     case InfoType::IDENTITY:
         appendIdentity(doc.to<JsonObject>());
@@ -264,8 +264,9 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     case InfoType::INVALID:
         return result;
     }
-    if (doc.overflowed())
-        return result;
+    // No overflow check: an ArduinoJson 7 document has no capacity, and the only
+    // unbounded section here is hwconnections, which profileUsable() already
+    // caps at MaxConnections.
     serializeJson(doc, result.data);
     result.valid = result.data.length() != 0;
     return result;

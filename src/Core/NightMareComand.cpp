@@ -321,7 +321,7 @@ static void listFileTree(JsonArray &files, const String &path, uint8_t depth)
             name = name.substring(slash + 1);
         String fullPath = path + "/" + name;
         bool isDir = entry.isDirectory();
-        JsonObject entryObj = files.createNestedObject();
+        JsonObject entryObj = files.add<JsonObject>();
         entryObj["name"] = isDir ? fullPath + "/" : fullPath;
         entryObj["size"] = isDir ? 0 : entry.size();
         entry.close();
@@ -350,7 +350,7 @@ static NightMareResults executeAdoptCommand(const String &newName, NightmareCont
         return result;
     }
 
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["name"] = newName;
     const bool rebootRequired = gDeviceIdentity.getDeviceName() != newName;
     doc["active_name"] = gDeviceIdentity.getDeviceName();
@@ -390,7 +390,7 @@ static NightMareResults executeTimezoneCommand(const String &timezone,
         return result;
     }
     refreshIdentityDocuments();
-    DynamicJsonDocument doc(192);
+    JsonDocument doc;
     doc["timezone"] = gDeviceIdentity.getTimezone();
     serializeJson(doc, result.response);
     result.result = true;
@@ -638,7 +638,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     {
         if (parsedMsg.argc == 0)
         {
-            DynamicJsonDocument doc(192);
+            JsonDocument doc;
             doc["timezone"] = gDeviceIdentity.getTimezone();
             serializeJson(doc, result.response);
             result.result = true;
@@ -698,7 +698,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         {
             const time_t epoch = NightMare::Time::now();
             const bool clockValid = NightMare::Time::valid();
-            DynamicJsonDocument doc(256);
+            JsonDocument doc;
             doc["synced"] = clockValid && SystemState.getFlag("time_synced");
             doc["valid"] = clockValid;
             doc["epoch"] = clockValid ? static_cast<uint64_t>(epoch) : 0;
@@ -716,10 +716,14 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     {
         if (parsedMsg.subcommand == "LIST")
         {
-            auto doc = DynamicJsonDocument(FS_LIST_JSON_CAPACITY);
-            JsonArray files = doc.createNestedArray("files");
+            JsonDocument doc;
+            JsonArray files = doc["files"].to<JsonArray>();
             listFileTree(files, "", FS_LIST_MAX_DEPTH);
-            if (doc.overflowed())
+            // ArduinoJson 7 documents have no capacity to overflow, so the
+            // ceiling applies to the finished document instead. Building it
+            // first cannot run away: the tree is bounded by FS_LIST_MAX_DEPTH
+            // and by the size of the filesystem it is listing.
+            if (measureJson(doc) > FS_LIST_JSON_CAPACITY)
             {
                 result.response = "Too many files to list: the tree exceeds " + String(FS_LIST_JSON_CAPACITY) + " bytes of JSON.";
                 result.result = false;
@@ -766,7 +770,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         }
         else if (parsedMsg.subcommand == "STATUS")
         {
-            auto doc = DynamicJsonDocument(512);
+            JsonDocument doc;
             doc["totalBytes"] = LittleFS.totalBytes();
             doc["usedBytes"] = LittleFS.usedBytes();
             doc["usedPercentage"] = (double)(LittleFS.usedBytes() * 100) / (double)LittleFS.totalBytes();
@@ -1018,7 +1022,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         {
             bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
             int16_t res = WiFi.scanComplete();
-            auto doc = DynamicJsonDocument(2560);
+            JsonDocument doc;
             if (start || res == -2)
             {
                 int16_t res = WiFi.scanNetworks(true);
@@ -1040,10 +1044,10 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 else
                 {
                     doc["control"] = "scan_done";
-                    JsonArray networks = doc.createNestedArray("networks");
+                    JsonArray networks = doc["networks"].to<JsonArray>();
                     for (int i = 0; i < res; i++)
                     {
-                        JsonObject net = networks.createNestedObject();
+                        JsonObject net = networks.add<JsonObject>();
                         net["ssid"] = WiFi.SSID(i);
                         net["rssi"] = WiFi.RSSI(i);
                         net["mac"] = WiFi.BSSIDstr(i);

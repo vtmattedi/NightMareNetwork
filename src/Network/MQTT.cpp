@@ -415,7 +415,7 @@ bool MQTT_DiscoveryEnabled()
 String deviceStatusJson(const String &deviceName, bool online)
 {
     // Serialized, not concatenated: a device name may legally contain '"' or '\'.
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     doc["name"] = deviceName;
     doc["hardware"] = gDeviceIdentity.getHardwareSignature();
     doc["timezone"] = gDeviceIdentity.getTimezone();

@@ -41,7 +41,7 @@ bool StateStore::load()
     File file = LittleFS.open(SETTINGS_FILE, "r");
     if (!file)
         return false;
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     const DeserializationError error = deserializeJson(doc, file);
     file.close();
     if (error || !doc.is<JsonObject>())

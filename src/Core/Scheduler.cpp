@@ -353,15 +353,15 @@ String Scheduler::list(SchedulerJobScope scope)
     JobGuard guard;
     ensureInitialized();
 
-    DynamicJsonDocument doc(32768);
-    JsonArray array = doc.createNestedArray("jobs");
+    JsonDocument doc;
+    JsonArray array = doc["jobs"].to<JsonArray>();
     uint8_t count = 0;
     for (const Job &job : jobs_)
     {
         if (!job.active || job.scope != scope)
             continue;
         ++count;
-        JsonObject item = array.createNestedObject();
+        JsonObject item = array.add<JsonObject>();
         item["id"] = job.id;
         item["label"] = job.label;
         item["clock"] = job.clock == SchedulerClock::Wall ? "wall" : "monotonic";
@@ -382,8 +382,8 @@ String Scheduler::list(SchedulerJobScope scope)
     doc["wallReady"] = wallReady;
     doc["wallNow"] = wallReady ? NightMare::Time::now() : 0;
     doc["monotonicMs"] = millis();
-    if (doc.overflowed())
-        return String();
+    // No overflow check: an ArduinoJson 7 document has no capacity, and this one
+    // is bounded by MaxJobs either way.
     String output;
     serializeJson(doc, output);
     return output;
@@ -461,13 +461,13 @@ bool Scheduler::writeJobs(const SchedulerJobScope *omit)
     if (!storageReady_)
         return false;
 
-    DynamicJsonDocument doc(32768);
-    JsonArray array = doc.createNestedArray("jobs");
+    JsonDocument doc;
+    JsonArray array = doc["jobs"].to<JsonArray>();
     for (const Job &job : jobs_)
     {
         if (!persists(job) || (omit != nullptr && job.scope == *omit))
             continue;
-        JsonObject item = array.createNestedObject();
+        JsonObject item = array.add<JsonObject>();
         item["id"] = job.id;
         item["scope"] = scopeName(job.scope);
         item["label"] = job.label;
@@ -475,8 +475,7 @@ bool Scheduler::writeJobs(const SchedulerJobScope *omit)
         item["due"] = job.due;
         item["interval"] = job.interval;
     }
-    if (doc.overflowed())
-        return false;
+    // Bounded by MaxJobs, and an ArduinoJson 7 document cannot overflow.
     File file = LittleFS.open(JobsFile, "w");
     if (!file)
         return false;
@@ -493,7 +492,7 @@ bool Scheduler::load()
     File file = LittleFS.open(JobsFile, "r");
     if (!file)
         return false;
-    DynamicJsonDocument doc(32768);
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
     if (error)

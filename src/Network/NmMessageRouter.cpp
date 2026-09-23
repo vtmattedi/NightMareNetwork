@@ -51,9 +51,8 @@ bool syncTime(const String &payload)
 {
     if (payload.length() > 256)
         return true;
-    DynamicJsonDocument doc(256);
-    if (deserializeJson(doc, payload) || !doc.containsKey("timestamp") ||
-        !doc.containsKey("offset"))
+    JsonDocument doc;
+    if (deserializeJson(doc, payload) || doc["timestamp"].isNull() || doc["offset"].isNull())
         return true;
     String timestampText;
     serializeJson(doc["timestamp"], timestampText);
