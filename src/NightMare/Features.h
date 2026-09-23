@@ -72,6 +72,28 @@
 #ifndef NM_ENABLE_ACTION_PAYLOAD_ASSERTION
 #define NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
 #endif
+// Whether a bound Remote resource also fetches and checks its owner's manifest.
+//
+// 1: a Remote resource subscribes to the owner's /resources as well as to
+//    /state, parses the manifest and reports kind/type/access/argument
+//    disagreements. Diagnostics only -- it has never gated traffic.
+//
+// 0: a Remote resource subscribes to /state and nothing else. No manifest
+//    subscription, no manifest parsing, no comparison. Everything else behaves
+//    identically, because a manifest describes and /state tells the truth.
+//
+// Worth turning off on a device that is tight for memory. Verification costs a
+// subscription per remote owner and a JSON parse of whatever arrives on it, and
+// both land during the connect burst, when retained manifests are replayed and
+// the TLS session is still holding its record buffers. A manifest handler set
+// with setManifestHandler() is independent of this and still works.
+#ifndef NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
+#define NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
+#endif
+// Which encoding `>manifest` returns when asked for neither: json or mpack.
+#ifndef NM_DEFAULT_MANIFEST_FORMAT
+#define NM_DEFAULT_MANIFEST_FORMAT json
+#endif
 // How often a pending cleanup of a previous identity is retried. Deliberately
 // slow: it only matters after an adoption, and each attempt publishes.
 #ifndef NM_IDENTITY_CLEANUP_RETRY_MS

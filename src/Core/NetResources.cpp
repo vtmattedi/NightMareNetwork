@@ -39,6 +39,18 @@ String resolveResourceManifestTopic(const String &deviceName)
     return deviceName + "/resources";
 }
 
+String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format)
+{
+    String topic = resolveResourceManifestTopic(deviceName);
+    // One segment below the manifest, which cannot collide with a resource:
+    // a value lives at resources/<name>/state, three segments deep, and this is
+    // two. A device may still own a resource called "msgpack" without either
+    // topic shadowing the other.
+    if (format == ManifestFormat::MSGPACK)
+        topic += "/msgpack";
+    return topic;
+}
+
 String resolveResourceTopic(const String &deviceName, const String &resourceName,
                             ResourceTopicOperation operation)
 {

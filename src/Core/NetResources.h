@@ -136,6 +136,79 @@ enum class ResourceTopicOperation : uint8_t
     INVOKE
 };
 
+/// @brief How a manifest is encoded on the wire. The same document either way:
+/// this chooses the encoding, never the content.
+///
+///   JSON     <device>/resources          readable, self-describing, large
+///   MSGPACK  <device>/resources/msgpack  compact, enums written as their
+///                                        numeric value rather than their name
+///
+/// Both are published and both are retained, so a reader picks whichever it can
+/// decode and nothing has to negotiate. A manifest is the largest routine
+/// document on the network and the one that arrives while a connection is at
+/// its most expensive, which is what the compact form is for.
+enum class ManifestFormat : uint8_t
+{
+    JSON,
+    MSGPACK
+};
+
+/* ---------------------------------------------------------------------------
+ * The MessagePack manifest layout.
+ *
+ * This is the normative description; nothing else should restate it.
+ *
+ *   manifest := [ encodingVersion:uint, manifestVersion:uint, resources:array ]
+ *
+ *   resource := [ 0, name:str, access:uint, type:uint ]   // kind 0 = VALUE
+ *             | [ 1, name:str, arguments:array ]          // kind 1 = ACTION
+ *
+ *   argument := [ name:str, type:uint, required:bool ]
+ *
+ * `kind` leads each resource so a reader knows the shape before reading the
+ * rest. The numbers are NetResourceType, AccessPolicy and NetValueType.
+ *
+ * Positions rather than keys because MessagePack has no string table: it writes
+ * every key in full, every time, and on a real 20-resource manifest the repeated
+ * words "name", "kind", "access" and "type" were 61% of the payload. Integer
+ * keys are not an option here -- ArduinoJson's object keys are JsonString on
+ * both encode and decode -- and positions cost nothing at all. Measured against
+ * that manifest: 1753 bytes as JSON, 955 keyed, 375 positional.
+ *
+ * The price is that ORDER IS THE CONTRACT, which is what the encoding version
+ * exists to govern:
+ *
+ *  1. Element 0 of the top-level array is the encoding version, frozen forever.
+ *     Every future version keeps it at position 0, so a reader can always learn
+ *     what it is holding before trying to interpret the rest.
+ *
+ *  2. Append only. A new field goes on the END of its array. Readers ignore
+ *     trailing elements they do not recognise, so adding one does NOT bump the
+ *     encoding version.
+ *
+ *  3. Never reorder a position, never repurpose one, never remove one. Each of
+ *     those breaks every existing reader and DOES bump the encoding version.
+ *
+ *  4. Enum values are append-only and never renumbered. A value a reader does
+ *     not know means "unknown", not "incompatible": it neither bumps the
+ *     encoding version nor counts as a mismatch.
+ *
+ *  5. An unknown encoding version is not an error. The reader ignores the
+ *     compact manifest and uses the JSON one, which is always published beside
+ *     it. That is what makes rule 3 survivable -- a bump degrades old readers to
+ *     JSON instead of breaking them.
+ * ------------------------------------------------------------------------- */
+constexpr uint8_t ManifestEncodingVersion = 1;
+
+/// Positions within the top-level array. Position 0 is fixed for all time; see
+/// rule 1 above.
+enum class ManifestSlot : uint8_t
+{
+    ENCODING_VERSION = 0,
+    MANIFEST_VERSION = 1,
+    RESOURCES = 2
+};
+
 /// @brief The device that implements the resource: the current identity for a
 /// MANAGED one, the configured source for a REMOTE one. A reference, because
 /// both live as long as the resource; the Manager calls this per registry entry.
@@ -149,6 +222,10 @@ String resolveResourceTopic(const String &deviceName, const String &resourceName
                             ResourceTopicOperation operation);
 
 String resolveResourceManifestTopic(const String &deviceName);
+
+/// @brief The manifest topic for one encoding. JSON keeps the plain
+/// `<device>/resources`, so nothing that already reads it has to change.
+String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format);
 
 enum class NetSyncStrategy : uint8_t
 {

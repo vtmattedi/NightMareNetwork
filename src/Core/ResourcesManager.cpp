@@ -14,6 +14,38 @@ constexpr size_t MaxSegmentLength = 64;
 constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
 constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
 constexpr int ManifestVersion = 2;
+/// Every device's manifest, for a handler that wants the whole network.
+constexpr const char *AllManifestsFilter = "+/resources";
+/// The same, in the compact encoding. Taken only when an encoded handler is set.
+constexpr const char *AllEncodedManifestsFilter = "+/resources/msgpack";
+
+/// @brief The encoding `>manifest` uses when given no argument. Written as a
+/// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
+/// -- so the setting reads the way the command does.
+#define NM_MANIFEST_FORMAT_STR2(x) #x
+#define NM_MANIFEST_FORMAT_STR(x) NM_MANIFEST_FORMAT_STR2(x)
+
+/// @brief "json" or "mpack", case-insensitively. Empty selects the default.
+bool parseManifestFormat(const String &text, ManifestFormat &format)
+{
+    String wanted = text;
+    wanted.trim();
+    if (wanted.length() == 0)
+        wanted = NM_MANIFEST_FORMAT_STR(NM_DEFAULT_MANIFEST_FORMAT);
+    wanted.toLowerCase();
+
+    if (wanted == "json")
+    {
+        format = ManifestFormat::JSON;
+        return true;
+    }
+    if (wanted == "mpack" || wanted == "msgpack")
+    {
+        format = ManifestFormat::MSGPACK;
+        return true;
+    }
+    return false;
+}
 
 bool commandSpace(char c)
 {
@@ -275,11 +307,101 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource) const
     return ingressTopicFor(resource, resolveResourceOwner(resource), resource.name_);
 }
 
+bool ResourcesManager::verifiesRemoteManifests()
+{
+    return NM_ENABLE_REMOTE_RESOURCE_VERIFICATION != 0;
+}
+
+void ResourcesManager::setManifestHandler(ManifestHandler handler)
+{
+    const bool had = manifestHandler_ != nullptr;
+    // Stored first. See the note on the declaration: the subscription below is
+    // only queued when it returns, and a retained manifest can arrive before
+    // anyone would have installed a handler afterwards.
+    manifestHandler_ = handler;
+    if (subscriber_ == nullptr || had == (handler != nullptr))
+        return;
+    if (handler != nullptr)
+        subscriber_->subscribe(AllManifestsFilter);
+    else
+        subscriber_->unsubscribe(AllManifestsFilter);
+}
+
+void ResourcesManager::setEncodedManifestHandler(EncodedManifestHandler handler)
+{
+    const bool had = encodedManifestHandler_ != nullptr;
+    // Stored before subscribing, as above.
+    encodedManifestHandler_ = handler;
+    if (subscriber_ == nullptr || had == (handler != nullptr))
+        return;
+    if (handler != nullptr)
+        subscriber_->subscribe(AllEncodedManifestsFilter);
+    else
+        subscriber_->unsubscribe(AllEncodedManifestsFilter);
+}
+
+bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
+{
+    JsonDocument packed;
+    if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) || !packed.is<JsonArray>())
+        return false;
+
+    JsonArrayConst root = packed.as<JsonArrayConst>();
+    // Position 0 is the encoding version and always will be; anything else is a
+    // dialect this build does not speak. Refusing beats guessing -- the JSON
+    // manifest is published beside it, so the caller has somewhere to go.
+    if (root.size() < 3 || root[0].as<uint8_t>() != ManifestEncodingVersion)
+        return false;
+
+    into.clear();
+    into["version"] = root[1].as<int>();
+    JsonArray items = into["resources"].to<JsonArray>();
+    for (JsonVariantConst element : root[2].as<JsonArrayConst>())
+    {
+        JsonArrayConst entry = element.as<JsonArrayConst>();
+        if (entry.size() < 2)
+            continue;
+        const uint8_t kind = entry[0].as<uint8_t>();
+        JsonObject item = items.add<JsonObject>();
+        item["name"] = entry[1].as<const char *>();
+        item["kind"] = kindName(static_cast<NetResourceType>(kind));
+
+        if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
+        {
+            if (entry.size() < 4)
+                continue;
+            item["access"] = accessName(static_cast<AccessPolicy>(entry[2].as<uint8_t>()));
+            item["type"] = valueTypeName(static_cast<NetValueType>(entry[3].as<uint8_t>()));
+            continue;
+        }
+
+        JsonArray args = item["arguments"].to<JsonArray>();
+        if (entry.size() < 3)
+            continue;
+        for (JsonVariantConst argumentElement : entry[2].as<JsonArrayConst>())
+        {
+            JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+            if (argument.size() < 3)
+                continue;
+            JsonObject out = args.add<JsonObject>();
+            out["name"] = argument[0].as<const char *>();
+            out["type"] = valueTypeName(static_cast<NetValueType>(argument[1].as<uint8_t>()));
+            out["required"] = argument[2].as<bool>();
+        }
+    }
+    return true;
+}
+
 void ResourcesManager::subscribeResource(const NetResource &resource, bool includeManifest)
 {
     if (subscriber_ == nullptr)
         return;
-    if (includeManifest && !resource.isOwned() && hasResolvedSource(resource))
+    // A remote owner's manifest is only worth a subscription if something is
+    // going to read it. With verification compiled out nothing here does, and a
+    // handler -- which wants every device, not just the bound ones -- has its
+    // own subscription.
+    if (verifiesRemoteManifests() && includeManifest && !resource.isOwned() &&
+        hasResolvedSource(resource))
         subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
@@ -293,12 +415,20 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->unsubscribe(ingress);
-    if (removeManifest && !resource.isOwned() && hasResolvedSource(resource))
+    if (verifiesRemoteManifests() && removeManifest && !resource.isOwned() &&
+        hasResolvedSource(resource))
         subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName));
 }
 
 void ResourcesManager::subscribeAll()
 {
+    // Reinstalled on every reconnect alongside the per-resource ones: the
+    // handler outlives the connection that was carrying manifests to it.
+    if (manifestHandler_ != nullptr && subscriber_ != nullptr)
+        subscriber_->subscribe(AllManifestsFilter);
+    if (encodedManifestHandler_ != nullptr && subscriber_ != nullptr)
+        subscriber_->subscribe(AllEncodedManifestsFilter);
+
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
@@ -317,12 +447,18 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
 {
     if (topicFilter.length() == 0)
         return false;
+    // Claimed so a project asking to drop this filter cannot take the handler's
+    // manifests away with it.
+    if (manifestHandler_ != nullptr && topicFilter == AllManifestsFilter)
+        return true;
+    if (encodedManifestHandler_ != nullptr && topicFilter == AllEncodedManifestsFilter)
+        return true;
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
         if (ingressTopicFor(resource) == topicFilter)
             return true;
-        if (!resource.isOwned() && hasResolvedSource(resource) &&
+        if (verifiesRemoteManifests() && !resource.isOwned() && hasResolvedSource(resource) &&
             resolveResourceManifestTopic(resource.ownerDevice_.deviceName) == topicFilter)
             return true;
     }
@@ -532,7 +668,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 
     if (subscriber_ != nullptr)
     {
-        if (ownerChanged && !remoteOwnerInUse(newOwner, &resource))
+        if (verifiesRemoteManifests() && ownerChanged && !remoteOwnerInUse(newOwner, &resource))
             subscriber_->subscribe(resolveResourceManifestTopic(newOwner));
         const String ingress = ingressTopicFor(resource);
         if (ingress.length() != 0)
@@ -546,22 +682,33 @@ bool ResourcesManager::publishManifest()
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
 
-    String payload;
-    if (!serializeManifest(payload))
+    // Both encodings, both retained. A reader takes whichever it can decode and
+    // nothing has to negotiate a format. The JSON one is published first and is
+    // the one whose failure fails this call: it is the manifest the protocol
+    // has always defined, and a device that could not publish it has not
+    // announced itself. A MessagePack failure is logged and tolerated, so an
+    // older reader is never held back by the compact form.
+    String json;
+    if (!serializeManifest(json, ManifestFormat::JSON))
         return false;
-    return publisher_->publish(resolveResourceManifestTopic(thisDevice), payload, true);
+    if (!publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json,
+                             true))
+        return false;
+
+    String packed;
+    if (!serializeManifest(packed, ManifestFormat::MSGPACK) ||
+        !publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
+                             packed, true))
+        LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
+    return true;
 }
 
-bool ResourcesManager::serializeManifest(String &payload) const
+// The JSON manifest, unchanged since the protocol first defined it: named keys,
+// enum names spelled out. That topic is read by people and by tools that have
+// never seen this header, and it is the fallback for anyone who cannot decode
+// the compact form, so it stays exactly as it is.
+void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
 {
-    // ArduinoJson 7 documents size themselves, growing through a chain of small
-    // pools instead of one block fixed at construction. That deletes the
-    // question this function used to have to answer -- how big a manifest is
-    // about to be -- and with it the 16KB contiguous request that answer
-    // defaulted to. It also removes the failure mode: there is no capacity to
-    // overflow, so a manifest can no longer be silently dropped for being
-    // larger than a guess made before it was built.
-    JsonDocument doc;
     doc["version"] = ManifestVersion;
     JsonArray items = doc["resources"].to<JsonArray>();
     for (int i = 0; i < resourceCount_; ++i)
@@ -593,12 +740,75 @@ bool ResourcesManager::serializeManifest(String &payload) const
             }
         }
     }
+}
+
+// The compact manifest: positions instead of keys, enum values instead of
+// names. The layout and the rules for changing it live in NetResources.h and
+// are not restated here -- there must be one description of a wire format.
+void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
+{
+    JsonArray root = doc.to<JsonArray>();
+    root.add(ManifestEncodingVersion); // Position 0, frozen for all time.
+    root.add(ManifestVersion);
+    JsonArray items = root.add<JsonArray>();
+
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (!resource.isOwned())
+            continue;
+        JsonArray item = items.add<JsonArray>();
+        // Kind first: it tells a reader which shape the rest of this array is.
+        item.add(static_cast<uint8_t>(resource.kind_));
+        item.add(resource.name_);
+
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item.add(static_cast<uint8_t>(value.access_));
+            item.add(static_cast<uint8_t>(value.valueType_));
+            continue;
+        }
+
+        const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+        JsonArray args = item.add<JsonArray>();
+        for (size_t a = 0; a < action.argumentCount(); ++a)
+        {
+            JsonArray argument = args.add<JsonArray>();
+            argument.add(action.argument(a).name);
+            argument.add(static_cast<uint8_t>(action.argument(a).type));
+            argument.add(action.argument(a).required);
+        }
+    }
+}
+
+bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format) const
+{
+    // ArduinoJson 7 documents size themselves, growing through a chain of small
+    // pools instead of one block fixed at construction. That deletes the
+    // question this function used to have to answer -- how big a manifest is
+    // about to be -- and with it the 16KB contiguous request that answer
+    // defaulted to. It also removes the failure mode: there is no capacity to
+    // overflow, so a manifest can no longer be silently dropped for being
+    // larger than a guess made before it was built.
+    JsonDocument doc;
+    const bool packed = format == ManifestFormat::MSGPACK;
+    if (packed)
+        buildPositionalManifest(doc);
+    else
+        buildNamedManifest(doc);
 
     // The protocol ceiling is still enforced, just on the finished document
     // rather than on a guess made before building it: a manifest too large to
     // publish is a real condition, a pool too small to build one is not.
+    //
+    // MessagePack is binary and can contain a zero byte, which is fine here:
+    // String tracks its own length, and every path this payload takes -- the
+    // publisher, esp_mqtt_client_publish -- is given that length rather than
+    // being left to find a terminator.
     payload = String();
-    if (serializeJson(doc, payload) == 0 || payload.length() > MaxManifestLength)
+    const size_t written = packed ? serializeMsgPack(doc, payload) : serializeJson(doc, payload);
+    if (written == 0 || payload.length() > MaxManifestLength)
         return false;
     return true;
 }
@@ -734,7 +944,14 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
             withdrawn = false;
     }
     // Actions need nothing: /invoke is never retained.
-    if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName), String(), true))
+    //
+    // Both manifests go, not just the JSON one -- either left behind would
+    // re-announce the old identity to whichever reader prefers that encoding.
+    if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName, ManifestFormat::JSON),
+                             String(), true))
+        withdrawn = false;
+    if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName, ManifestFormat::MSGPACK),
+                             String(), true))
         withdrawn = false;
     return withdrawn;
 }
@@ -825,13 +1042,16 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
 
         if (command.internalCommand == InternalCommands::MANIFEST)
         {
-            String arguments = command.payload;
-            arguments.trim();
-            if (arguments.length() != 0)
-                return {false, String("Usage: >manifest")};
+            // `>manifest [json|mpack]`, defaulting to NM_DEFAULT_MANIFEST_FORMAT.
+            // Asking for mpack over a serial console returns binary and will
+            // look like noise; over MQTT, where the response topic carries a
+            // length rather than a terminator, it arrives intact.
+            ManifestFormat format = ManifestFormat::JSON;
+            if (!parseManifestFormat(command.payload, format))
+                return {false, String("Usage: >manifest [json|mpack]")};
 
             String manifest;
-            if (!serializeManifest(manifest))
+            if (!serializeManifest(manifest, format))
                 return {false, String("Could not serialize manifest")};
             return {true, manifest};
         }
@@ -1051,6 +1271,7 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
         return;
     }
 
+#if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
     JsonArray items = doc["resources"].as<JsonArray>();
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -1130,8 +1351,50 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
                             deviceName.c_str(), resource->name_.c_str(), remoteName.c_str());
         }
     }
+#endif // NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
+
+    // Always, and independently of verification: a handler asked for every
+    // device's manifest, not for this manager's opinion of it.
     if (manifestHandler_ != nullptr)
         manifestHandler_(deviceName, message);
+}
+
+// Validate, then deliver. The handler is promised a payload that is well formed
+// and in an encoding this build understands, so it never has to re-check either.
+// An empty payload is a retained withdrawal and is passed straight through,
+// matching how the JSON manifest reports the same thing.
+void ResourcesManager::applyEncodedManifest(const String &deviceName, const String &message)
+{
+    if (message.length() > MaxManifestLength)
+    {
+        LOG_WARNING("RM", "Ignored oversized encoded manifest from '%s' (%u bytes)",
+                    deviceName.c_str(), (unsigned)message.length());
+        return;
+    }
+    if (message.length() == 0)
+    {
+        encodedManifestHandler_(deviceName, message);
+        return;
+    }
+
+    JsonDocument probe;
+    if (deserializeMsgPack(probe, message.c_str(), message.length()) || !probe.is<JsonArray>())
+    {
+        LOG_WARNING("RM", "Ignored malformed encoded manifest from '%s'", deviceName.c_str());
+        return;
+    }
+    JsonArrayConst root = probe.as<JsonArrayConst>();
+    const uint8_t encoding = root.size() != 0 ? root[0].as<uint8_t>() : 0;
+    if (root.size() < 3 || encoding != ManifestEncodingVersion)
+    {
+        // Not an error: a device newer than this one. It publishes the JSON
+        // manifest too, which is the whole point of still publishing it.
+        LOG_WARNING("RM", "Encoded manifest from '%s' is encoding %u, this build reads %u -- "
+                          "use the JSON manifest instead",
+                    deviceName.c_str(), (unsigned)encoding, (unsigned)ManifestEncodingVersion);
+        return;
+    }
+    encodedManifestHandler_(deviceName, message);
 }
 
 bool ResourcesManager::handleIngressMessage(const String &topic, const String &message)
@@ -1145,14 +1408,30 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     const String path = topic.substring(firstSlash + 1);
     if (path == "resources")
     {
-        // Consumed when some remote resource points at that device, or a
-        // discovery handler wants every manifest; whether the payload then turns
-        // out to be valid does not change that. This device's own manifest is
-        // not other-device traffic and is left alone.
+        // Consumed when verification wants it for a resource bound from that
+        // device, or when a handler wants every manifest; whether the payload
+        // then turns out to be valid does not change that. This device's own
+        // manifest is not other-device traffic and is left alone.
+        //
+        // With verification compiled out the first reason disappears, and a
+        // manifest nobody asked for falls through to the project callback like
+        // any other unconsumed topic rather than being parsed here.
+        const bool wantedForVerification =
+            verifiesRemoteManifests() && remoteOwnerInUse(deviceName, nullptr);
         if (deviceName == gDeviceIdentity.getDeviceName() ||
-            (!remoteOwnerInUse(deviceName, nullptr) && manifestHandler_ == nullptr))
+            (!wantedForVerification && manifestHandler_ == nullptr))
             return false;
         applyOtherDeviceManifest(deviceName, message);
+        return true;
+    }
+    if (path == "resources/msgpack")
+    {
+        // Consumed only when something asked for the compact form. Without a
+        // handler this is not our traffic and falls through to the project
+        // callback, exactly as any other unrecognised topic does.
+        if (encodedManifestHandler_ == nullptr || deviceName == gDeviceIdentity.getDeviceName())
+            return false;
+        applyEncodedManifest(deviceName, message);
         return true;
     }
     if (!path.startsWith("resources/"))

@@ -2,6 +2,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_RESOURCES
 #include "NetResources.h"
+#include <ArduinoJson.h>
 
 // Implement this at the transport boundary. A successful return means that the
 // message was accepted for publishing; it does not acknowledge execution by another device.
@@ -82,7 +83,49 @@ public:
     // Called for valid manifests from other devices, including retained deletion
     // (an empty payload).
     using ManifestHandler = void (*)(const String &deviceName, const String &manifest);
-    void setManifestHandler(ManifestHandler handler) { manifestHandler_ = handler; }
+
+    /// @brief Install a handler for every device's manifest, and subscribe to
+    /// them. Setting one is the request: a handler wants the whole network, not
+    /// only the devices this one happens to bind resources from, so the manager
+    /// takes "+/resources" on its behalf and gives it back when the handler is
+    /// cleared. Independent of NM_ENABLE_REMOTE_RESOURCE_VERIFICATION, which
+    /// governs only the manager's own checking of its own Remote resources.
+    ///
+    /// The handler is stored before the subscription is asked for, deliberately.
+    /// A subscribe is queued, not established, when the call returns, and a
+    /// retained manifest can be delivered the instant the broker processes it --
+    /// so a handler installed afterwards would miss exactly the replay it was
+    /// set up to receive.
+    void setManifestHandler(ManifestHandler handler);
+
+    // Called for the compact MessagePack manifest of every device, once one of
+    // these is installed. Separate from ManifestHandler on purpose: the two
+    // topics carry the same document in different encodings, and a consumer
+    // wants one of them, not both.
+    using EncodedManifestHandler = void (*)(const String &deviceName, const String &encoded);
+
+    /// @brief Install a handler for every device's compact manifest, and
+    /// subscribe to them. Nothing subscribes to or decodes the MessagePack form
+    /// unless one is set -- the library's own verification still reads the JSON
+    /// manifest -- so this is what turns the compact form on for a reader.
+    ///
+    /// The payload handed over is the raw MessagePack, already checked to be
+    /// well formed and to carry an encoding version this build understands. A
+    /// manifest in a version it does not is dropped with a warning rather than
+    /// guessed at; the JSON manifest is always published beside it, so a reader
+    /// that cares can fall back to that.
+    ///
+    /// Stored before subscribing, for the same reason as setManifestHandler().
+    void setEncodedManifestHandler(EncodedManifestHandler handler);
+
+    /// @brief Expand a compact manifest into the same named-key document the
+    /// JSON form has, so a consumer can read either through one code path and
+    /// never hardcode a position. False when the payload is not well formed or
+    /// its encoding version is not ManifestEncodingVersion.
+    ///
+    /// Optional: the handler receives the raw payload, and a consumer happy to
+    /// read positions directly can skip this and keep the compact document.
+    static bool decodeManifest(const String &encoded, JsonDocument &into);
 
     /// @brief Runs a locally implemented action and hands back what it returned.
     /// Raw MQTT ingress uses this and drops the result; a correlated caller
@@ -141,7 +184,20 @@ private:
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
     bool publishManifest();
-    bool serializeManifest(String &payload) const;
+    // One builder per encoding rather than one with branches: the JSON form is
+    // frozen and the compact form is free to change, and keeping them apart is
+    // what stops a change to the second quietly altering the first.
+    void buildNamedManifest(JsonDocument &doc) const;
+    void buildPositionalManifest(JsonDocument &doc) const;
+    void applyEncodedManifest(const String &deviceName, const String &message);
+    /// @brief Build this device's manifest in one encoding. The document is the
+    /// same either way; MSGPACK writes kind, access and type as their numeric
+    /// values rather than their names, which is most of what it saves.
+    bool serializeManifest(String &payload, ManifestFormat format) const;
+    /// @brief Whether a manifest subscription is wanted for remote owners.
+    /// False when verification is compiled out: a handler subscribes to every
+    /// device instead, which is a different question.
+    static bool verifiesRemoteManifests();
     bool publishState(const NetValueResource &resource);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
@@ -158,6 +214,7 @@ private:
     ResourcePublisher *publisher_ = nullptr;   // Non-owning.
     ResourceSubscriber *subscriber_ = nullptr; // Non-owning.
     ManifestHandler manifestHandler_ = nullptr;
+    EncodedManifestHandler encodedManifestHandler_ = nullptr;
 };
 
 extern ResourcesManager gResourcesManager;
