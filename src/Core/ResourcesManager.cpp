@@ -2,6 +2,7 @@
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
 #include "DeviceIdentity.h"
+#include "DocumentPayload.h"
 
 #include <ArduinoJson.h>
 #if NM_PLATFORM_ESP32
@@ -10,14 +11,14 @@
 
 namespace
 {
-constexpr size_t MaxSegmentLength = 64;
-constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
-constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
-constexpr int ManifestVersion = 2;
-/// Every device's manifest, for a handler that wants the whole network.
-constexpr const char *AllManifestsFilter = "+/manifest";
-/// The same, in the compact encoding. Taken only when an encoded handler is set.
-constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
+    constexpr size_t MaxSegmentLength = 64;
+    constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
+    constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
+    constexpr int ManifestVersion = 2;
+    /// Every device's manifest, for a handler that wants the whole network.
+    constexpr const char *AllManifestsFilter = "+/manifest";
+    /// The same, in the compact encoding. Taken only when an encoded handler is set.
+    constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
 /// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
@@ -25,133 +26,133 @@ constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
 #define NM_MANIFEST_FORMAT_STR2(x) #x
 #define NM_MANIFEST_FORMAT_STR(x) NM_MANIFEST_FORMAT_STR2(x)
 
-/// @brief "json" or "mpack", case-insensitively. Empty selects the default.
-bool parseManifestFormat(const String &text, ManifestFormat &format)
-{
-    String wanted = text;
-    wanted.trim();
-    if (wanted.length() == 0)
-        wanted = NM_MANIFEST_FORMAT_STR(NM_DEFAULT_MANIFEST_FORMAT);
-    wanted.toLowerCase();
-
-    if (wanted == "json")
+    /// @brief "json" or "mpack", case-insensitively. Empty selects the default.
+    bool parseManifestFormat(const String &text, ManifestFormat &format)
     {
-        format = ManifestFormat::JSON;
-        return true;
+        String wanted = text;
+        wanted.trim();
+        if (wanted.length() == 0)
+            wanted = NM_MANIFEST_FORMAT_STR(NM_DEFAULT_MANIFEST_FORMAT);
+        wanted.toLowerCase();
+
+        if (wanted == "json")
+        {
+            format = ManifestFormat::JSON;
+            return true;
+        }
+        if (wanted == "mpack" || wanted == "msgpack")
+        {
+            format = ManifestFormat::MSGPACK;
+            return true;
+        }
+        return false;
     }
-    if (wanted == "mpack" || wanted == "msgpack")
+
+    bool commandSpace(char c)
     {
-        format = ManifestFormat::MSGPACK;
-        return true;
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
     }
-    return false;
-}
 
-bool commandSpace(char c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
-}
-
-size_t skipCommandSpace(const String &text, size_t position)
-{
-    while (position < text.length() && commandSpace(text[position]))
-        ++position;
-    return position;
-}
-
-String commandToken(const String &text, size_t &position)
-{
-    position = skipCommandSpace(text, position);
-    const size_t start = position;
-    while (position < text.length() && !commandSpace(text[position]))
-        ++position;
-    return text.substring(start, position);
-}
-
-const char *kindName(NetResourceType kind)
-{
-    return kind == NetResourceType::VALUE ? "value" : "action";
-}
-
-const char *accessName(AccessPolicy access)
-{
-    return access == AccessPolicy::READ_WRITE ? "read_write" : "read";
-}
-
-const char *valueTypeName(NetValueType type)
-{
-    switch (type)
+    size_t skipCommandSpace(const String &text, size_t position)
     {
-    case NetValueType::BOOLEAN:
-        return "boolean";
-    case NetValueType::INTEGER:
-        return "integer";
-    case NetValueType::FLOAT:
-        return "float";
-    case NetValueType::STRUCT:
-        return "struct";
-    case NetValueType::STRING:
-    default:
-        return "string";
+        while (position < text.length() && commandSpace(text[position]))
+            ++position;
+        return position;
     }
-}
+
+    String commandToken(const String &text, size_t &position)
+    {
+        position = skipCommandSpace(text, position);
+        const size_t start = position;
+        while (position < text.length() && !commandSpace(text[position]))
+            ++position;
+        return text.substring(start, position);
+    }
+
+    const char *kindName(NetResourceType kind)
+    {
+        return kind == NetResourceType::VALUE ? "value" : "action";
+    }
+
+    const char *accessName(AccessPolicy access)
+    {
+        return access == AccessPolicy::READ_WRITE ? "read_write" : "read";
+    }
+
+    const char *valueTypeName(NetValueType type)
+    {
+        switch (type)
+        {
+        case NetValueType::BOOLEAN:
+            return "boolean";
+        case NetValueType::INTEGER:
+            return "integer";
+        case NetValueType::FLOAT:
+            return "float";
+        case NetValueType::STRUCT:
+            return "struct";
+        case NetValueType::STRING:
+        default:
+            return "string";
+        }
+    }
 
 #if NM_ENABLE_ACTION_PAYLOAD_ASSERTION
-bool argumentTypeMatches(NetValueType type, JsonVariantConst value)
-{
-    switch (type)
+    bool argumentTypeMatches(NetValueType type, JsonVariantConst value)
     {
-    case NetValueType::BOOLEAN:
-        return value.is<bool>();
-    case NetValueType::INTEGER:
-        return value.is<long long>();
-    case NetValueType::FLOAT:
-        return value.is<double>() || value.is<long long>();
-    case NetValueType::STRING:
-        return value.is<const char *>();
-    case NetValueType::STRUCT:
-        return value.is<JsonObjectConst>() || value.is<JsonArrayConst>();
+        switch (type)
+        {
+        case NetValueType::BOOLEAN:
+            return value.is<bool>();
+        case NetValueType::INTEGER:
+            return value.is<long long>();
+        case NetValueType::FLOAT:
+            return value.is<double>() || value.is<long long>();
+        case NetValueType::STRING:
+            return value.is<const char *>();
+        case NetValueType::STRUCT:
+            return value.is<JsonObjectConst>() || value.is<JsonArrayConst>();
+        }
+        return false;
     }
-    return false;
-}
 
-// Checks what the schema knows and nothing more. A tolerant reader: unknown
-// fields pass, so a newer caller can send fields an older implementation does
-// not declare yet, and an optional argument may be absent. An empty payload is
-// an object with no fields. JSON is the canonical machine payload; positional
-// human syntax belongs to the command layer and never arrives here.
-bool assertActionPayload(const NetActionResource &action, const String &payload, String &error)
-{
-    JsonDocument doc;
-    JsonObjectConst fields;
-    if (payload.length() != 0)
+    // Checks what the schema knows and nothing more. A tolerant reader: unknown
+    // fields pass, so a newer caller can send fields an older implementation does
+    // not declare yet, and an optional argument may be absent. An empty payload is
+    // an object with no fields. JSON is the canonical machine payload; positional
+    // human syntax belongs to the command layer and never arrives here.
+    bool assertActionPayload(const NetActionResource &action, const String &payload, String &error)
     {
-        if (deserializeJson(doc, payload) || !doc.is<JsonObject>())
+        JsonDocument doc;
+        JsonObjectConst fields;
+        if (payload.length() != 0)
         {
-            error = "payload is not a JSON object";
-            return false;
+            if (deserializeJson(doc, payload) || !doc.is<JsonObject>())
+            {
+                error = "payload is not a JSON object";
+                return false;
+            }
+            fields = doc.as<JsonObjectConst>();
         }
-        fields = doc.as<JsonObjectConst>();
+        for (size_t i = 0; i < action.argumentCount(); ++i)
+        {
+            const ActionArgMetadata &arg = action.argument(i);
+            JsonVariantConst value = fields[arg.name];
+            if (value.isNull())
+            {
+                if (!arg.required)
+                    continue;
+                error = String("missing argument '") + arg.name + "'";
+                return false;
+            }
+            if (!argumentTypeMatches(arg.type, value))
+            {
+                error = String("argument '") + arg.name + "' is not " + valueTypeName(arg.type);
+                return false;
+            }
+        }
+        return true;
     }
-    for (size_t i = 0; i < action.argumentCount(); ++i)
-    {
-        const ActionArgMetadata &arg = action.argument(i);
-        JsonVariantConst value = fields[arg.name];
-        if (value.isNull())
-        {
-            if (!arg.required)
-                continue;
-            error = String("missing argument '") + arg.name + "'";
-            return false;
-        }
-        if (!argumentTypeMatches(arg.type, value))
-        {
-            error = String("argument '") + arg.name + "' is not " + valueTypeName(arg.type);
-            return false;
-        }
-    }
-    return true;
-}
 #endif
 }
 
@@ -404,7 +405,7 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
     if (verifiesRemoteManifests() && includeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                                     ManifestFormat::MSGPACK));
+                                                            ManifestFormat::MSGPACK));
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->subscribe(ingress);
@@ -420,7 +421,7 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
     if (verifiesRemoteManifests() && removeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                                     ManifestFormat::MSGPACK));
+                                                              ManifestFormat::MSGPACK));
 }
 
 void ResourcesManager::subscribeAll()
@@ -463,7 +464,7 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
             return true;
         if (verifiesRemoteManifests() && !resource.isOwned() && hasResolvedSource(resource) &&
             resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                                     ManifestFormat::MSGPACK) == topicFilter)
+                                         ManifestFormat::MSGPACK) == topicFilter)
             return true;
     }
     return false;
@@ -694,18 +695,22 @@ bool ResourcesManager::publishManifest()
     // has always defined, and a device that could not publish it has not
     // announced itself. A MessagePack failure is logged and tolerated, so an
     // older reader is never held back by the compact form.
-    String json;
-    if (!serializeManifest(json, ManifestFormat::JSON))
-        return false;
-    if (!publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json,
-                             true))
-        return false;
+    {
+        String json;
+        if (!serializeManifest(json, ManifestFormat::JSON))
+            return false;
+        if (!publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json,
+                                 true))
+            return false;
+    }
+    {
 
-    String packed;
-    if (!serializeManifest(packed, ManifestFormat::MSGPACK) ||
-        !publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
-                             packed, true))
-        LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
+        String packed;
+        if (!serializeManifest(packed, ManifestFormat::MSGPACK) ||
+            !publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
+                                 packed, true))
+            LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
+    }
     return true;
 }
 
@@ -814,18 +819,29 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     else
         buildNamedManifest(doc);
 
+    // All or nothing. A manifest is retained, so a short one is not a failure
+    // that gets retried -- it is a lie that stays on the broker, and every
+    // reader that later asks what this device offers is told the truncated
+    // answer. Refusing leaves the previous manifest up, which is at worst out
+    // of date rather than wrong.
+    if (!serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
+                                payload))
+    {
+        LOG_WARNING("RM", "Could not build the complete %s manifest; publishing nothing",
+                    packed ? "MessagePack" : "JSON");
+        return false;
+    }
+
     // The protocol ceiling is still enforced, just on the finished document
     // rather than on a guess made before building it: a manifest too large to
     // publish is a real condition, a pool too small to build one is not.
-    //
-    // MessagePack is binary and can contain a zero byte, which is fine here:
-    // String tracks its own length, and every path this payload takes -- the
-    // publisher, esp_mqtt_client_publish -- is given that length rather than
-    // being left to find a terminator.
-    payload = String();
-    const size_t written = packed ? serializeMsgPack(doc, payload) : serializeJson(doc, payload);
-    if (written == 0 || payload.length() > MaxManifestLength)
+    if (payload.length() > MaxManifestLength)
+    {
+        LOG_WARNING("RM", "Manifest is %u bytes, over the %u-byte ceiling; publishing nothing",
+                    (unsigned)payload.length(), (unsigned)MaxManifestLength);
+        payload = String();
         return false;
+    }
     return true;
 }
 
@@ -850,10 +866,12 @@ bool ResourcesManager::publishState(const NetValueResource &resource)
 
 ActionResult ResourcesManager::listResources() const
 {
-    auto displayName = [](const NetResource &resource) -> String {
+    auto displayName = [](const NetResource &resource) -> String
+    {
         return resource.name_.length() == 0 ? String("<unnamed>") : resource.name_;
     };
-    auto shortNameIsAmbiguous = [this](const NetResource &candidate) -> bool {
+    auto shortNameIsAmbiguous = [this](const NetResource &candidate) -> bool
+    {
         if (candidate.name_.length() == 0)
             return false;
         int matches = 0;
@@ -862,7 +880,8 @@ ActionResult ResourcesManager::listResources() const
                 return true;
         return false;
     };
-    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> String {
+    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> String
+    {
         String value;
         if (resource.kind_ == NetResourceType::ACTION)
             value = "-";
@@ -898,7 +917,8 @@ ActionResult ResourcesManager::listResources() const
     }
 
     String response;
-    auto appendColumn = [&response](const String &text, size_t width) {
+    auto appendColumn = [&response](const String &text, size_t width)
+    {
         response += text;
         for (size_t i = text.length(); i < width; ++i)
             response += ' ';
@@ -1133,7 +1153,8 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     if (command.target.length() == 0)
         return {false, String("Usage: > <name|owner/name> [get|set|invoke] [payload]")};
 
-    auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult {
+    auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult
+    {
         if (action.isOwned())
         {
             ActionResult result = executeAction(action, payload);

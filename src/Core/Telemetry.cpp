@@ -4,6 +4,7 @@
 #include "Telemetry.h"
 #include "DeviceIdentity.h"
 #include "Scheduler.h"
+#include "DocumentPayload.h"
 #include <NightMare/HardwareProfile.h>
 #include <Network/MQTT.h>
 #include <esp_system.h>
@@ -345,9 +346,13 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     case InfoType::INVALID:
         return result;
     }
-    // No overflow check: an ArduinoJson 7 document has no fixed capacity.
-    serializeJson(doc, result.data);
-    result.valid = result.data.length() != 0;
+    // An ArduinoJson 7 document has no fixed capacity, but it can still lose a
+    // value to a failed allocation, and a non-empty payload is no evidence that
+    // it did not. These documents are retained, so a half-built one would be
+    // read as this device's description until something replaced it.
+    result.valid = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
+    if (!result.valid)
+        LOG_WARNING("TEL", "Could not build the complete info document; publishing nothing");
     return result;
 }
 
@@ -382,10 +387,17 @@ TelemetryResult TelemetryService::getHardware(HardwareFormat format) const
         buildPositionalHardware(doc);
     else
         buildNamedHardware(doc);
-    const size_t written = format == HardwareFormat::MSGPACK
-                               ? serializeMsgPack(doc, result.data)
-                               : serializeJson(doc, result.data);
-    result.valid = written != 0;
+    const bool packed = format == HardwareFormat::MSGPACK;
+    // Same rule as the manifest, and for the same reason: a board describing
+    // itself with half its pins is worse than one that has not answered yet.
+    // The compact form needs this doubly -- its connections encode Direction,
+    // SignalType and the device index as bare numbers, and every one of those
+    // enums starts at 0, which MessagePack writes as the byte 0x00.
+    result.valid = serializeWholeDocument(
+        doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON, result.data);
+    if (!result.valid)
+        LOG_WARNING("TEL", "Could not build the complete %s hardware document; publishing nothing",
+                    packed ? "MessagePack" : "JSON");
     return result;
 }
 
