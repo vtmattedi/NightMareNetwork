@@ -121,6 +121,7 @@ void setup()
     const NMHardware::Resistor rSub("0.33");
     const NMHardware::Resistor rSubNumeric(0.33);
     const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
+    const TelemetryResult packedHardware = Telemetry.getHardware(HardwareFormat::MSGPACK);
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
     const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
@@ -133,7 +134,11 @@ void setup()
                             rSub.exponent() == -1 && rSubNumeric.exponent() == -1 &&
                             hardware.valid &&
                             hardware.data.indexOf("esp32-devkit:test") >= 0 &&
-                            hardware.data.indexOf("\"connections\"") >= 0 && info.valid &&
+                            hardware.data.indexOf("button-board:test") >= 0 &&
+                            hardware.data.indexOf("\"boards\"") >= 0 &&
+                            hardware.data.indexOf("\"board\":1") >= 0 &&
+                            hardware.data.indexOf("\"connections\"") >= 0 &&
+                            packedHardware.valid && packedHardware.data.length() > 0 && info.valid &&
                             info.data.indexOf("hwconnections") < 0 &&
                             hardwareCommand.result && !removedConnections.result);
     Telemetry.start();

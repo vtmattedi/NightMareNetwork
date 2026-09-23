@@ -98,7 +98,8 @@ Profile getProfile()
 #if NM_HAS_PROJECT_HARDWARE
     return projectProfile();
 #else
-    return {"unspecified", nullptr, 0, nullptr, 0};
+    static const Board boards[] = {{"main", "unspecified"}};
+    return {boards, 1, nullptr, 0, nullptr, 0};
 #endif
 }
 }

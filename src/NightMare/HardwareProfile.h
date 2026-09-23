@@ -4,7 +4,7 @@
 
 namespace NMHardware
 {
-constexpr uint8_t TopologyVersion = 1;
+constexpr uint8_t TopologyVersion = 2;
 constexpr uint8_t NoDevice = 0xff;
 constexpr uint8_t NoBus = 0xff;
 
@@ -79,10 +79,17 @@ private:
 };
 static_assert(sizeof(Resistor) == 2, "Resistor wire value must remain exactly two bytes");
 
+struct Board
+{
+    const char *id;
+    const char *model;
+};
+
 struct Device
 {
     const char *id;
     const char *model;
+    uint8_t board;
 };
 
 // MessagePack connection positions are kept in this same order. `resistor` is
@@ -110,26 +117,29 @@ struct Connection
 
 struct Profile
 {
-    const char *boardId;
+    const Board *boards;
+    size_t boardCount;
     const Device *devices;
     size_t deviceCount;
     const Connection *connections;
     size_t connectionCount;
 };
 
-/* MessagePack topology schema (version 1):
+/* MessagePack topology schema (version 2):
  *
- *   [version, boardId, devices[], connections[]]
- *   device     := [id, model]
+ *   [version, boards[], devices[], connections[]]
+ *   board      := [id, model]
+ *   device     := [id, model, boardIndex]
  *   connection := [pin, deviceIndex, signal, busIndex, signalType,
  *                  direction, pull, activeLow, resistor?]
  *
- * Indices use 0xff for "none". Enums and array fields are append-only. The
- * optional resistor is the two-byte value returned by Resistor::encoded().
- * Rendering coordinates, artwork and icons never belong in this profile.
+ * boards[0] is the main board. Connection device and bus indices use 0xff for
+ * "none". Enums and array fields are append-only. The optional resistor is the
+ * two-byte value returned by Resistor::encoded(). Rendering coordinates,
+ * artwork and icons never belong in this profile.
  */
 
-// If the project has no NightMareHardware.h, this returns an unnamed board
-// with no advertised devices or physical connections.
+// If the project has no NightMareHardware.h, this returns one "main" board
+// with model "unspecified" and no advertised devices or connections.
 Profile getProfile();
 }

@@ -184,9 +184,13 @@ namespace NMHardware
 {
 inline Profile projectProfile()
 {
+    static const Board boards[] = {
+        {"main", "esp32-c3-supermini:v1"},
+        {"front", "status-panel:v1"},
+    };
     static const Device devices[] = {
-        {"button", "momentary-switch"},
-        {"status", "LED"},
+        {"button", "momentary-switch", 0},
+        {"status", "LED", 1},
     };
     static const Connection connections[] = {
         {9, 0, "pressed", NoBus, SignalType::Gpio,
@@ -196,7 +200,7 @@ inline Profile projectProfile()
     };
 
     return {
-        "esp32-c3-supermini:v1",
+        boards, sizeof(boards) / sizeof(boards[0]),
         devices, sizeof(devices) / sizeof(devices[0]),
         connections,
         sizeof(connections) / sizeof(connections[0])
@@ -208,10 +212,14 @@ inline Profile projectProfile()
 If this file is absent, NightMare reports:
 
 ```text
-board: unspecified
+boards: [{ id: main, model: unspecified }]
 devices: none
 connections: none
 ```
+
+`boards[0]` is always the main board. Board IDs identify instances in this
+topology; board models select stable board or footprint definitions. A device's
+numeric board field identifies the physical board that owns it.
 
 ## Declare Resources
 

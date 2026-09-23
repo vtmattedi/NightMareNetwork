@@ -18,6 +18,14 @@ namespace
     constexpr char NetworkJob[] = "nm.telemetry.network";
     constexpr size_t MaxConnections = 128;
 
+    const char *mainBoardModel(const NMHardware::Profile &profile)
+    {
+        if (profile.boardCount == 0 || profile.boards == nullptr ||
+            profile.boards[0].model == nullptr)
+            return "unspecified";
+        return profile.boards[0].model;
+    }
+
     const char *directionName(NMHardware::Direction direction)
     {
         switch (direction)
@@ -80,10 +88,15 @@ namespace
 
     bool profileUsable(const NMHardware::Profile &profile)
     {
-        if (profile.deviceCount > 255 || profile.connectionCount > MaxConnections ||
+        if (profile.boardCount == 0 || profile.boardCount > 255 ||
+            profile.deviceCount > 255 || profile.connectionCount > MaxConnections ||
+            profile.boards == nullptr ||
             (profile.deviceCount != 0 && profile.devices == nullptr) ||
             (profile.connectionCount != 0 && profile.connections == nullptr))
             return false;
+        for (size_t i = 0; i < profile.deviceCount; ++i)
+            if (profile.devices[i].board >= profile.boardCount)
+                return false;
         for (size_t i = 0; i < profile.connectionCount; ++i)
         {
             const NMHardware::Connection &connection = profile.connections[i];
@@ -169,7 +182,7 @@ void TelemetryService::appendIdentity(JsonObject dst) const
 void TelemetryService::appendHardware(JsonObject dst) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
-    dst["board"] = profile.boardId != nullptr ? profile.boardId : "unspecified";
+    dst["board"] = mainBoardModel(profile);
     dst["chip"] = ESP.getChipModel();
     dst["cores"] = ESP.getChipCores();
     dst["revision"] = ESP.getChipRevision();
@@ -182,13 +195,20 @@ void TelemetryService::buildNamedHardware(JsonDocument &doc) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
     doc["version"] = NMHardware::TopologyVersion;
-    doc["board_id"] = profile.boardId != nullptr ? profile.boardId : "unspecified";
+    JsonArray boards = doc["boards"].to<JsonArray>();
+    for (size_t i = 0; i < profile.boardCount; ++i)
+    {
+        JsonObject item = boards.add<JsonObject>();
+        item["id"] = profile.boards[i].id != nullptr ? profile.boards[i].id : "";
+        item["model"] = profile.boards[i].model != nullptr ? profile.boards[i].model : "";
+    }
     JsonArray devices = doc["devices"].to<JsonArray>();
     for (size_t i = 0; i < profile.deviceCount; ++i)
     {
         JsonObject item = devices.add<JsonObject>();
         item["id"] = profile.devices[i].id != nullptr ? profile.devices[i].id : "";
         item["model"] = profile.devices[i].model != nullptr ? profile.devices[i].model : "";
+        item["board"] = profile.devices[i].board;
     }
     JsonArray connections = doc["connections"].to<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)
@@ -224,13 +244,20 @@ void TelemetryService::buildPositionalHardware(JsonDocument &doc) const
     const NMHardware::Profile profile = NMHardware::getProfile();
     JsonArray root = doc.to<JsonArray>();
     root.add(NMHardware::TopologyVersion);
-    root.add(profile.boardId != nullptr ? profile.boardId : "unspecified");
+    JsonArray boards = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.boardCount; ++i)
+    {
+        JsonArray item = boards.add<JsonArray>();
+        item.add(profile.boards[i].id != nullptr ? profile.boards[i].id : "");
+        item.add(profile.boards[i].model != nullptr ? profile.boards[i].model : "");
+    }
     JsonArray devices = root.add<JsonArray>();
     for (size_t i = 0; i < profile.deviceCount; ++i)
     {
         JsonArray item = devices.add<JsonArray>();
         item.add(profile.devices[i].id != nullptr ? profile.devices[i].id : "");
         item.add(profile.devices[i].model != nullptr ? profile.devices[i].model : "");
+        item.add(profile.devices[i].board);
     }
     JsonArray connections = root.add<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)

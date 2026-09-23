@@ -203,7 +203,8 @@ heap_bytes
 psram_bytes
 ```
 
-`board` comes from the active NightMare hardware profile.
+`board` is the model of the main board (`boards[0]`) in the active NightMare
+hardware profile.
 
 The remaining hardware fields come from the ESP runtime.
 
@@ -218,15 +219,39 @@ The MessagePack schema is versioned and positional:
 ```text
 [
   version,
-  boardId,
+  boards[],
   devices[],
   connections[]
 ]
 
-device     = [id, model]
+board      = [id, model]
+device     = [id, model, boardIndex]
 connection = [pin, deviceIndex, signal, busIndex,
               signalTypeEnum, directionEnum, pullEnum, activeLow,
               resistor?]
+```
+
+Version 2 makes every physical board or module a first-class topology entry.
+`boards[0]` is the main board. A board `id` identifies that instance in this
+topology, while `model` selects its stable board/footprint definition. Every
+device belongs to a board by numeric index, so multiple instances of the same
+board model remain distinct.
+
+The readable JSON form names the same fields:
+
+```json
+{
+  "version": 2,
+  "boards": [
+    {"id": "main", "model": "esp32-3248s035c:v1"},
+    {"id": "io", "model": "mattediworks-io-expander:v1"}
+  ],
+  "devices": [
+    {"id": "display", "model": "ST7796", "board": 0},
+    {"id": "pcf", "model": "PCF8574", "board": 1}
+  ],
+  "connections": []
+}
 ```
 
 `255` means no device or no bus. Numeric enums are append-only:

@@ -79,6 +79,22 @@ lifecycle, while ordinary device information remains readable JSON.
 available in retained JSON and MessagePack, and rendering metadata remains a
 server concern.
 
+## Physical boards are first-class topology owners
+
+**Decision:** hardware topology version 2 represents every physical board or
+module, including the main board, in one `boards[]` collection. Each device
+references the board that owns it by index.
+
+**Reason:** “onboard” is not an intrinsic device property. What matters for
+rendering and physical reasoning is which board instance owns a component.
+Separating an instance `id` from a stable board `model` also allows two
+identical expansion boards in the same topology.
+
+**Consequence:** `boards[0]` is the main board; there is no separate `boardId`
+field. Board and device records retain human-readable IDs, while repeated wire
+references use compact numeric indices. This is an intentional version 2 wire
+and public API break rather than a version 1 compatibility representation.
+
 ## Status is presence, not Resource freshness
 
 **Decision:** `<device>/status` contains the logical name, hardware signature, configured timezone, and online/offline presence.

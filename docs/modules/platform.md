@@ -209,6 +209,19 @@ NMHardware::Profile projectProfile();
 The model is:
 
 ```cpp
+struct Board
+{
+    const char *id;
+    const char *model;
+};
+
+struct Device
+{
+    const char *id;
+    const char *model;
+    uint8_t board;
+};
+
 struct Connection
 {
     int16_t pin;
@@ -224,7 +237,8 @@ struct Connection
 
 struct Profile
 {
-    const char *boardId;
+    const Board *boards;
+    size_t boardCount;
     const Device *devices;
     size_t deviceCount;
     const Connection *connections;
@@ -256,14 +270,14 @@ ExternalDown
 If no `NightMareHardware.h` exists, NightMare returns:
 
 ```text
-boardId:     unspecified
+boards:      [{ id: main, model: unspecified }]
 devices:     none
 connections: none
 ```
 
-The board ID also feeds INFO/HARDWARE. The complete topology is published at
-`<device>/hardware` and `<device>/hardware/msgpack` and is available through
-the `HW` command.
+The model of `boards[0]` also feeds INFO/HARDWARE. The complete topology is
+published at `<device>/hardware` and `<device>/hardware/msgpack` and is
+available through the `HW` command.
 
 ## `startNightMareESP()`
 

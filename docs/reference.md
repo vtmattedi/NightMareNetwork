@@ -1106,6 +1106,13 @@ struct Device
 {
     const char *id;
     const char *model;
+    uint8_t board;
+};
+
+struct Board
+{
+    const char *id;
+    const char *model;
 };
 
 struct Connection
@@ -1123,7 +1130,8 @@ struct Connection
 
 struct Profile
 {
-    const char *boardId;
+    const Board *boards;
+    size_t boardCount;
     const Device *devices;
     size_t deviceCount;
     const Connection *connections;

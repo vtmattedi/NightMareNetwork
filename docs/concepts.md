@@ -341,8 +341,9 @@ compact representation. The two retained forms are:
 <device>/hardware/msgpack
 ```
 
-They describe only the board ID, attached devices, buses/signals, pins,
-directions, pull modes, optional pull resistors, and active-low behavior.
+They describe physical board instances and models, which board owns each
+attached device, buses/signals, pins, directions, pull modes, optional pull
+resistors, and active-low behavior.
 Artwork, footprints, coordinates, icons, and other rendering data remain
 server-side.
 

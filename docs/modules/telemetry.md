@@ -401,7 +401,7 @@ NMHardware::getProfile();
 If no project `NightMareHardware.h` exists, the profile defaults to:
 
 ```text
-board: unspecified
+boards: [{ id: main, model: unspecified }]
 connections: none
 ```
 
@@ -426,10 +426,11 @@ Telemetry.publishHardware(HardwareFormat::MSGPACK);
 Telemetry.publishHardware(); // both
 ```
 
-The compact schema is `[version, boardId, devices[], connections[]]`. Devices
-are `[id, model]`; connections use positional pin, device index, signal, bus
-index, numeric signal type, numeric direction, numeric pull, active-low, and an
-optional resistor.
+The version 2 compact schema is
+`[version, boards[], devices[], connections[]]`. Boards are `[id, model]`, and
+devices are `[id, model, boardIndex]`. `boards[0]` is the main board. Connections
+use positional pin, device index, signal, bus index, numeric signal type,
+numeric direction, numeric pull, active-low, and an optional resistor.
 
 A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
 `a.b × 10^c` ohms. Constructors accept numeric ohms and strings such as
@@ -438,6 +439,7 @@ A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
 Pull modes are `None`, `Up`, `Down`, `ExternalUp`, and `ExternalDown`.
 Rendering coordinates, SVG, icons, footprints, and artwork remain server-side.
 
-The implementation bounds hardware connections to 128 entries and devices to
-255. An unusable profile causes topology generation to fail rather than
-silently serialize invalid memory.
+The implementation bounds hardware connections to 128 entries and boards and
+devices to 255 each. A profile must contain at least one board, and every device
+must reference a valid board index. An unusable profile causes topology
+generation to fail rather than silently serialize invalid memory.
