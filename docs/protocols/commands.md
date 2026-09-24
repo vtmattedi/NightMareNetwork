@@ -692,7 +692,7 @@ Returns JSON:
 }
 ```
 
-Directory traversal is bounded to four recursive levels and the response uses a 4096-byte JSON document capacity.
+Directory traversal is bounded to four recursive levels, and the serialized JSON response is limited to 4096 bytes.
 
 ### Read
 

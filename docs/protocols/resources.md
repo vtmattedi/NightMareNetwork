@@ -655,5 +655,5 @@ Current Resource protocol/runtime limits include:
 bound Resources per device: 100
 Resource segment length:     64 characters
 Value/Action payload:        2048 bytes
-manifest JSON capacity:      16384 bytes
+manifest payload limit:      16384 bytes
 ```

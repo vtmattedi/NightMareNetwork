@@ -360,6 +360,8 @@ bool publishManifest();
 bool publishConsumeManifest();
 bool publishResourceStates();
 void subscribeAll();
+bool needsSubscription(
+    const String &topicFilter) const;
 
 bool handleIngressMessage(
     const String &topic,
@@ -369,6 +371,16 @@ using ManifestHandler =
     void (*)(const String &deviceName, const String &manifest);
 
 void setManifestHandler(ManifestHandler handler);
+
+using EncodedManifestHandler =
+    void (*)(const String &deviceName, const String &encoded);
+
+void setEncodedManifestHandler(
+    EncodedManifestHandler handler);
+
+static bool decodeManifest(
+    const String &encoded,
+    JsonDocument &into);
 
 static bool decodeConsumeManifest(
     const String &encoded,
@@ -390,8 +402,10 @@ ActionResult executeCommand(
 
 // Resource command grammar:
 //   >list
+//   >manifest [publish] [json|msgpack]
+//   >drop <name|owner/name>
 //   >raw <topic> [payload]
-//   > <name> [get|set|invoke] [payload]
+//   > <name|owner/name> [get|set|invoke] [payload]
 
 bool withdrawIdentity(const String &oldDeviceName);
 ```
@@ -427,7 +441,7 @@ Current limits:
 Resources per manager:          100
 Resource/topic segment:         64 characters
 Value/Action payload:           2048 bytes
-Resource manifest capacity:     16384 bytes
+Resource manifest payload limit: 16384 bytes
 Resource command expression:    16640 bytes
 ```
 
@@ -811,11 +825,8 @@ Current persistent file:
 /configs.json
 ```
 
-Current JSON load capacity:
-
-```text
-4096 bytes
-```
+Settings loading uses a dynamically sized ArduinoJson 7 `JsonDocument`;
+there is no fixed JSON load capacity.
 
 ## Time
 

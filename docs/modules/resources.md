@@ -729,7 +729,7 @@ Current Resource limits are:
 bound Resources:          100
 Resource-name length:     64 characters
 Value/Action payload:     2048 bytes
-manifest JSON capacity:   16384 bytes
+manifest payload limit:   16384 bytes
 ```
 
 For wire details, see [Resource protocol](../protocols/resources.md).

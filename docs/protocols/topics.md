@@ -181,13 +181,16 @@ NightMare subscribes only where a bound Resource needs ingress.
 | `ManagedAction` | its own `/invoke` |
 | `RemoteAction` | none |
 
-For Remote Resources, the manager also subscribes once to:
+When `NM_ENABLE_REMOTE_RESOURCE_VERIFICATION` is enabled, the manager
+also subscribes once to:
 
 ```text
-<remote-device>/manifest
+<remote-device>/manifest/msgpack
 ```
 
-per remote owner so it can receive descriptive manifest information.
+per remote owner. The compact manifest is decoded for compatibility diagnostics
+against the local Remote-resource declarations. This verification subscription
+is separate from JSON `+/manifest` discovery/handler subscriptions.
 
 These subscriptions are rebuilt after MQTT reconnect.
 

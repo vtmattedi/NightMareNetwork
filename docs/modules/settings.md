@@ -292,13 +292,11 @@ PersistentSettings.load();
 
 replaces the current in-memory entries with the file contents.
 
-The current JSON parsing buffer is:
+Settings loading uses ArduinoJson 7's dynamically sized `JsonDocument`;
+there is no fixed 4096-byte parsing buffer.
 
-```text
-4096 bytes
-```
-
-The RuntimeState entry limit of 64 still applies while loading.
+The RuntimeState entry limit of 64 still applies while loading, and allocation
+failure or invalid JSON causes the load to fail.
 
 ## Framework-private settings
 

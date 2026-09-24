@@ -23,7 +23,7 @@ platform:  espressif32
 The library currently declares these dependencies:
 
 ```text
-ArduinoJson ^6.21.3
+ArduinoJson ^7.0.0
 ArduinoOTA
 ```
 
@@ -102,10 +102,14 @@ A useful explicit default configuration is:
 #define NM_ENABLE_LVGL 0
 
 #define NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
+#define NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
+#define NM_DEFAULT_MANIFEST_FORMAT json
 
 #define NM_TELEMETRY_INTERVAL_MS 60000UL
 #define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
 #define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
+#define NM_SYSTEM_REQUEST_RETRY_MS 1000UL
+#define NM_SYSTEM_REQUEST_MAX_RETRY_MS 300000UL
 
 #define NM_SCHEDULER_OWN_TASK 1
 

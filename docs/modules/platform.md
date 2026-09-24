@@ -88,7 +88,8 @@ NM_ENABLE_HTTP                 0
 NM_ENABLE_WEBSOCKET            0
 NM_ENABLE_LVGL                 0
 
-NM_ENABLE_ACTION_PAYLOAD_ASSERTION  0
+NM_ENABLE_ACTION_PAYLOAD_ASSERTION     0
+NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
 
 NM_CONSOLE_BUILTINS            1
 NM_CONSOLE_SERIAL              0
@@ -120,9 +121,11 @@ NM_NTP_SERVER_3  "time.google.com"
 Defaults:
 
 ```text
-NM_TELEMETRY_INTERVAL_MS           60000
-NM_NETWORK_TELEMETRY_INTERVAL_MS  300000
+NM_TELEMETRY_INTERVAL_MS             60000
+NM_NETWORK_TELEMETRY_INTERVAL_MS   300000
 NM_IDENTITY_CLEANUP_RETRY_MS       60000
+NM_SYSTEM_REQUEST_RETRY_MS          1000
+NM_SYSTEM_REQUEST_MAX_RETRY_MS    300000
 ```
 
 ## Scheduler execution mode
@@ -189,6 +192,13 @@ WEBSOCKET
 CONSOLE_SERIAL
     -> CONSOLE
 ```
+
+> **Current MQTT-off limitation:** the feature graph does not formally require
+> MQTT when its dependents are disabled, but the current ESP32
+> `tickNightMareESP()` deferred-publication processor still checks MQTT
+> readiness directly. Treat the standard ESP lifecycle with
+> `NM_ENABLE_MQTT=0` as unsupported until that processor becomes
+> transport-neutral.
 
 These are current implementation dependencies, not necessarily permanent architectural requirements.
 

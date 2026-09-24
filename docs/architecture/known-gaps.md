@@ -193,6 +193,19 @@ The current compile-time feature rules therefore require both.
 
 A future design could separate “build/query telemetry JSON” from “automatically publish telemetry,” but that split is not part of the current feature model.
 
+## MQTT-disabled ESP lifecycle is not yet cleanly supported
+
+**Category:** Known implementation coupling.
+
+The feature graph allows MQTT to be disabled when MQTT-dependent features are
+also disabled, but the current ESP32 cooperative deferred-publication processor
+still checks MQTT connection state directly.
+
+As a result, the standard `startNightMareESP()` / `tickNightMareESP()` lifecycle
+should currently be treated as MQTT-oriented. This needs to become
+transport-neutral before an ESP-NOW-only leaf can use the same lifecycle with
+`NM_ENABLE_MQTT=0` cleanly.
+
 ## WiFi/time/OTA remain ESP-oriented services
 
 **Category:** Technical debt / platform limitation.
