@@ -407,7 +407,8 @@ On MQTT reconnect, NightMare restores framework participation instead of asking 
 The reconnect callback restores subscriptions, records retained framework
 publications, flushes already queued application messages, and invokes the
 project callback. `tickNightMareESP()` then processes at most one queued
-framework publication per call. Failed work is requested again.
+framework publication per call. Failed work moves behind the other ready work,
+waits for the retry interval, and is dropped after the configured final attempt.
 
 The path includes:
 

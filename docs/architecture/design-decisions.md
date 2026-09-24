@@ -23,10 +23,11 @@ framework publication still needs processing.
 headers, and MQTT reconnect callbacks should not build every allocation-heavy
 retained document in one TLS memory burst.
 
-**Consequence:** `tickNightMareESP()` processes at most one pending publication
-request per call and requests failed work again. This is task-safe framework
-plumbing, not an ISR API or a generic scheduler. Generic transient String data
-continues to use an application-owned `RuntimeState`.
+**Consequence:** `tickNightMareESP()` processes at most one ready publication
+request per call. Failed work moves behind other ready requests, waits before
+retrying, and is dropped after a bounded number of attempts. This is task-safe
+framework plumbing, not an ISR API or a generic scheduler. Generic transient
+String data continues to use an application-owned `RuntimeState`.
 
 ## Retained MQTT state instead of a separate synchronization protocol
 

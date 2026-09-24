@@ -465,8 +465,9 @@ time request when wall time is invalid
 ```
 
 The console and time-request messages remain small immediate publications. The
-typed pending requests are consumed by `tickNightMareESP()`; failed
-publications are requested again.
+typed pending requests are consumed by `tickNightMareESP()`. A failed request
+moves behind other ready work, waits before retrying, and is dropped after its
+configured final attempt. Offline time does not consume an attempt.
 
 ## Custom subscriptions
 

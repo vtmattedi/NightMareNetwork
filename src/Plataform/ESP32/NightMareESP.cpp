@@ -24,73 +24,137 @@
 
 namespace
 {
-bool processSystemRequest(SystemRequest request)
-{
-    switch (request)
+    struct RequestRetry
     {
-    case SystemRequest::PublishStatus:
-#if NM_ENABLE_MQTT
-        return MQTT_Connected() && MQTT_Publish("status", deviceStatusJson(true), true, true);
-#else
-        return true;
-#endif
-    case SystemRequest::PublishManifest:
-#if NM_ENABLE_MQTT
-        return MQTT_Connected() && gResourcesManager.publishManifest();
-#else
-        return true;
-#endif
-    case SystemRequest::PublishConsumeManifest:
-#if NM_ENABLE_MQTT
-        return MQTT_Connected() && gResourcesManager.publishConsumeManifest();
-#else
-        return true;
-#endif
-    case SystemRequest::PublishResourceStates:
-#if NM_ENABLE_MQTT
-        return MQTT_Connected() && gResourcesManager.publishResourceStates();
-#else
-        return true;
-#endif
-    case SystemRequest::PublishInfo:
-#if NM_ENABLE_TELEMETRY
-        return MQTT_Connected() && Telemetry.publishInfo(InfoType::INFO);
-#else
-        return true;
-#endif
-    case SystemRequest::PublishHardwareJson:
-#if NM_ENABLE_TELEMETRY
-        return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::JSON);
-#else
-        return true;
-#endif
-    case SystemRequest::PublishHardwareMsgPack:
-#if NM_ENABLE_TELEMETRY
-        return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::MSGPACK);
-#else
-        return true;
-#endif
-    case SystemRequest::Count:
-        return true;
-    }
-    return true;
-}
+        uint8_t attempts = 0;
+        uint32_t retryAtMs = 0;
+    };
 
-void processOneSystemRequest()
-{
-    static uint16_t next = 0;
-    for (size_t checked = 0; checked < SystemRequestCount; ++checked)
+    RequestRetry requestRetries[SystemRequestCount];
+
+    bool retryReady(const RequestRetry &retry, uint32_t now)
     {
-        const uint16_t index = (next + checked) % SystemRequestCount;
-        const SystemRequest request = static_cast<SystemRequest>(index);
-        if (!SystemState.take(request))
-            continue;
-        next = (index + 1) % SystemRequestCount;
-        if (!processSystemRequest(request))
-            SystemState.request(request);
-        return;
+        return retry.attempts == 0 ||
+               static_cast<int32_t>(now - retry.retryAtMs) >= 0;
     }
-}
+
+    bool processSystemRequest(SystemRequest request)
+    {
+        switch (request)
+        {
+        case SystemRequest::PublishStatus:
+#if NM_ENABLE_MQTT
+            return MQTT_Connected() && MQTT_Publish("status", deviceStatusJson(true), true, true);
+#else
+            return true;
+#endif
+        case SystemRequest::PublishManifest:
+#if NM_ENABLE_MQTT
+            return MQTT_Connected() && gResourcesManager.publishManifest();
+#else
+            return true;
+#endif
+        case SystemRequest::PublishConsumeManifest:
+#if NM_ENABLE_MQTT
+            return MQTT_Connected() && gResourcesManager.publishConsumeManifest();
+#else
+            return true;
+#endif
+        case SystemRequest::PublishResourceStates:
+#if NM_ENABLE_MQTT
+            return MQTT_Connected() && gResourcesManager.publishResourceStates();
+#else
+            return true;
+#endif
+        case SystemRequest::PublishInfo:
+#if NM_ENABLE_TELEMETRY
+            return MQTT_Connected() && Telemetry.publishInfo(InfoType::INFO);
+#else
+            return true;
+#endif
+        case SystemRequest::PublishHardwareJson:
+#if NM_ENABLE_TELEMETRY
+            return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::JSON);
+#else
+            return true;
+#endif
+        case SystemRequest::PublishHardwareMsgPack:
+#if NM_ENABLE_TELEMETRY
+            return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::MSGPACK);
+#else
+            return true;
+#endif
+        case SystemRequest::Count:
+            return true;
+        }
+        return true;
+    }
+
+    String debugSystemRequest(int start = 0)
+    {
+        static const char *SystemRequestNames[] = {
+            "PublishStatus",
+            "PublishManifest",
+            "PublishConsumeManifest",
+            "PublishResourceStates",
+            "PublishInfo",
+            "PublishHardwareJson",
+            "PublishHardwareMsgPack",
+            "Count"};
+        String result = "";
+        for (size_t i = 0; i < SystemRequestCount; ++i)
+        {
+            int index = (start + i) % SystemRequestCount;
+            if (SystemState.pending(static_cast<SystemRequest>(index)))
+            {
+                if (!result.isEmpty())
+                    result += ", ";
+                result += SystemRequestNames[index];
+            }
+        }
+        return result;
+    }
+
+    void processOneSystemRequest()
+    {
+        static uint16_t next = 0;
+#if NM_ENABLE_MQTT
+        // All current requests publish through MQTT. Keep them pending while
+        // offline without spending an attempt or entering a retry loop.
+        if (!MQTT_Connected())
+            return;
+#endif
+        const uint32_t now = millis();
+        for (size_t checked = 0; checked < SystemRequestCount; ++checked)
+        {
+            const uint16_t index = (next + checked) % SystemRequestCount;
+            const SystemRequest request = static_cast<SystemRequest>(index);
+            // Serial.printf("Processing system request: %d  queue: [%s]\n", index, debugSystemRequest().c_str());
+            RequestRetry &retry = requestRetries[index];
+            if (!SystemState.pending(request) || !retryReady(retry, now) ||
+                !SystemState.take(request))
+                continue;
+            next = (index + 1) % SystemRequestCount;
+            ++retry.attempts;
+            if (processSystemRequest(request))
+            {
+                retry = RequestRetry{};
+            }
+            else if (retry.attempts < NM_SYSTEM_REQUEST_MAX_ATTEMPTS)
+            {
+                retry.retryAtMs = now + NM_SYSTEM_REQUEST_RETRY_MS;
+                SystemState.request(request);
+            }
+            else
+            {
+                LOG_WARNING("NM", "Dropping system request %u after %u failed attempts",
+                            static_cast<unsigned>(index),
+                            static_cast<unsigned>(retry.attempts));
+                retry = RequestRetry{};
+            }
+            return;
+        }
+    }
 }
 #if NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
 #include <Core/NightMareCommand.h>

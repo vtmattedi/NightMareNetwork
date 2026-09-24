@@ -102,8 +102,19 @@
 #ifndef NM_IDENTITY_CLEANUP_RETRY_MS
 #define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
 #endif
-// Refresh of <device>/telemetry/network. Slow on purpose: it is bookkeeping, it
-// is also published on every MQTT connection, and /status owns presence.
+// Deferred framework publications use bounded, delayed retries. A permanent
+// failure must not turn into work attempted on every cooperative tick.
+#ifndef NM_SYSTEM_REQUEST_MAX_ATTEMPTS
+#define NM_SYSTEM_REQUEST_MAX_ATTEMPTS 3
+#endif
+#ifndef NM_SYSTEM_REQUEST_RETRY_MS
+#define NM_SYSTEM_REQUEST_RETRY_MS 1000UL
+#endif
+#if NM_SYSTEM_REQUEST_MAX_ATTEMPTS < 1
+#error "NM_SYSTEM_REQUEST_MAX_ATTEMPTS must be at least 1"
+#endif
+// Refresh of <device>/telemetry/network. Slow on purpose: it is bookkeeping,
+// while /status owns presence.
 #ifndef NM_NETWORK_TELEMETRY_INTERVAL_MS
 #define NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
 #endif

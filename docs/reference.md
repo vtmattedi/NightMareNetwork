@@ -750,6 +750,17 @@ extern SystemStateStore SystemState;
 The implementation uses fixed bit banks derived from each `Count`. Operations
 are task-safe and allocation-free; there is no ISR-safe API.
 
+Deferred publication processing defaults to:
+
+```cpp
+NM_SYSTEM_REQUEST_MAX_ATTEMPTS == 3
+NM_SYSTEM_REQUEST_RETRY_MS == 1000UL
+```
+
+Offline time does not consume an attempt. After a failed attempt, the request
+moves behind other ready work and cannot run again until the retry interval.
+The final failure is logged and dropped.
+
 ## StateStore
 
 When Settings are enabled:

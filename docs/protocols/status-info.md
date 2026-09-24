@@ -511,8 +511,9 @@ retained information documents:
 <device>/hardware/msgpack
 ```
 
-`tickNightMareESP()` publishes at most one requested document per call and
-requeues a failed publication. This spreads their allocations across
+`tickNightMareESP()` publishes at most one ready document per call. A failed
+publication moves behind other ready work, waits before retrying, and is
+dropped after the configured final attempt. This spreads allocations across
 cooperative ticks instead of the connection callback.
 
 Each document is attempted even if publication of another document fails.

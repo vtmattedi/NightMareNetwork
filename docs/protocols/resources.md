@@ -633,7 +633,7 @@ requests cooperative re-announcement of:
 
 Applications do not need to manually republish all bound Resources after reconnect.
 `tickNightMareESP()` processes the manifest, consume manifest, and managed-state
-requests separately and retries a failed request.
+requests separately. Failed requests use the bounded deferred retry policy.
 
 ## Identity cleanup
 
