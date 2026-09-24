@@ -36,15 +36,15 @@ enum class HardwareFormat : uint8_t
     MSGPACK
 };
 
-// Device-wide information, split by how often it changes. Three retained documents:
+// Device-wide information, split by how often it changes. Five retained documents:
 //   <device>/info               identity, hardware, build, boot: fixed per boot
 //   <device>/hardware           hardware topology as retained JSON
 //   <device>/hardware/msgpack   the same topology as retained MessagePack
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
-// All three are also refreshed on every MQTT connection. Sensors, actuators and
-// application state belong to NetResources, which carry their own freshness;
-// nothing here duplicates them.
+// Static INFO and hardware documents are requested on every MQTT connection
+// and published cooperatively. Sensors, actuators and application state belong
+// to NetResources, which carry their own freshness; nothing here duplicates them.
 class TelemetryService
 {
 public:

@@ -740,7 +740,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             const time_t epoch = NightMare::Time::now();
             const bool clockValid = NightMare::Time::valid();
             JsonDocument doc;
-            doc["synced"] = clockValid && SystemState.getFlag("time_synced");
+            doc["synced"] = clockValid && SystemState.get(SystemFlag::TimeSynced);
             doc["valid"] = clockValid;
             doc["epoch"] = clockValid ? static_cast<uint64_t>(epoch) : 0;
             doc["local"] = clockValid
@@ -815,7 +815,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             doc["totalBytes"] = LittleFS.totalBytes();
             doc["usedBytes"] = LittleFS.usedBytes();
             doc["usedPercentage"] = (double)(LittleFS.usedBytes() * 100) / (double)LittleFS.totalBytes();
-            doc["initialized"] = SystemState.getFlag("LittleFS_mounted");
+            doc["initialized"] = SystemState.get(SystemFlag::PersistentStorageReady);
             String resStr = "";
             serializeJson(doc, resStr);
             result.response = resStr;
@@ -858,7 +858,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 result.response = "Filesystem format denied.";
                 result.result = false;
             }
-            else if (!SystemState.getFlag("LittleFS_mounted"))
+            else if (!SystemState.get(SystemFlag::PersistentStorageReady))
             {
                 result.response = "Filesystem not mounted.";
                 result.result = false;
@@ -980,36 +980,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         else
         {
             result.response = "Unknown CONFIG subcommand available: [GET <name | all>, SET <name> <value>].";
-        }
-    }
-    else if (parsedMsg.command == "SYSTEMCONFIGS")
-    {
-        String name = parsedMsg.args[1];
-        String value = parsedMsg.args[2];
-        if (parsedMsg.subcommand == "GET")
-        {
-            if (name == "" || name == "ALL")
-                result.response = SystemState.toJson();
-            else
-            {
-                if (SystemState.exists(name))
-                {
-                    result.response = "{\"" + name + "\":\"" + SystemState.get(name) + "\"}";
-                }
-                else
-                {
-                    result.response = "{\"error\":\"Configuration '" + name + "' does not exist.\"}";
-                }
-            }
-        }
-        else if (parsedMsg.subcommand == "SET" && name != "" && value != "")
-        {
-            SystemState.set(name, value);
-            result.response = "{\"" + name + "\":\"" + SystemState.get(name) + "\"}";
-        }
-        else
-        {
-            result.response = SystemState.toJson();
         }
     }
 #if NM_ENABLE_WIFI

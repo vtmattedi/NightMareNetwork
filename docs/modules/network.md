@@ -420,18 +420,19 @@ Then the callback receives the complete topic String.
 MQTT_onConnected(callback);
 ```
 
-runs after NightMare's own connection work.
+runs after subscriptions are restored and standard publications are requested.
 
 Before the project callback, the framework has already:
 
 - restored subscriptions,
-- published online status,
-- re-announced Resources,
-- re-announced provider and consume manifests,
-- refreshed telemetry,
+- requested online status,
+- requested Resource state and provider/consume manifest re-announcement,
+- requested INFO and both hardware documents when telemetry is enabled,
 - flushed queued messages.
 
-Project code therefore sees a connection after standard framework participation has been restored.
+The requested publications are completed cooperatively by later
+`tickNightMareESP()` calls, one request per tick. Applications should therefore
+keep calling the standard tick after connection.
 
 ## Disconnected callback
 
@@ -449,20 +450,23 @@ describing which broker disconnected.
 
 ## Reconnect publication
 
-`NmMessageRouter::onConnected()` publishes/re-announces:
+`NmMessageRouter::onConnected()` requests deferred publication of:
 
 ```text
 status
 Resource manifest
+consume manifest
 Managed Value state
 INFO
-SYSTEM telemetry
-NETWORK telemetry
+hardware JSON
+hardware MessagePack
 console connection message
 time request when wall time is invalid
 ```
 
-according to enabled features.
+The console and time-request messages remain small immediate publications. The
+typed pending requests are consumed by `tickNightMareESP()`; failed
+publications are requested again.
 
 ## Custom subscriptions
 

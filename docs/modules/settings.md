@@ -7,7 +7,7 @@ order: 60
 
 # Settings and runtime state
 
-NightMare currently has two closely related key/value stores:
+NightMare has two generic String key/value types and one typed runtime facility:
 
 ```text
 RuntimeState
@@ -15,6 +15,9 @@ RuntimeState
 
 StateStore
     RuntimeState behavior + optional persistence
+
+SystemStateStore
+    allocation-free framework facts and pending requests
 ```
 
 The standard global instances are:
@@ -24,7 +27,8 @@ SystemState
 PersistentSettings
 ```
 
-They should not be treated as interchangeable merely because their APIs are similar.
+`SystemState` is not a key/value store. `PersistentSettings` remains a
+`StateStore` backed by the existing String model.
 
 ## RuntimeState
 
@@ -32,12 +36,6 @@ They should not be treated as interchangeable merely because their APIs are simi
 
 ```cpp
 RuntimeState state;
-```
-
-or use the global:
-
-```cpp
-SystemState
 ```
 
 It never accesses filesystem storage.
@@ -132,17 +130,32 @@ The global:
 SystemState
 ```
 
-is framework/runtime state.
+is an allocation-free `SystemStateStore`. Runtime facts use typed flags:
 
-Current framework examples include:
+```cpp
+if (!SystemState.get(SystemFlag::OtaRunning))
+    readSensor();
 
-```text
-LittleFS_mounted
-time_synced
-boot_time
+SystemState.set(SystemFlag::TimeSynced);
+SystemState.clear(SystemFlag::TimeSynced);
 ```
 
-Applications should avoid assuming undocumented framework keys are stable API.
+Pending framework work is kept in a separate typed bank:
+
+```cpp
+SystemState.request(SystemRequest::PublishHardwareJson);
+
+if (SystemState.take(SystemRequest::PublishHardwareJson))
+{
+    if (!publishHardwareJson())
+        SystemState.request(SystemRequest::PublishHardwareJson);
+}
+```
+
+`pending()` observes a request without clearing it. `take()` atomically tests
+and clears one. Operations are task-safe, not ISR-safe. Disabled modules leave
+their flags false. The storage size is derived from the enum `Count` members;
+the API does not expose raw masks.
 
 ## StateStore
 
@@ -181,7 +194,7 @@ PersistentSettings.begin();
 For a persistent store, `begin()`:
 
 1. mounts LittleFS with `LittleFS.begin(true)`,
-2. updates `SystemState["LittleFS_mounted"]`,
+2. updates `SystemFlag::PersistentStorageReady`,
 3. loads `/configs.json`,
 4. creates/saves an empty settings file if none exists.
 
@@ -303,6 +316,9 @@ _password
 
 These names are implementation details.
 
+NightMare source refers to them through `NightMare::PersistentKey` constants;
+the String values on disk remain unchanged for existing devices.
+
 Application code should use the owning module APIs:
 
 ```text
@@ -329,18 +345,6 @@ The command is a generic store interface.
 Module-specific invariants still belong to the module API.
 
 For example, changing `_device_name` directly would bypass adoption/cleanup semantics, while changing `_timezone` directly would not apply `TZ` or refresh identity publications. Use the identity API or commands instead.
-
-## SYSTEMCONFIGS command
-
-`SYSTEMCONFIGS` operates on:
-
-```cpp
-SystemState
-```
-
-rather than PersistentSettings.
-
-Those values disappear on reboot.
 
 ## Current coupling
 

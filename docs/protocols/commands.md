@@ -669,31 +669,6 @@ For normal `StateStore` changes, persistence may already be save-on-change; this
 
 Framework-private keys are implementation details even though the generic CONFIG surface can expose stored keys.
 
-## SYSTEMCONFIGS
-
-`SYSTEMCONFIGS` operates on the in-memory `SystemState`.
-
-Read all:
-
-```text
-SYSTEMCONFIGS GET
-SYSTEMCONFIGS GET ALL
-```
-
-Read one:
-
-```text
-SYSTEMCONFIGS GET <name>
-```
-
-Set one:
-
-```text
-SYSTEMCONFIGS SET <name> <value>
-```
-
-Unlike `CONFIG`, this is runtime state rather than persistent settings.
-
 ## FS
 
 Filesystem commands are part of the general built-in command set.

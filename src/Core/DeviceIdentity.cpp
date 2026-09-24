@@ -1,4 +1,5 @@
 #include "DeviceIdentity.h"
+#include "PersistentKeys.h"
 #include <NightMare/Features.h>
 #if NM_ENABLE_SETTINGS
 #include "StateStore.h"
@@ -11,11 +12,8 @@ DeviceIdentity gDeviceIdentity;
 
 namespace
 {
-constexpr char DeviceNameKey[] = "_device_name";
-constexpr char TimezoneKey[] = "_timezone";
 // "<oldName>/<flags>". The separator is safe because '/' never appears in a
 // device name, and one record is all v1 allows.
-constexpr char PendingCleanupKey[] = "_pending_identity_cleanup";
 constexpr uint8_t AllCleanupFlags = CLEANUP_RESOURCES | CLEANUP_STATUS;
 
 bool applyTimezone(const String &timezone)
@@ -76,8 +74,9 @@ bool DeviceIdentity::begin()
     const bool settingsReady = PersistentSettings.begin();
     if (settingsReady)
     {
-        storedName = PersistentSettings.get(DeviceNameKey, defaultName);
-        storedTimezone = PersistentSettings.get(TimezoneKey, defaultTimezone);
+        storedName = PersistentSettings.get(NightMare::PersistentKey::DeviceName, defaultName);
+        storedTimezone = PersistentSettings.get(NightMare::PersistentKey::DeviceTimezone,
+                                                defaultTimezone);
     }
 #endif
     deviceName_ = validDeviceName(storedName) ? storedName : defaultName;
@@ -86,10 +85,14 @@ bool DeviceIdentity::begin()
         return false;
     initialized_ = true;
 #if NM_ENABLE_SETTINGS
-    if (settingsReady && (!PersistentSettings.exists(DeviceNameKey) || storedName != deviceName_))
-        PersistentSettings.set(DeviceNameKey, deviceName_);
-    if (settingsReady && (!PersistentSettings.exists(TimezoneKey) || storedTimezone != timezone_))
-        PersistentSettings.set(TimezoneKey, timezone_);
+    if (settingsReady &&
+        (!PersistentSettings.exists(NightMare::PersistentKey::DeviceName) ||
+         storedName != deviceName_))
+        PersistentSettings.set(NightMare::PersistentKey::DeviceName, deviceName_);
+    if (settingsReady &&
+        (!PersistentSettings.exists(NightMare::PersistentKey::DeviceTimezone) ||
+         storedTimezone != timezone_))
+        PersistentSettings.set(NightMare::PersistentKey::DeviceTimezone, timezone_);
     if (settingsReady)
         loadPendingCleanup();
 #endif
@@ -99,9 +102,10 @@ bool DeviceIdentity::begin()
 void DeviceIdentity::loadPendingCleanup()
 {
 #if NM_ENABLE_SETTINGS
-    if (!PersistentSettings.exists(PendingCleanupKey))
+    if (!PersistentSettings.exists(NightMare::PersistentKey::PendingIdentityCleanup))
         return;
-    const String record = PersistentSettings.get(PendingCleanupKey, String());
+    const String record = PersistentSettings.get(
+        NightMare::PersistentKey::PendingIdentityCleanup, String());
     const int separator = record.lastIndexOf('/');
     if (separator > 0)
     {
@@ -118,7 +122,7 @@ void DeviceIdentity::loadPendingCleanup()
             return;
         }
     }
-    PersistentSettings.remove(PendingCleanupKey);
+    PersistentSettings.remove(NightMare::PersistentKey::PendingIdentityCleanup);
 #endif
 }
 
@@ -126,9 +130,9 @@ bool DeviceIdentity::persistPendingCleanup()
 {
 #if NM_ENABLE_SETTINGS
     if (pendingFlags_ == 0)
-        return !PersistentSettings.exists(PendingCleanupKey) ||
-               PersistentSettings.remove(PendingCleanupKey);
-    return PersistentSettings.set(PendingCleanupKey,
+        return !PersistentSettings.exists(NightMare::PersistentKey::PendingIdentityCleanup) ||
+               PersistentSettings.remove(NightMare::PersistentKey::PendingIdentityCleanup);
+    return PersistentSettings.set(NightMare::PersistentKey::PendingIdentityCleanup,
                                   pendingOldName_ + "/" + String(pendingFlags_));
 #else
     return true;
@@ -169,11 +173,11 @@ bool DeviceIdentity::setTimezone(const String &timezone)
     if (!applyTimezone(timezone))
         return false;
 #if NM_ENABLE_SETTINGS
-    if (!PersistentSettings.set(TimezoneKey, timezone))
+    if (!PersistentSettings.set(NightMare::PersistentKey::DeviceTimezone, timezone))
     {
         // StateStore mutates its in-memory value before saving. Restore both
         // views even when the first filesystem write failed.
-        PersistentSettings.set(TimezoneKey, previousTimezone);
+        PersistentSettings.set(NightMare::PersistentKey::DeviceTimezone, previousTimezone);
         applyTimezone(previousTimezone);
         return false;
     }
@@ -238,7 +242,7 @@ bool DeviceIdentity::beginAdoption(const String &newName)
         pendingFlags_ = 0;
         return false;
     }
-    if (!PersistentSettings.set(DeviceNameKey, newName))
+    if (!PersistentSettings.set(NightMare::PersistentKey::DeviceName, newName))
     {
         pendingOldName_ = String();
         pendingFlags_ = 0;

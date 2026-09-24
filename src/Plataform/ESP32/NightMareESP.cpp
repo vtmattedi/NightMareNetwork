@@ -1,6 +1,10 @@
 #include "NightMareESP.h"
 #include <NightMare.h>
 #include <Core/DeviceIdentity.h>
+#include <Core/SystemState.h>
+#if NM_ENABLE_RESOURCES
+#include <Core/ResourcesManager.h>
+#endif
 #if NM_ENABLE_SCHEDULER
 #include <Core/Scheduler.h>
 #endif
@@ -15,7 +19,79 @@
 #endif
 #if NM_ENABLE_MQTT
 #include <Network/IdentityCleanup.h>
+#include <Network/MQTT.h>
 #endif
+
+namespace
+{
+bool processSystemRequest(SystemRequest request)
+{
+    switch (request)
+    {
+    case SystemRequest::PublishStatus:
+#if NM_ENABLE_MQTT
+        return MQTT_Connected() && MQTT_Publish("status", deviceStatusJson(true), true, true);
+#else
+        return true;
+#endif
+    case SystemRequest::PublishManifest:
+#if NM_ENABLE_MQTT
+        return MQTT_Connected() && gResourcesManager.publishManifest();
+#else
+        return true;
+#endif
+    case SystemRequest::PublishConsumeManifest:
+#if NM_ENABLE_MQTT
+        return MQTT_Connected() && gResourcesManager.publishConsumeManifest();
+#else
+        return true;
+#endif
+    case SystemRequest::PublishResourceStates:
+#if NM_ENABLE_MQTT
+        return MQTT_Connected() && gResourcesManager.publishResourceStates();
+#else
+        return true;
+#endif
+    case SystemRequest::PublishInfo:
+#if NM_ENABLE_TELEMETRY
+        return MQTT_Connected() && Telemetry.publishInfo(InfoType::INFO);
+#else
+        return true;
+#endif
+    case SystemRequest::PublishHardwareJson:
+#if NM_ENABLE_TELEMETRY
+        return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::JSON);
+#else
+        return true;
+#endif
+    case SystemRequest::PublishHardwareMsgPack:
+#if NM_ENABLE_TELEMETRY
+        return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::MSGPACK);
+#else
+        return true;
+#endif
+    case SystemRequest::Count:
+        return true;
+    }
+    return true;
+}
+
+void processOneSystemRequest()
+{
+    static uint16_t next = 0;
+    for (size_t checked = 0; checked < SystemRequestCount; ++checked)
+    {
+        const uint16_t index = (next + checked) % SystemRequestCount;
+        const SystemRequest request = static_cast<SystemRequest>(index);
+        if (!SystemState.take(request))
+            continue;
+        next = (index + 1) % SystemRequestCount;
+        if (!processSystemRequest(request))
+            SystemState.request(request);
+        return;
+    }
+}
+}
 #if NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
 #include <Core/NightMareCommand.h>
 #endif
@@ -84,6 +160,7 @@ void tickNightMareESP()
 #if NM_ENABLE_TIME_SYNC
     processTimeSyncEvents();
 #endif
+    processOneSystemRequest();
 #if NM_ENABLE_SCHEDULER
     // In TASK mode the Scheduler's own task does this; ticking here too would
     // only contend for the same lock.

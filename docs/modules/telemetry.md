@@ -328,19 +328,23 @@ Default:
 300000 ms
 ```
 
-The slower cadence is deliberate because network telemetry is bookkeeping and is also refreshed on every MQTT connection.
+The slower cadence is deliberate because network telemetry is bookkeeping.
 
 ## MQTT reconnect publication
 
-Every MQTT connection calls:
+Every MQTT connection requests cooperative publication of:
 
 ```cpp
-Telemetry.publishAll();
+Telemetry.publishInfo(InfoType::INFO);
+Telemetry.publishHardware(HardwareFormat::JSON);
+Telemetry.publishHardware(HardwareFormat::MSGPACK);
 ```
 
 when telemetry is enabled.
 
-This refreshes retained INFO, SYSTEM, and NETWORK documents after reconnect or broker switch.
+`tickNightMareESP()` processes one request per call, so the three
+allocation-heavy static documents are not built during the MQTT/TLS connection
+callback. SYSTEM and NETWORK continue on their periodic schedules.
 
 ## Why network telemetry can look stale after disconnect
 

@@ -3,6 +3,7 @@
 #if NM_ENABLE_CONSOLE
 #include <Core/NightMareTypes.h>
 #include <Core/StateStore.h>
+#include <Core/SystemState.h>
 
 #define DELIMITER (char)' '
 

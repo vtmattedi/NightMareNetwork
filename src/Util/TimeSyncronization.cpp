@@ -4,7 +4,7 @@
 #include "TimeSyncronization.h"
 
 #include <Core/Logs.h>
-#include <Core/StateStore.h>
+#include <Core/SystemState.h>
 #include <Core/Time.h>
 #include <WiFi.h>
 #include <atomic>
@@ -17,19 +17,17 @@ void (*timeSyncCallback)(void) = nullptr;
 
 void sntpTimeAvailable(timeval *)
 {
-    // This runs on lwIP's task. RuntimeState owns Arduino Strings and is not
-    // thread-safe, so defer all bookkeeping and user callbacks to loop().
+    // This runs on lwIP's task. Keep state transitions and user callbacks in
+    // the normal cooperative context.
     syncPending.store(true, std::memory_order_release);
 }
 
 bool recordSynchronizedClock()
 {
-    const time_t timestamp = NightMare::Time::now();
     if (!NightMare::Time::valid())
         return false;
 
-    SystemState.setFlag("time_synced", true);
-    SystemState.set("boot_time", String(static_cast<unsigned long>(timestamp - millis() / 1000)));
+    SystemState.set(SystemFlag::TimeSynced);
     if (timeSyncCallback != nullptr)
         timeSyncCallback();
     return true;
@@ -45,7 +43,7 @@ bool startSntpTimeSync()
     if (timezone == nullptr || timezone[0] == '\0')
         timezone = NM_TIMEZONE;
 
-    SystemState.setFlag("time_synced", false);
+    SystemState.clear(SystemFlag::TimeSynced);
     esp_sntp_set_time_sync_notification_cb(sntpTimeAvailable);
     configTzTime(timezone, NM_NTP_SERVER_1, NM_NTP_SERVER_2, NM_NTP_SERVER_3);
     LOG("Time", "SNTP synchronization started (%s)", timezone);

@@ -502,21 +502,22 @@ Use network telemetry as last-known bookkeeping.
 
 ## Publication on MQTT connection
 
-Every MQTT connection or broker switch refreshes the five retained information documents:
+Every MQTT connection or broker switch requests a refresh of the three static
+retained information documents:
 
 ```text
 <device>/info
 <device>/hardware
 <device>/hardware/msgpack
-<device>/telemetry/system
-<device>/telemetry/network
 ```
 
-This happens through `Telemetry.publishAll()`.
+`tickNightMareESP()` publishes at most one requested document per call and
+requeues a failed publication. This spreads their allocations across
+cooperative ticks instead of the connection callback.
 
 Each document is attempted even if publication of another document fails.
 
-Network telemetry therefore identifies the broker actually active at the latest successful refresh.
+SYSTEM and NETWORK telemetry are refreshed by their periodic Scheduler jobs.
 
 ## Periodic publication
 

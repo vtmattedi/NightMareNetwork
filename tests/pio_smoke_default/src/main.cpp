@@ -5,6 +5,8 @@
 
 namespace
 {
+RuntimeState smokeState;
+
 template <typename T>
 class HasSetValue
 {
@@ -92,7 +94,7 @@ void setup()
 {
     PersistentSettings.begin();
     PersistentSettings.setFlag("smoke", true);
-    SystemState.setFlag("smoke", PersistentSettings.getFlag("smoke"));
+    smokeState.setFlag("smoke", PersistentSettings.getFlag("smoke"));
     managedState.onWrite = acceptStateWrite;
     const bool localStateUsesWritePolicy = managedState.setValue(7) && writeCalls == 1 &&
                                            managedState.getValue() == 7;
@@ -158,7 +160,7 @@ void setup()
                                       !ambiguous.success &&
                                       ambiguous.result.indexOf("owner/name") >= 0 &&
                                       qualified.success && qualified.result == "18";
-    SystemState.setFlag("resource_api", localStateUsesWritePolicy &&
+    smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&
                                             managedSensor.owner().length() != 0 &&
                                             managedSensor.kind() == NetResourceType::VALUE &&
@@ -172,7 +174,7 @@ void setup()
     const NightMareResults timezoneSet =
         handleNightMareCommand(String("TIMEZONE SET \"") + timezone + "\"");
     const NightMareResults invalidAdopt = handleNightMareCommand("CHANGE NAME all");
-    SystemState.setFlag("identity_commands",
+    smokeState.setFlag("identity_commands",
                         timezoneQuery.result && timezoneQuery.response.indexOf(timezone) >= 0 &&
                             timezoneSet.result && gDeviceIdentity.getTimezone() == timezone &&
                             !invalidAdopt.result);
@@ -199,7 +201,7 @@ void setup()
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
     const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
-    SystemState.setFlag("hardware_topology",
+    smokeState.setFlag("hardware_topology",
                         sizeof(NMHardware::Resistor) == 2 &&
                             r330.firstDigit() == 3 && r330.secondDigit() == 3 &&
                             r330.exponent() == 2 && r3k3.exponent() == 3 &&

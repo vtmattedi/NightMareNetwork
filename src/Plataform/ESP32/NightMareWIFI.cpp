@@ -2,6 +2,7 @@
 #if NM_ENABLE_WIFI
 #include "NightMareWIFI.h"
 #include <Core/DeviceIdentity.h>
+#include <Core/PersistentKeys.h>
 #if NM_ENABLE_MQTT
 #include <Network/MQTT.h>
 #endif
@@ -159,13 +160,14 @@ bool WiFi_Auto()
 {
     // Ensure StateStore module is initialized
     PersistentSettings.begin();
-    if (!PersistentSettings.exists("_ssid") || !PersistentSettings.exists("_password"))
+    if (!PersistentSettings.exists(NightMare::PersistentKey::WifiSsid) ||
+        !PersistentSettings.exists(NightMare::PersistentKey::WifiPassword))
     {
-        PersistentSettings.set("_ssid", DEFAULT_SSID);
-        PersistentSettings.set("_password", DEFAULT_PASSWORD);
+        PersistentSettings.set(NightMare::PersistentKey::WifiSsid, DEFAULT_SSID);
+        PersistentSettings.set(NightMare::PersistentKey::WifiPassword, DEFAULT_PASSWORD);
     }
-    String ssid = PersistentSettings.get("_ssid");
-    String password = PersistentSettings.get("_password");
+    String ssid = PersistentSettings.get(NightMare::PersistentKey::WifiSsid);
+    String password = PersistentSettings.get(NightMare::PersistentKey::WifiPassword);
     return WiFi_ConnectAsync(ssid.c_str(), password.c_str(), true);
 }
 
@@ -192,13 +194,13 @@ bool WiFi_ChangeCredentials(const String &ssid, const String &password)
     bool result = WiFi_Connect(ssid.c_str(), password.c_str(), 15000);
     if (!result)
     {
-        String old_ssid = PersistentSettings.get("_ssid");
-        String old_password = PersistentSettings.get("_password");
+        String old_ssid = PersistentSettings.get(NightMare::PersistentKey::WifiSsid);
+        String old_password = PersistentSettings.get(NightMare::PersistentKey::WifiPassword);
         WiFi_ConnectAsync(old_ssid.c_str(), old_password.c_str(), true);
         return false;
     }
-    PersistentSettings.set("_ssid", ssid);
-    PersistentSettings.set("_password", password);
+    PersistentSettings.set(NightMare::PersistentKey::WifiSsid, ssid);
+    PersistentSettings.set(NightMare::PersistentKey::WifiPassword, password);
     PersistentSettings.save();
     return true;
 }

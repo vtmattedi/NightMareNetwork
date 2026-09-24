@@ -31,8 +31,6 @@ void appendJsonString(String &output, const String &input)
 }
 }
 
-RuntimeState SystemState;
-
 bool RuntimeState::set(const String &key, const String &value)
 {
     if (key.length() == 0)

@@ -356,6 +356,9 @@ bool bindResource(NetResource *resource);
 void unbindResource(NetResource *resource);
 
 bool announceAll();
+bool publishManifest();
+bool publishConsumeManifest();
+bool publishResourceStates();
 void subscribeAll();
 
 bool handleIngressMessage(
@@ -669,12 +672,6 @@ void NightMareCommand_SerialResolver(
 
 ## RuntimeState
 
-Global:
-
-```cpp
-extern RuntimeState SystemState;
-```
-
 Capacity:
 
 ```cpp
@@ -711,6 +708,47 @@ size_t size() const;
 
 String toJson() const;
 ```
+
+## SystemState
+
+```cpp
+enum class SystemFlag : uint16_t
+{
+    OtaRunning = 0,
+    TimeSynced,
+    PersistentStorageReady,
+    Count
+};
+
+enum class SystemRequest : uint16_t
+{
+    PublishStatus = 0,
+    PublishManifest,
+    PublishConsumeManifest,
+    PublishResourceStates,
+    PublishInfo,
+    PublishHardwareJson,
+    PublishHardwareMsgPack,
+    Count
+};
+
+class SystemStateStore
+{
+public:
+    bool get(SystemFlag flag) const;
+    void set(SystemFlag flag);
+    void clear(SystemFlag flag);
+
+    void request(SystemRequest request);
+    bool pending(SystemRequest request) const;
+    bool take(SystemRequest request);
+};
+
+extern SystemStateStore SystemState;
+```
+
+The implementation uses fixed bit banks derived from each `Count`. Operations
+are task-safe and allocation-free; there is no ISR-safe API.
 
 ## StateStore
 

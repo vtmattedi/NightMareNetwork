@@ -5,6 +5,7 @@
 #include <Core/NightMareTypes.h>
 #include <Core/DeviceIdentity.h>
 #include <Core/RuntimeState.h>
+#include <Core/SystemState.h>
 #include <Core/Time.h>
 #include <Core/NetResources.h>
 #include <Core/Logs.h>

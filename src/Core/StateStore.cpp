@@ -2,6 +2,7 @@
 #if NM_ENABLE_SETTINGS
 
 #include "StateStore.h"
+#include "SystemState.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
@@ -18,10 +19,10 @@ bool StateStore::begin()
     }
     if (!LittleFS.begin(true))
     {
-        SystemState.setFlag("LittleFS_mounted", false);
+        SystemState.clear(SystemFlag::PersistentStorageReady);
         return false;
     }
-    SystemState.setFlag("LittleFS_mounted", true);
+    SystemState.set(SystemFlag::PersistentStorageReady);
     if (!load())
         RuntimeState::clear(); // Leave invalid files untouched until settings are written.
     initialized_ = true;

@@ -2,7 +2,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_OTA
 #include <ArduinoOTA.h>
-#include <Core/StateStore.h>
+#include <Core/SystemState.h>
 #define OTA_TIMEOUT_MS 5000
 #define OTA_TASK_PRIORITY 1
 

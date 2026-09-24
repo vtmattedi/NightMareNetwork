@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Small in-memory status store. It is part of core and never accesses storage.
+// Generic in-memory String key/value store. It never accesses storage.
 class RuntimeState
 {
 public:
@@ -28,5 +28,3 @@ private:
     Entry entries_[MaxEntries];
     size_t count_ = 0;
 };
-
-extern RuntimeState SystemState;

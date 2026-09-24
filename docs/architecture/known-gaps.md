@@ -43,11 +43,16 @@ Cluster and namespace should not be treated as synonyms: a cluster is the Local 
 
 **Category:** Deferred design.
 
-The current MQTT path performs automatic routing through `NmMessageRouter` and `ResourcesManager` directly from the MQTT callback path.
+The current MQTT ingress path performs automatic routing through
+`NmMessageRouter` and `ResourcesManager` directly from the MQTT callback path.
+Reconnect publication is narrower: it uses typed `SystemRequest` bits and the
+cooperative ESP tick to spread framework re-announcement across ticks.
 
 The intended longer-term architecture may introduce a central Runtime/queue so transport ingress is cleanly separated from application execution.
 
-This is not implemented in the current frozen core and should not be assumed by application code.
+A general execution queue is not implemented and should not be assumed by
+application code. `SystemState` requests are a fixed framework publication
+mechanism, not generic scheduling semantics.
 
 ## Projected Remote Value JSON fan-out is not implemented
 

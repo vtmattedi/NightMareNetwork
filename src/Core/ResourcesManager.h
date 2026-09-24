@@ -69,6 +69,9 @@ public:
     // Call after transport reconnection to republish the retained manifest and
     // every managed value that has authoritative state. Binding one also announces it.
     bool announceAll();
+    bool publishManifest();
+    bool publishConsumeManifest();
+    bool publishResourceStates();
     // Rebuild exact subscriptions after a transport reconnects.
     void subscribeAll();
     bool needsSubscription(const String &topicFilter) const;
@@ -187,9 +190,7 @@ private:
     // Manifests are subscribed once per remote device, not once per resource.
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
-    bool publishManifest();
     bool publishManifest(ManifestFormat format);
-    bool publishConsumeManifest();
     bool publishConsumeManifest(ManifestFormat format);
     // One builder per encoding rather than one with branches: the JSON form is
     // frozen and the compact form is free to change, and keeping them apart is

@@ -127,7 +127,8 @@ The standard ESP lifecycle starts SNTP on the first successful WiFi connection w
 
 ## Completion dispatch
 
-The ESP SNTP callback runs on lwIP's task. NightMare therefore does not update `RuntimeState` or call application callbacks directly from that callback.
+The ESP SNTP callback runs on lwIP's task. NightMare therefore does not update
+the framework flag or call application callbacks directly from that callback.
 
 Instead it records a pending event. `tickNightMareESP()` calls:
 
@@ -144,8 +145,7 @@ Applications using automatic time synchronization should therefore continue call
 Successful synchronization records:
 
 ```text
-SystemState["time_synced"] = "1"
-SystemState["boot_time"]   = <derived boot epoch>
+SystemState.set(SystemFlag::TimeSynced)
 ```
 
 and invokes the optional callback registered through:

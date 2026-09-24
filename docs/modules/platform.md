@@ -403,11 +403,15 @@ Time synchronization completion
 Scheduler
     only when Scheduler mode is MANUAL
 
+one pending `SystemRequest`
+
 Serial console
     only when NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
 ```
 
-SNTP completion is intentionally dispatched here because the ESP callback runs on lwIP's task. NightMare defers `RuntimeState` bookkeeping and the application `onTimeSync()` callback to the normal cooperative context.
+SNTP completion is intentionally dispatched here because the ESP callback runs
+on lwIP's task. NightMare defers the `SystemFlag::TimeSynced` transition and the
+application `onTimeSync()` callback to the normal cooperative context.
 
 Task-driven/event-driven subsystems such as MQTT and WiFi are not otherwise polled here.
 
@@ -588,7 +592,10 @@ startSntpTimeSync();
 
 It uses the process `TZ` value applied by `DeviceIdentity`, plus `NM_NTP_SERVER_1..3`.
 
-Synchronization is asynchronous. The SNTP callback marks a pending event; `tickNightMareESP()` later calls `processTimeSyncEvents()` so `SystemState` and application callbacks are not touched from lwIP's task.
+Synchronization is asynchronous. The SNTP callback marks a pending event;
+`tickNightMareESP()` later calls `processTimeSyncEvents()` so the
+`SystemFlag::TimeSynced` transition and application callback do not run on
+lwIP's task.
 
 See [Time](time.md) for the complete clock, timezone, formatting, and synchronization API.
 
@@ -619,8 +626,7 @@ manualSyncTime(timestamp);
 Successful time sync updates:
 
 ```text
-SystemState["time_synced"] = "1"
-SystemState["boot_time"]   = <derived epoch>
+SystemState.set(SystemFlag::TimeSynced)
 ```
 
 and invokes the optional callback installed by:

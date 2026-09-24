@@ -624,13 +624,16 @@ Remote unbinding removes subscriptions that are no longer needed.
 
 ## Reconnect
 
-After MQTT reconnect, NightMare rebuilds exact Resource subscriptions and re-announces:
+After MQTT reconnect, NightMare rebuilds exact Resource subscriptions and
+requests cooperative re-announcement of:
 
 - the retained Resource manifest,
 - the retained consume manifest,
 - every Managed Value that has authoritative state.
 
 Applications do not need to manually republish all bound Resources after reconnect.
+`tickNightMareESP()` processes the manifest, consume manifest, and managed-state
+requests separately and retries a failed request.
 
 ## Identity cleanup
 

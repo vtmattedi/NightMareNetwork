@@ -389,11 +389,14 @@ It services components that require cooperative dispatch, currently including:
 
 ```text
 completed SNTP synchronization events when time sync is enabled
+one pending framework publication request
 Scheduler when configured MANUAL
 serial command resolver when enabled
 ```
 
-The SNTP network callback itself runs on lwIP's task; `tickNightMareESP()` moves NightMare state updates and the application time-sync callback back into the normal cooperative context.
+The SNTP network callback itself runs on lwIP's task; `tickNightMareESP()` moves
+the time-synchronized flag transition and the application time-sync callback
+back into the normal cooperative context.
 
 It does not otherwise poll systems that already own their own lifecycle, such as MQTT or WiFi.
 
@@ -401,7 +404,12 @@ It does not otherwise poll systems that already own their own lifecycle, such as
 
 On MQTT reconnect, NightMare restores framework participation instead of asking each application Resource to do so manually.
 
-The reconnect path includes:
+The reconnect callback restores subscriptions, records retained framework
+publications, flushes already queued application messages, and invokes the
+project callback. `tickNightMareESP()` then processes at most one queued
+framework publication per call. Failed work is requested again.
+
+The path includes:
 
 ```text
 default/framework subscriptions
@@ -411,11 +419,13 @@ online status publication
 Resource manifest/state re-announcement
 consume-manifest re-announcement
 /info refresh
-system telemetry refresh
-network telemetry refresh
+hardware JSON/MessagePack refresh
 queued MQTT messages
 project connected callback
 ```
+
+The bounded tick path prevents manifests, Resource states, INFO, and both
+hardware encodings from being built in one MQTT/TLS reconnect burst.
 
 This is an example of the project's “register once, participate automatically” rule.
 

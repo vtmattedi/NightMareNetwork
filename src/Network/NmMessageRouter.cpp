@@ -5,12 +5,12 @@
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
+#include <Core/SystemState.h>
 #if NM_ENABLE_TELEMETRY
 #include <Core/Telemetry.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Core/Time.h>
-#include <Core/StateStore.h>
 #include <Util/TimeSyncronization.h>
 #include <ArduinoJson.h>
 #include <stdlib.h>
@@ -76,12 +76,14 @@ namespace NmMessageRouter
 // connection event: see processPendingIdentityCleanup().
 void onConnected()
 {
-    MQTT_Publish("status", deviceStatusJson(true), true, true);
-    gResourcesManager.announceAll();
+    SystemState.request(SystemRequest::PublishStatus);
+    SystemState.request(SystemRequest::PublishManifest);
+    SystemState.request(SystemRequest::PublishConsumeManifest);
+    SystemState.request(SystemRequest::PublishResourceStates);
 #if NM_ENABLE_TELEMETRY
-    // Retained documents are refreshed on every (re)connection, broker switches
-    // included, so the network document names the broker actually in use.
-    Telemetry.publishAll();
+    SystemState.request(SystemRequest::PublishInfo);
+    SystemState.request(SystemRequest::PublishHardwareJson);
+    SystemState.request(SystemRequest::PublishHardwareMsgPack);
 #endif
 #if NM_ENABLE_CONSOLE
     MQTT_Publish("console/out", firstConnection ? "Booted" : "Connected");

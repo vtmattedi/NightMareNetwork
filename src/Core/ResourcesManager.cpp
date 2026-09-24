@@ -1138,6 +1138,14 @@ bool ResourcesManager::announceAll()
     bool published = publishManifest();
     if (!publishConsumeManifest())
         published = false;
+    if (!publishResourceStates())
+        published = false;
+    return published;
+}
+
+bool ResourcesManager::publishResourceStates()
+{
+    bool published = true;
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];

@@ -13,6 +13,21 @@ This page records decisions that might otherwise look arbitrary when reading the
 
 Each entry states the decision, why it exists, and what it costs.
 
+## Runtime facts and pending framework work are separate
+
+**Decision:** `SystemState` uses typed flag and request enums backed by fixed bit
+banks. Runtime facts answer what is true now. Requests answer which bounded
+framework publication still needs processing.
+
+**Reason:** module-neutral consumers should not depend on String keys or module
+headers, and MQTT reconnect callbacks should not build every allocation-heavy
+retained document in one TLS memory burst.
+
+**Consequence:** `tickNightMareESP()` processes at most one pending publication
+request per call and requests failed work again. This is task-safe framework
+plumbing, not an ISR API or a generic scheduler. Generic transient String data
+continues to use an application-owned `RuntimeState`.
+
 ## Retained MQTT state instead of a separate synchronization protocol
 
 **Decision:** current state is represented with retained MQTT topics wherever MQTT already provides the required semantics.

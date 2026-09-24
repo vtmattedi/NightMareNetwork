@@ -26,10 +26,10 @@
 /// bound: withdrawing a previous identity only reaches declared resources.
 void startNightMareESP();
 
-/// @brief The framework's cooperative service point: ticks the Scheduler when
-/// nothing else does (MANUAL mode) and reads the serial console when enabled.
-/// Task- and event-driven parts (MQTT, WiFi, OTA, a Scheduler task) are never
-/// polled here.
+/// @brief The framework's cooperative service point: processes at most one
+/// pending framework publication, ticks the Scheduler when nothing else does
+/// (MANUAL mode), and reads the serial console when enabled. MQTT transport,
+/// WiFi, OTA, and a task-owned Scheduler are not polled here.
 void tickNightMareESP();
 
 /// @brief Prints the NightMare Network figlet, the device name and firmware

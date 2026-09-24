@@ -16,13 +16,13 @@ void OTA_EventHandler(OTA_INFO info, int data = -1)
 
 void startOTA()
 {
-    SystemState.setFlag("ota_running", true);
+    SystemState.set(SystemFlag::OtaRunning);
     OTA_EventHandler(OTA_START, ArduinoOTA.getCommand());
 }
 
 void endOTA()
 {
-    SystemState.setFlag("ota_running", false);
+    SystemState.clear(SystemFlag::OtaRunning);
     OTA_EventHandler(OTA_END);
 }
 
@@ -33,7 +33,7 @@ void progressOTA(unsigned int progress, unsigned int total)
 
 void errorOTA(ota_error_t error)
 {
-    SystemState.setFlag("ota_running", false);
+    SystemState.clear(SystemFlag::OtaRunning);
 
     OTA_EventHandler(OTA_ERROR, error);
 }
@@ -43,12 +43,10 @@ void otaTask(void *param)
     while (true)
     {
         ArduinoOTA.handle();
-        int taskDealay = SystemState.getFlag("ota_running") ? 5 : 1000;
+        int taskDealay = SystemState.get(SystemFlag::OtaRunning) ? 5 : 1000;
         vTaskDelay(taskDealay / portTICK_PERIOD_MS);
         yield();
     }
-    // should never reach here, but if it does, we should clean up and disable OTA
-    SystemState.setFlag("ota_enabled", false);
 }
 
 void initOTA()
@@ -61,14 +59,13 @@ void initOTA()
     ArduinoOTA.onError(errorOTA);
     ArduinoOTA.setTimeout(OTA_TIMEOUT_MS);
     ArduinoOTA.begin();
-    bool res = xTaskCreate(
+    xTaskCreate(
         otaTask,
         "OTA_Task",
         4096,
         NULL,
         OTA_TASK_PRIORITY,
         &otaTaskHandle);
-    SystemState.setFlag("ota_enabled", res);
 }
 
 void onOTAEvent(ota_callback_t callback)
