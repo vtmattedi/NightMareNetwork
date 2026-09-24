@@ -4,9 +4,8 @@
 
 namespace NMHardware
 {
-constexpr uint8_t TopologyVersion = 2;
+constexpr uint8_t TopologyVersion = 3;
 constexpr uint8_t NoBoard = 0xff;
-constexpr uint8_t NoDevice = 0xff;
 constexpr uint8_t NoBus = 0xff;
 
 // Values are part of the MessagePack wire format. Append; never renumber.
@@ -86,64 +85,131 @@ struct Board
     const char *model;
 };
 
+// Values are part of the MessagePack wire format. Append; never renumber.
+// This is a broad semantic category, never a specific component model.
+enum class DeviceKind : uint8_t
+{
+    Unknown = 0,
+    Ic = 1,
+    Led = 2,
+    Button = 3,
+    Relay = 4,
+    Sensor = 5,
+    Display = 6,
+    Speaker = 7,
+    Buzzer = 8,
+    Connector = 9,
+    Transistor = 10,
+    Diode = 11,
+    Resistor = 12,
+    Capacitor = 13,
+    Motor = 14,
+    Storage = 15
+};
+
 struct Device
 {
     const char *id;
     const char *model;
-    // NoBoard means a standalone component connected to the topology rather
-    // than one physically integrated into a board or module.
+    // NoBoard is for a genuinely external discrete component. A standalone
+    // physical PCB/module should normally be represented as its own Board.
     uint8_t board;
+    DeviceKind kind;
+    // Optional stable, lowercase physical-form slug. Presentation artwork
+    // remains a viewer concern.
+    const char *form;
+
+    constexpr Device(const char *deviceId, const char *deviceModel,
+                     uint8_t boardIndex, DeviceKind deviceKind = DeviceKind::Unknown,
+                     const char *deviceForm = nullptr)
+        : id(deviceId), model(deviceModel), board(boardIndex), kind(deviceKind),
+          form(deviceForm) {}
 };
 
-// MessagePack connection positions are kept in this same order. `resistor` is
-// an optional trailing field and is emitted only for an external pull.
-struct Connection
+// Values are part of the MessagePack wire format. Append; never renumber.
+enum class EndpointKind : uint8_t
 {
-    int16_t pin;
-    uint8_t device;
-    const char *signal;
-    uint8_t bus;
+    Board = 0,
+    Device = 1,
+    External = 2
+};
+
+struct Endpoint
+{
+    EndpointKind kind;
+    uint8_t index;
+    const char *terminal;
+
+    constexpr Endpoint(EndpointKind endpointKind, uint8_t endpointIndex,
+                       const char *terminalName)
+        : kind(endpointKind), index(endpointIndex), terminal(terminalName) {}
+};
+
+// A Net is one electrically continuous conductor. Metadata belongs here rather
+// than being repeated on every physical segment of the conductor.
+struct Net
+{
+    const char *id;
     SignalType type;
+    uint8_t bus;
     Direction direction;
     Pull pull;
     bool activeLow;
     Resistor resistor;
 
-    Connection(int16_t pinNumber, uint8_t deviceIndex, const char *signalName,
-               uint8_t busIndex, SignalType signalType, Direction signalDirection,
-               Pull pullMode = Pull::None, bool isActiveLow = false,
-               Resistor pullResistor = Resistor())
-        : pin(pinNumber), device(deviceIndex), signal(signalName), bus(busIndex),
-          type(signalType), direction(signalDirection), pull(pullMode),
-          activeLow(isActiveLow), resistor(pullResistor) {}
+    Net(const char *netId, SignalType signalType, uint8_t busIndex,
+        Direction signalDirection, Pull pullMode = Pull::None,
+        bool isActiveLow = false, Resistor pullResistor = Resistor())
+        : id(netId), type(signalType), bus(busIndex), direction(signalDirection),
+          pull(pullMode), activeLow(isActiveLow), resistor(pullResistor) {}
+};
+
+// A Connection is one physical segment. Segments sharing `net` are
+// electrically continuous; segments sharing a non-zero `group` merely travel
+// together in the same cable or harness.
+struct Connection
+{
+    Endpoint from;
+    Endpoint to;
+    uint8_t net;
+    uint8_t group;
+
+    constexpr Connection(Endpoint fromEndpoint, Endpoint toEndpoint,
+                         uint8_t netIndex, uint8_t physicalGroup = 0)
+        : from(fromEndpoint), to(toEndpoint), net(netIndex), group(physicalGroup) {}
 };
 
 struct Profile
 {
+    uint8_t hostBoard;
     const Board *boards;
     size_t boardCount;
     const Device *devices;
     size_t deviceCount;
+    const Net *nets;
+    size_t netCount;
     const Connection *connections;
     size_t connectionCount;
 };
 
-/* MessagePack topology schema (version 2):
+/* MessagePack topology schema (version 3):
  *
- *   [version, boards[], devices[], connections[]]
+ *   [version, hostBoard, boards[], devices[], nets[], connections[]]
  *   board      := [id, model]
- *   device     := [id, model, boardIndex]
- *   connection := [pin, deviceIndex, signal, busIndex, signalType,
- *                  direction, pull, activeLow, resistor?]
+ *   device     := [id, model, boardIndex, kind?, form?]
+ *   net        := [id, signalType, busIndex, direction, pull, activeLow,
+ *                  resistor?]
+ *   connection := [fromEndpoint, toEndpoint, netIndex, group]
+ *   endpoint   := [kind, index, terminal]
  *
- * boards[0] is the main board. A device board index of 0xff means the component
- * is standalone. Connection device and bus indices also use 0xff for "none".
+ * `hostBoard` identifies the board running NightMare; no array position has an
+ * implicit role. A device board index of 0xff remains available for genuinely
+ * external discrete components, but a standalone PCB/module should be a Board.
  * Enums and array fields are append-only. The optional resistor is the two-byte
- * value returned by Resistor::encoded(). Rendering coordinates, artwork and
- * icons never belong in this profile.
+ * value returned by Resistor::encoded().
  */
 
 // If the project has no NightMareHardware.h, this returns one "main" board
-// with model "unspecified" and no advertised devices or connections.
+// with model "unspecified" and no advertised devices, nets or connections.
 Profile getProfile();
 }

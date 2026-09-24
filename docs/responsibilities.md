@@ -37,6 +37,7 @@ Once Resources are declared and bound, NightMare owns the repetitive network beh
 - registration,
 - canonical Resource topics,
 - retained manifests,
+- retained consume manifests derived from Remote Resources,
 - retained Value state,
 - `/set` routing,
 - `/invoke` routing,

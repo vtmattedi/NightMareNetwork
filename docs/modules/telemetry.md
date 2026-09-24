@@ -402,6 +402,9 @@ If no project `NightMareHardware.h` exists, the profile defaults to:
 
 ```text
 boards: [{ id: main, model: unspecified }]
+host_board: 0
+devices: none
+nets: none
 connections: none
 ```
 
@@ -426,13 +429,16 @@ Telemetry.publishHardware(HardwareFormat::MSGPACK);
 Telemetry.publishHardware(); // both
 ```
 
-The version 2 compact schema is
-`[version, boards[], devices[], connections[]]`. Boards are `[id, model]`, and
-devices are `[id, model, boardIndex]`. `boards[0]` is the main board. Connections
-use positional pin, device index, signal, bus index, numeric signal type,
-numeric direction, numeric pull, active-low, and an optional resistor.
-`boardIndex` is `255` for a standalone component; readable JSON represents that
-value as `null`.
+The version 3 compact schema is
+`[version, hostBoard, boards[], devices[], nets[], connections[]]`. A device is
+`[id, model, board, kind?, form?]`; default devices retain the three-position
+form. `kind` is a broad append-only semantic enum and `form` is an optional
+stable lowercase slug such as `to92` or `waterproof-probe`. A net is
+`[id, signalType, bus, direction, pull, activeLow, resistor?]`. A connection is
+`[fromEndpoint, toEndpoint, net, group]`, and each endpoint is
+`[kind, index, terminal]`. `hostBoard` identifies the board running NightMare.
+Connections describe each physical segment explicitly; equal net indices mean
+electrical continuity, while equal non-zero groups mean physical bundling only.
 
 A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
 `a.b × 10^c` ohms. Constructors accept numeric ohms and strings such as
@@ -441,7 +447,8 @@ A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
 Pull modes are `None`, `Up`, `Down`, `ExternalUp`, and `ExternalDown`.
 Rendering coordinates, SVG, icons, footprints, and artwork remain server-side.
 
-The implementation bounds hardware connections to 128 entries and boards and
-devices to 255 each. A profile must contain at least one board, and every device
-must reference a valid board index or `NoBoard`. An unusable profile causes
+The implementation bounds hardware connections to 128 entries and boards,
+devices, and nets to 255 each. A profile must contain a valid host board; every
+device and endpoint must reference a valid index, and every connection must
+reference a valid net. An unusable profile causes
 topology generation to fail rather than silently serialize invalid memory.

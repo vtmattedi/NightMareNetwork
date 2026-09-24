@@ -58,6 +58,28 @@ RemoteState<int> remoteState;
 ManagedAction managedAction("managed_action");
 RemoteAction remoteAction;
 
+class RecordingPublisher : public ResourcePublisher
+{
+public:
+    bool publish(const String &topic, const String &payload, bool retained) override
+    {
+        if (topic.endsWith("/manifest/consume"))
+        {
+            ++consumeJsonPublishes;
+            lastConsumeJson = payload;
+            consumeWasRetained = retained;
+        }
+        else if (topic.endsWith("/manifest/consume/msgpack"))
+            ++consumePackedPublishes;
+        return true;
+    }
+
+    int consumeJsonPublishes = 0;
+    int consumePackedPublishes = 0;
+    bool consumeWasRetained = false;
+    String lastConsumeJson;
+};
+
 int writeCalls = 0;
 bool acceptStateWrite(ManagedState<int> &, const int &)
 {
@@ -88,6 +110,44 @@ void setup()
     gResourcesManager.handleIngressMessage("outside-node/resource/temperature/state", "18");
     gResourcesManager.handleIngressMessage("inside-node/resource/temperature/state", "24");
 
+    JsonDocument consumePacked;
+    JsonArray consumeRoot = consumePacked.to<JsonArray>();
+    consumeRoot.add(ConsumeManifestEncodingVersion);
+    consumeRoot.add(ConsumeManifestVersion);
+    JsonArray consumeItems = consumeRoot.add<JsonArray>();
+    JsonArray consumeValue = consumeItems.add<JsonArray>();
+    consumeValue.add(static_cast<uint8_t>(NetResourceType::VALUE));
+    consumeValue.add("outside-node");
+    consumeValue.add("temperature");
+    consumeValue.add(static_cast<uint8_t>(AccessPolicy::READ));
+    consumeValue.add(static_cast<uint8_t>(NetValueType::INTEGER));
+    String encodedConsume;
+    serializeMsgPack(consumePacked, encodedConsume);
+    JsonDocument decodedConsume;
+    const bool consumeCodecWorks =
+        ResourcesManager::decodeConsumeManifest(encodedConsume, decodedConsume) &&
+        decodedConsume["version"].as<int>() == ConsumeManifestVersion &&
+        decodedConsume["consumes"][0]["device"].as<String>() == "outside-node" &&
+        resolveResourceConsumeManifestTopic("smoke") == "smoke/manifest/consume";
+
+    ResourcesManager consumeManager;
+    RecordingPublisher consumePublisher;
+    RemoteSensor<float> consumed("temperature", NetDeviceIdentity("weather-node"));
+    consumeManager.setPublisher(&consumePublisher);
+    const bool consumeBound = consumeManager.bindResource(&consumed);
+    const bool boundPublished = consumePublisher.lastConsumeJson.indexOf("weather-node") >= 0 &&
+                                consumePublisher.lastConsumeJson.indexOf("temperature") >= 0;
+    consumed.setSource("relay-node", "target");
+    const bool retargetPublished = consumePublisher.lastConsumeJson.indexOf("relay-node") >= 0 &&
+                                   consumePublisher.lastConsumeJson.indexOf("weather-node") < 0;
+    consumeManager.unbindResource(&consumed);
+    const bool unbindPublished = consumePublisher.lastConsumeJson ==
+                                 "{\"version\":1,\"consumes\":[]}";
+    const bool consumeLifecycleWorks = consumeBound && boundPublished && retargetPublished &&
+                                       unbindPublished && consumePublisher.consumeWasRetained &&
+                                       consumePublisher.consumeJsonPublishes >= 4 &&
+                                       consumePublisher.consumePackedPublishes >= 4;
+
     const ActionResult list = gResourcesManager.executeCommand("list");
     const ActionResult ambiguous = gResourcesManager.executeCommand(" temperature");
     const ActionResult qualified =
@@ -105,7 +165,8 @@ void setup()
                                             managedSensor.type() == NetValueType::INTEGER &&
                                             !managedSensor.isRemote() && remoteSensor.isRemote() &&
                                             remoteSensor.hasValue() && !remoteSensor.isStale() &&
-                                            resourceCommandsWork);
+                                            resourceCommandsWork && consumeCodecWorks &&
+                                            consumeLifecycleWorks);
     const String timezone = gDeviceIdentity.getTimezone();
     const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");
     const NightMareResults timezoneSet =
@@ -122,6 +183,19 @@ void setup()
     const NMHardware::Resistor rSubNumeric(0.33);
     const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
     const TelemetryResult packedHardware = Telemetry.getHardware(HardwareFormat::MSGPACK);
+    JsonDocument packedHardwareDoc;
+    const bool hardwareCompactMetadata =
+        packedHardware.valid &&
+        !deserializeMsgPack(packedHardwareDoc, packedHardware.data.c_str(),
+                            packedHardware.data.length()) &&
+        packedHardwareDoc[3][0].as<JsonArrayConst>().size() == 3 &&
+        packedHardwareDoc[3][1].as<JsonArrayConst>().size() == 5 &&
+        packedHardwareDoc[3][1][3].as<uint8_t>() ==
+            static_cast<uint8_t>(NMHardware::DeviceKind::Sensor) &&
+        packedHardwareDoc[3][1][4].as<String>() == "waterproof-probe" &&
+        packedHardwareDoc[3][2].as<JsonArrayConst>().size() == 5 &&
+        packedHardwareDoc[3][2][3].as<uint8_t>() == 0 &&
+        packedHardwareDoc[3][2][4].as<String>() == "panel-mount";
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
     const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
@@ -135,11 +209,18 @@ void setup()
                             hardware.valid &&
                             hardware.data.indexOf("esp32-devkit:test") >= 0 &&
                             hardware.data.indexOf("button-board:test") >= 0 &&
+                            hardware.data.indexOf("\"host_board\":0") >= 0 &&
                             hardware.data.indexOf("\"boards\"") >= 0 &&
                             hardware.data.indexOf("\"board\":1") >= 0 &&
-                            hardware.data.indexOf("\"board\":null") >= 0 &&
+                            hardware.data.indexOf("\"kind\":\"sensor\"") >= 0 &&
+                            hardware.data.indexOf("\"form\":\"waterproof-probe\"") >= 0 &&
+                            hardware.data.indexOf("\"form\":\"panel-mount\"") >= 0 &&
+                            hardware.data.indexOf("\"kind\":\"unknown\"") < 0 &&
+                            hardware.data.indexOf("\"nets\"") >= 0 &&
+                            hardware.data.indexOf("\"from\"") >= 0 &&
+                            hardware.data.indexOf("\"group\":0") >= 0 &&
                             hardware.data.indexOf("\"connections\"") >= 0 &&
-                            packedHardware.valid && packedHardware.data.length() > 0 && info.valid &&
+                            hardwareCompactMetadata && packedHardware.data.length() > 0 && info.valid &&
                             info.data.indexOf("hwconnections") < 0 &&
                             hardwareCommand.result && !removedConnections.result);
     Telemetry.start();

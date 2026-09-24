@@ -367,6 +367,17 @@ using ManifestHandler =
 
 void setManifestHandler(ManifestHandler handler);
 
+static bool decodeConsumeManifest(
+    const String &encoded,
+    JsonDocument &into);
+
+constexpr uint8_t ConsumeManifestEncodingVersion = 1;
+constexpr uint8_t ConsumeManifestVersion = 1;
+
+String resolveResourceConsumeManifestTopic(
+    const String &deviceName,
+    ManifestFormat format = ManifestFormat::JSON);
+
 ActionResult executeAction(
     NetActionResource &action,
     const String &canonicalPayload);
@@ -1102,11 +1113,20 @@ public:
     double ohms() const;
 };
 
+enum class DeviceKind : uint8_t
+{
+    Unknown, Ic, Led, Button, Relay, Sensor, Display, Speaker,
+    Buzzer, Connector, Transistor, Diode, Resistor, Capacitor,
+    Motor, Storage
+};
+
 struct Device
 {
     const char *id;
     const char *model;
     uint8_t board;
+    DeviceKind kind;
+    const char *form;
 };
 
 constexpr uint8_t NoBoard = 0xff;
@@ -1117,25 +1137,43 @@ struct Board
     const char *model;
 };
 
-struct Connection
+enum class EndpointKind { Board, Device, External };
+
+struct Endpoint
 {
-    int16_t pin;
-    uint8_t device;
-    const char *signal;
-    uint8_t bus;
+    EndpointKind kind;
+    uint8_t index;
+    const char *terminal;
+};
+
+struct Net
+{
+    const char *id;
     SignalType type;
+    uint8_t bus;
     Direction direction;
     Pull pull;
     bool activeLow;
     Resistor resistor;
 };
 
+struct Connection
+{
+    Endpoint from;
+    Endpoint to;
+    uint8_t net;
+    uint8_t group;
+};
+
 struct Profile
 {
+    uint8_t hostBoard;
     const Board *boards;
     size_t boardCount;
     const Device *devices;
     size_t deviceCount;
+    const Net *nets;
+    size_t netCount;
     const Connection *connections;
     size_t connectionCount;
 };

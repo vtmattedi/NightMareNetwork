@@ -198,6 +198,8 @@ Current retained families include:
 <device>/telemetry/network
 <device>/manifest
 <device>/manifest/msgpack
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
 <device>/resource/<value>/state
 ```
 
@@ -407,6 +409,7 @@ Resource subscriptions
 optional discovery subscriptions
 online status publication
 Resource manifest/state re-announcement
+consume-manifest re-announcement
 /info refresh
 system telemetry refresh
 network telemetry refresh
@@ -428,6 +431,7 @@ Once the new identity is active, cleanup removes retained network state under th
 
 ```text
 old Resource manifest
+old consume manifest
 old retained managed Value states that are still declared
 old status topic
 ```

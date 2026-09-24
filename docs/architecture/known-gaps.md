@@ -101,6 +101,7 @@ When a device adopts a new name, old-identity cleanup can delete:
 
 ```text
 the old manifest
+the old consume manifest
 retained state for currently declared Managed Values
 the old status topic
 ```

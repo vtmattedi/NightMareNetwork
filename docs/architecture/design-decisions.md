@@ -81,21 +81,38 @@ server concern.
 
 ## Physical boards are first-class topology owners
 
-**Decision:** hardware topology version 2 represents every physical board or
-module, including the main board, in one `boards[]` collection. Each device
-references the board that owns it by index. Devices such as wired probes and
-discrete sensors may explicitly have no owning board.
+**Decision:** hardware topology version 3 represents every physical PCB/module
+in `boards[]`, identifies the firmware host explicitly with `hostBoard`, and
+represents mounted chips/components in `devices[]`. Electrical meaning lives in
+`nets[]`; `connections[]` contains every physical endpoint-to-endpoint segment.
 
 **Reason:** “onboard” is not an intrinsic device property. What matters for
 rendering and physical reasoning is which board instance owns a component.
 Separating an instance `id` from a stable board `model` also allows two
 identical expansion boards in the same topology.
 
-**Consequence:** `boards[0]` is the main board; there is no separate `boardId`
-field. Board and device records retain human-readable IDs, while repeated wire
-references use compact numeric indices. This is an intentional version 2 wire
-and public API break rather than a version 1 compatibility representation. A
-standalone device uses `NoBoard` (`255`) on the compact wire and `null` in JSON.
+**Consequence:** no board-array position has special meaning. Board crossings
+must not be inferred or collapsed. Segments sharing a net are electrically
+continuous; a non-zero connection group says only that conductors travel in the
+same cable. `NoBoard` remains for exceptional external discrete components,
+not as the normal representation of standalone modules.
+
+Device `kind` and `form` are optional progressive hints. Kind is a small,
+append-only semantic enum; form is an extensible stable slug. Firmware does not
+publish artwork names, UI component names, coordinates, or colors.
+
+## Provider and consumer Resource manifests are separate
+
+**Decision:** `<device>/manifest` continues to publish only Managed Resources.
+Bound Remote Resources with valid sources are derived into the separate
+versioned `<device>/manifest/consume` document.
+
+**Reason:** what a node provides and what it depends on are different graph
+directions and lifecycles. Remote declarations already contain all dependency
+metadata, so requiring a second project declaration would create drift.
+
+**Consequence:** bind, source changes, unbind, reconnect, and identity cleanup
+also maintain the retained JSON and MessagePack consume manifests.
 
 ## Status is presence, not Resource freshness
 
@@ -195,7 +212,7 @@ standalone device uses `NoBoard` (`255`) on the compact wire and `null` in JSON.
 
 ## Old identity cleanup only knows currently declared Resources
 
-**Decision:** cleanup withdraws retained state for Managed Values that exist in the current firmware plus the old manifest/status.
+**Decision:** cleanup withdraws retained state for Managed Values that exist in the current firmware plus the old provider manifest, consume manifest, and status.
 
 **Reason:** the framework has no historical registry of every Resource a previous firmware version might once have published.
 

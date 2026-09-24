@@ -9,10 +9,13 @@ order: 20
 
 Resources are the application-level contract between NightMare devices.
 
-The current Resource protocol has four topic shapes:
+The current Resource protocol has these topic shapes:
 
 ```text
 <device>/manifest
+<device>/manifest/msgpack
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
@@ -122,6 +125,47 @@ arg    = [name, typeEnum, required]
 Encoding version `1` is current. Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
+
+## Consume manifest
+
+A separate retained document describes Remote Resources this device currently
+depends on:
+
+```text
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
+```
+
+This is not an expansion of the provider manifest. `<device>/manifest` remains
+only what this device implements. The consume manifest version is `1` and is
+built automatically from bound Remote Resources with a resolved, valid source.
+Source-less or refused Remote Resources do not create dependency edges.
+
+```json
+{
+  "version": 1,
+  "consumes": [
+    {"device": "weather-node", "resource": "temperature",
+     "kind": "value", "access": "read", "type": "float"},
+    {"device": "door-node", "resource": "unlock",
+     "kind": "action", "arguments": []}
+  ]
+}
+```
+
+The compact positional schema is:
+
+```text
+[encodingVersion, consumeVersion, consumes[]]
+
+value  = [0, device, resource, accessEnum, typeEnum]
+action = [1, device, resource, arguments[]]
+arg    = [name, typeEnum, required]
+```
+
+Encoding version `1` is current. The document is republished when a Remote
+Resource is bound, retargeted, detached, or unbound, and on reconnect. Identity
+cleanup tombstones both retained encodings under the old device name.
 
 ## Resource kinds
 
@@ -583,6 +627,7 @@ Remote unbinding removes subscriptions that are no longer needed.
 After MQTT reconnect, NightMare rebuilds exact Resource subscriptions and re-announces:
 
 - the retained Resource manifest,
+- the retained consume manifest,
 - every Managed Value that has authoritative state.
 
 Applications do not need to manually republish all bound Resources after reconnect.
@@ -593,6 +638,7 @@ When a device identity is migrated, Resource cleanup under the old device name p
 
 - the old retained state of every **currently declared Managed Value**,
 - the old manifest.
+- the old consume manifest.
 
 Actions need no separate cleanup because `/invoke` is transient.
 

@@ -47,6 +47,15 @@ String resolveResourceManifestTopic(const String &deviceName, ManifestFormat for
     return topic;
 }
 
+String resolveResourceConsumeManifestTopic(const String &deviceName, ManifestFormat format)
+{
+    String topic = resolveResourceManifestTopic(deviceName);
+    topic += "/consume";
+    if (format == ManifestFormat::MSGPACK)
+        topic += "/msgpack";
+    return topic;
+}
+
 String resolveResourceRootTopic(const String &deviceName)
 {
     return deviceName + "/resource";

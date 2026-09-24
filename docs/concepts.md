@@ -241,6 +241,10 @@ The manifest is descriptive. It exists for discovery, self-description, tooling,
 
 It does not gate Resource state. A missing, stale, incompatible, or withdrawn manifest does not by itself invalidate a `/state` message.
 
+The separate retained `<device>/manifest/consume` document describes valid,
+bound Remote Resource dependencies. It does not add Remote Resources to the
+provider manifest.
+
 ## State
 
 A Value's retained state lives at:
@@ -342,8 +346,9 @@ compact representation. The two retained forms are:
 ```
 
 They describe physical board instances and models, which board owns each
-integrated device, standalone connected components, buses/signals, pins,
-directions, pull modes, optional pull resistors, and active-low behavior.
+integrated device, optional semantic device kinds and physical-form slugs,
+electrical nets, explicit physical segments, directions, pull modes, optional
+pull resistors, and active-low behavior.
 Artwork, footprints, coordinates, icons, and other rendering data remain
 server-side.
 

@@ -388,6 +388,7 @@ Retargeting:
 - clears Value state learned from the old source,
 - updates manifest subscriptions,
 - subscribes to the new source if valid.
+- republishes the retained consume manifest.
 
 The Resource remains Remote.
 
@@ -695,6 +696,11 @@ setManifestHandler(...)
 ```
 
 Applications normally call only binding and optional manifest-handler methods.
+
+Bound Remote Resources with valid sources are also published automatically as
+dependencies at `<device>/manifest/consume` and its MessagePack sibling. This
+document is separate from the Managed Resource provider manifest and requires
+no duplicate project declaration.
 
 MQTT transport is injected into the manager by the NightMare MQTT facade.
 

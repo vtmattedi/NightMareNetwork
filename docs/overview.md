@@ -105,12 +105,16 @@ The network representation is intentionally small:
 ```text
 <device>/manifest
 <device>/manifest/msgpack
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
 ```
 
-The manifest describes Resources. Retained `/state` is the authoritative freshness signal for Values.
+The provider manifest describes Managed Resources. The separate consume
+manifest is derived from valid bound Remote Resources. Retained `/state` is the
+authoritative freshness signal for Values.
 
 ## Identity and presence
 
@@ -143,7 +147,8 @@ NightMare separates information by lifecycle.
 
 <device>/hardware
 <device>/hardware/msgpack
-    hardware topology in JSON and MessagePack
+    topology v3: host board, boards, mounted devices, electrical nets,
+    and explicit physical connection segments
 
 <device>/telemetry/system
     runtime system health

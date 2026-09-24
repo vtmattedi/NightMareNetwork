@@ -127,6 +127,10 @@ public:
     /// read positions directly can skip this and keep the compact document.
     static bool decodeManifest(const String &encoded, JsonDocument &into);
 
+    /// @brief Expand `[encodingVersion, consumeVersion, consumes[]]` MessagePack
+    /// into the named JSON consume-manifest shape.
+    static bool decodeConsumeManifest(const String &encoded, JsonDocument &into);
+
     /// @brief Runs a locally implemented action and hands back what it returned.
     /// Raw MQTT ingress uses this and drops the result; a correlated caller
     /// (controlled console / MQTTP) uses the same path and keeps it, so action
@@ -185,16 +189,21 @@ private:
 
     bool publishManifest();
     bool publishManifest(ManifestFormat format);
+    bool publishConsumeManifest();
+    bool publishConsumeManifest(ManifestFormat format);
     // One builder per encoding rather than one with branches: the JSON form is
     // frozen and the compact form is free to change, and keeping them apart is
     // what stops a change to the second quietly altering the first.
     void buildNamedManifest(JsonDocument &doc) const;
     void buildPositionalManifest(JsonDocument &doc) const;
+    void buildNamedConsumeManifest(JsonDocument &doc) const;
+    void buildPositionalConsumeManifest(JsonDocument &doc) const;
     void applyEncodedManifest(const String &deviceName, const String &message);
     /// @brief Build this device's manifest in one encoding. The document is the
     /// same either way; MSGPACK writes kind, access and type as their numeric
     /// values rather than their names, which is most of what it saves.
     bool serializeManifest(String &payload, ManifestFormat format) const;
+    bool serializeConsumeManifest(String &payload, ManifestFormat format) const;
     /// @brief Whether a manifest subscription is wanted for remote owners.
     /// False when verification is compiled out: a handler subscribes to every
     /// device instead, which is a different question.

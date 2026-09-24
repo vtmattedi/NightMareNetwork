@@ -45,6 +45,8 @@ The current standard topic families are:
 
 <device>/manifest
 <device>/manifest/msgpack
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
@@ -76,6 +78,8 @@ NightMare uses retained messages for current state and current description.
 | `<device>/telemetry/network` | yes | last published network bookkeeping |
 | `<device>/manifest` | yes | Resource manifest |
 | `<device>/manifest/msgpack` | yes | compact positional Resource manifest |
+| `<device>/manifest/consume` | yes | Remote Resources this device consumes |
+| `<device>/manifest/consume/msgpack` | yes | compact consume manifest |
 | `<device>/resource/<name>/state` | yes | authoritative Value state |
 
 An empty retained payload is used as a tombstone where NightMare needs to remove retained state.
@@ -109,6 +113,17 @@ Requests, commands, and command responses are not retained.
 The manifest is retained and describes the Resources implemented by the device.
 
 It is descriptive metadata. It does not make Value state fresh and does not gate `/state`, `/set`, or `/invoke`.
+
+### Consume manifest
+
+```text
+<device>/manifest/consume
+<device>/manifest/consume/msgpack
+```
+
+These retained documents describe the valid, bound Remote Resources consumed
+by the device. They are generated from the Resource registry and remain
+separate from the provider manifest.
 
 ### Value state
 

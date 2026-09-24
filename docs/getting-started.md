@@ -190,18 +190,26 @@ inline Profile projectProfile()
     };
     static const Device devices[] = {
         {"button", "momentary-switch", 0},
-        {"status", "LED", 1},
+        {"status", "LED", 1, DeviceKind::Led, "5mm-tht"},
+    };
+    static const Net nets[] = {
+        {"button", SignalType::Gpio, NoBus, Direction::Input, Pull::Up, true},
+        {"status_led", SignalType::Gpio, NoBus, Direction::Output},
     };
     static const Connection connections[] = {
-        {9, 0, "pressed", NoBus, SignalType::Gpio,
-         Direction::Input, Pull::Up, true},
-        {8, 1, "light", NoBus, SignalType::Gpio,
-         Direction::Output},
+        {{EndpointKind::Board, 0, "GPIO9"},
+         {EndpointKind::Device, 0, "1"}, 0},
+        {{EndpointKind::Board, 0, "GPIO8"},
+         {EndpointKind::Board, 1, "LED"}, 1, 1},
+        {{EndpointKind::Board, 1, "LED"},
+         {EndpointKind::Device, 1, "A"}, 1},
     };
 
     return {
+        0,
         boards, sizeof(boards) / sizeof(boards[0]),
         devices, sizeof(devices) / sizeof(devices[0]),
+        nets, sizeof(nets) / sizeof(nets[0]),
         connections,
         sizeof(connections) / sizeof(connections[0])
     };
@@ -214,14 +222,19 @@ If this file is absent, NightMare reports:
 ```text
 boards: [{ id: main, model: unspecified }]
 devices: none
+nets: none
 connections: none
 ```
 
-`boards[0]` is always the main board. Board IDs identify instances in this
-topology; board models select stable board or footprint definitions. A device's
-numeric board field identifies the physical board that owns it. Use `NoBoard`
-for a discrete sensor or other component connected to, but not physically part
-of, one of those boards.
+`hostBoard` identifies the board running this firmware; array position zero has
+no implicit meaning. Board IDs identify physical PCB/module instances, and
+board models select stable definitions. Devices are chips/components mounted
+on boards. Nets identify common electrical conductors, while Connections make
+every physical segment and board crossing explicit. A non-zero connection
+group marks conductors bundled in one cable without electrically joining them.
+Device `kind` and `form` are optional visualization hints, so the three-field
+declaration remains valid. Kinds stay broad (`Sensor`, `Led`, `Button`); model
+and a stable lowercase form slug carry specific identity and package shape.
 
 ## Declare Resources
 

@@ -203,8 +203,7 @@ heap_bytes
 psram_bytes
 ```
 
-`board` is the model of the main board (`boards[0]`) in the active NightMare
-hardware profile.
+`board` is the model of `host_board` in the active NightMare hardware profile.
 
 The remaining hardware fields come from the ESP runtime.
 
@@ -219,45 +218,61 @@ The MessagePack schema is versioned and positional:
 ```text
 [
   version,
+  hostBoard,
   boards[],
   devices[],
+  nets[],
   connections[]
 ]
 
 board      = [id, model]
-device     = [id, model, boardIndex]
-connection = [pin, deviceIndex, signal, busIndex,
-              signalTypeEnum, directionEnum, pullEnum, activeLow,
-              resistor?]
+device     = [id, model, boardIndex, kind?, form?]
+net        = [id, signalTypeEnum, busIndex, directionEnum, pullEnum,
+              activeLow, resistor?]
+endpoint   = [kindEnum, index, terminal]
+connection = [fromEndpoint, toEndpoint, netIndex, group]
 ```
 
-Version 2 makes every physical board or module a first-class topology entry.
-`boards[0]` is the main board. A board `id` identifies that instance in this
-topology, while `model` selects its stable board/footprint definition. Every
-integrated device belongs to a board by numeric index, so multiple instances
-of the same board model remain distinct. Standalone components such as wired
-probes use `255` in MessagePack and `null` in readable JSON.
+Version 3 makes the firmware host explicit and separates electrical continuity
+from physical segments. `hostBoard` identifies the board running NightMare; no
+board-array position has an implicit role. A physical PCB/module is a Board. A
+chip or component mounted on one is a Device. `NoBoard` remains available for a
+genuinely external discrete component, but is not the normal representation of
+a standalone module.
 
 The readable JSON form names the same fields:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
+  "host_board": 0,
   "boards": [
     {"id": "main", "model": "esp32-3248s035c:v1"},
     {"id": "io", "model": "mattediworks-io-expander:v1"}
   ],
   "devices": [
-    {"id": "display", "model": "ST7796", "board": 0},
+    {"id": "display", "model": "ST7796", "board": 0, "kind": "display"},
     {"id": "pcf", "model": "PCF8574", "board": 1},
-    {"id": "temperature", "model": "DS18B20", "board": null}
+    {"id": "temperature", "model": "DS18B20", "board": 1,
+     "kind": "sensor", "form": "waterproof-probe"}
   ],
-  "connections": []
+  "nets": [
+    {"id": "i2c_sda", "type": "i2c_data", "bus": 0,
+     "direction": "bus", "pull": "external_up", "active_low": false}
+  ],
+  "connections": [
+    {"from": {"kind": "board", "index": 0, "terminal": "GPIO8"},
+     "to": {"kind": "board", "index": 1, "terminal": "SDA"},
+     "net": 0, "group": 1}
+  ]
 }
 ```
 
-`255` means no owning board, no connection device, or no bus in the applicable
-positional field. Numeric enums are append-only:
+Connections never infer board crossings: each physical segment is explicit.
+Segments with the same `net` are electrically continuous. A non-zero `group`
+means conductors travel together physically; it does not connect their nets.
+Endpoint kinds are `0 board`, `1 device`, and `2 external`. Numeric enums are
+append-only:
 
 ```text
 direction:  0 input, 1 output, 2 bidirectional, 3 power, 4 ground, 5 bus
@@ -266,6 +281,14 @@ signal:     0 gpio, 1 SPI clock, 2 SPI MOSI, 3 SPI MISO, 4 SPI chip-select,
             5 I2C data, 6 I2C clock, 7 UART transmit, 8 UART receive,
             9 PWM, 10 analog, 11 one-wire, 12 power, 13 ground
 ```
+
+Device kinds are broad semantic hints: `0 unknown`, `1 ic`, `2 led`,
+`3 button`, `4 relay`, `5 sensor`, `6 display`, `7 speaker`, `8 buzzer`,
+`9 connector`, `10 transistor`, `11 diode`, `12 resistor`, `13 capacitor`,
+`14 motor`, and `15 storage`. Values are append-only. JSON omits `kind` when it
+is `unknown` and omits an absent/empty `form`. MessagePack omits both trailing
+positions for a default Device; when `form` exists with an unknown kind, the
+kind position is emitted as `0` before it.
 
 The optional resistor is a two-byte value. Its first byte contains two BCD
 digits `a` and `b`; its second byte is signed exponent `c`, representing

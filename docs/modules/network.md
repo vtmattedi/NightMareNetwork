@@ -427,6 +427,7 @@ Before the project callback, the framework has already:
 - restored subscriptions,
 - published online status,
 - re-announced Resources,
+- re-announced provider and consume manifests,
 - refreshed telemetry,
 - flushed queued messages.
 

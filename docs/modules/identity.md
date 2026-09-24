@@ -371,7 +371,7 @@ It does not publish MQTT itself.
 Resource cleanup removes retained state under the old identity for:
 
 - every currently declared Managed Value,
-- the old Resource manifest.
+- the old Resource provider and consume manifests.
 
 Actions need no retained cleanup because `/invoke` is transient.
 

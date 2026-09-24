@@ -18,12 +18,13 @@ namespace
     constexpr char NetworkJob[] = "nm.telemetry.network";
     constexpr size_t MaxConnections = 128;
 
-    const char *mainBoardModel(const NMHardware::Profile &profile)
+    const char *hostBoardModel(const NMHardware::Profile &profile)
     {
         if (profile.boardCount == 0 || profile.boards == nullptr ||
-            profile.boards[0].model == nullptr)
+            profile.hostBoard >= profile.boardCount ||
+            profile.boards[profile.hostBoard].model == nullptr)
             return "unspecified";
-        return profile.boards[0].model;
+        return profile.boards[profile.hostBoard].model;
     }
 
     const char *directionName(NMHardware::Direction direction)
@@ -86,26 +87,85 @@ namespace
         return "unknown";
     }
 
+    const char *endpointKindName(NMHardware::EndpointKind kind)
+    {
+        switch (kind)
+        {
+        case NMHardware::EndpointKind::Board: return "board";
+        case NMHardware::EndpointKind::Device: return "device";
+        case NMHardware::EndpointKind::External: return "external";
+        }
+        return "unknown";
+    }
+
+    const char *deviceKindName(NMHardware::DeviceKind kind)
+    {
+        switch (kind)
+        {
+        case NMHardware::DeviceKind::Ic: return "ic";
+        case NMHardware::DeviceKind::Led: return "led";
+        case NMHardware::DeviceKind::Button: return "button";
+        case NMHardware::DeviceKind::Relay: return "relay";
+        case NMHardware::DeviceKind::Sensor: return "sensor";
+        case NMHardware::DeviceKind::Display: return "display";
+        case NMHardware::DeviceKind::Speaker: return "speaker";
+        case NMHardware::DeviceKind::Buzzer: return "buzzer";
+        case NMHardware::DeviceKind::Connector: return "connector";
+        case NMHardware::DeviceKind::Transistor: return "transistor";
+        case NMHardware::DeviceKind::Diode: return "diode";
+        case NMHardware::DeviceKind::Resistor: return "resistor";
+        case NMHardware::DeviceKind::Capacitor: return "capacitor";
+        case NMHardware::DeviceKind::Motor: return "motor";
+        case NMHardware::DeviceKind::Storage: return "storage";
+        case NMHardware::DeviceKind::Unknown: break;
+        }
+        return "unknown";
+    }
+
+    bool endpointUsable(const NMHardware::Endpoint &endpoint,
+                        const NMHardware::Profile &profile)
+    {
+        if (endpoint.terminal == nullptr || endpoint.terminal[0] == '\0')
+            return false;
+        switch (endpoint.kind)
+        {
+        case NMHardware::EndpointKind::Board:
+            return endpoint.index < profile.boardCount;
+        case NMHardware::EndpointKind::Device:
+            return endpoint.index < profile.deviceCount;
+        case NMHardware::EndpointKind::External:
+            return true;
+        }
+        return false;
+    }
+
     bool profileUsable(const NMHardware::Profile &profile)
     {
         if (profile.boardCount == 0 || profile.boardCount > 255 ||
-            profile.deviceCount > 255 || profile.connectionCount > MaxConnections ||
+            profile.hostBoard >= profile.boardCount || profile.deviceCount > 255 ||
+            profile.netCount > 255 || profile.connectionCount > MaxConnections ||
             profile.boards == nullptr ||
             (profile.deviceCount != 0 && profile.devices == nullptr) ||
+            (profile.netCount != 0 && profile.nets == nullptr) ||
             (profile.connectionCount != 0 && profile.connections == nullptr))
             return false;
         for (size_t i = 0; i < profile.deviceCount; ++i)
             if (profile.devices[i].board != NMHardware::NoBoard &&
                 profile.devices[i].board >= profile.boardCount)
                 return false;
+        for (size_t i = 0; i < profile.netCount; ++i)
+        {
+            const NMHardware::Net &net = profile.nets[i];
+            if (net.id == nullptr || net.id[0] == '\0' ||
+                (net.resistor.valid() && net.pull == NMHardware::Pull::None))
+                return false;
+        }
         for (size_t i = 0; i < profile.connectionCount; ++i)
         {
             const NMHardware::Connection &connection = profile.connections[i];
-            if ((connection.device != NMHardware::NoDevice &&
-                 connection.device >= profile.deviceCount) ||
-                connection.signal == nullptr)
-                return false;
-            if (connection.resistor.valid() && connection.pull == NMHardware::Pull::None)
+            if (connection.net >= profile.netCount ||
+                !endpointUsable(connection.from, profile) ||
+                !endpointUsable(connection.to, profile))
                 return false;
         }
         return true;
@@ -183,7 +243,7 @@ void TelemetryService::appendIdentity(JsonObject dst) const
 void TelemetryService::appendHardware(JsonObject dst) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
-    dst["board"] = mainBoardModel(profile);
+    dst["board"] = hostBoardModel(profile);
     dst["chip"] = ESP.getChipModel();
     dst["cores"] = ESP.getChipCores();
     dst["revision"] = ESP.getChipRevision();
@@ -196,6 +256,7 @@ void TelemetryService::buildNamedHardware(JsonDocument &doc) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
     doc["version"] = NMHardware::TopologyVersion;
+    doc["host_board"] = profile.hostBoard;
     JsonArray boards = doc["boards"].to<JsonArray>();
     for (size_t i = 0; i < profile.boardCount; ++i)
     {
@@ -213,33 +274,48 @@ void TelemetryService::buildNamedHardware(JsonDocument &doc) const
             item["board"] = nullptr;
         else
             item["board"] = profile.devices[i].board;
+        if (profile.devices[i].kind != NMHardware::DeviceKind::Unknown)
+            item["kind"] = deviceKindName(profile.devices[i].kind);
+        if (profile.devices[i].form != nullptr && profile.devices[i].form[0] != '\0')
+            item["form"] = profile.devices[i].form;
+    }
+    JsonArray nets = doc["nets"].to<JsonArray>();
+    for (size_t i = 0; i < profile.netCount; ++i)
+    {
+        const NMHardware::Net &net = profile.nets[i];
+        JsonObject item = nets.add<JsonObject>();
+        item["id"] = net.id != nullptr ? net.id : "";
+        item["type"] = signalTypeName(net.type);
+        if (net.bus == NMHardware::NoBus)
+            item["bus"] = nullptr;
+        else
+            item["bus"] = net.bus;
+        item["direction"] = directionName(net.direction);
+        item["pull"] = pullName(net.pull);
+        item["active_low"] = net.activeLow;
+        if (net.resistor.valid())
+        {
+            JsonArray resistor = item["resistor"].to<JsonArray>();
+            resistor.add(net.resistor.firstDigit());
+            resistor.add(net.resistor.secondDigit());
+            resistor.add(net.resistor.exponent());
+        }
     }
     JsonArray connections = doc["connections"].to<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)
     {
         const NMHardware::Connection &connection = profile.connections[i];
-        JsonObject pin = connections.add<JsonObject>();
-        pin["pin"] = connection.pin;
-        if (connection.device == NMHardware::NoDevice)
-            pin["device"] = nullptr;
-        else
-            pin["device"] = connection.device;
-        pin["signal"] = connection.signal;
-        if (connection.bus == NMHardware::NoBus)
-            pin["bus"] = nullptr;
-        else
-            pin["bus"] = connection.bus;
-        pin["type"] = signalTypeName(connection.type);
-        pin["direction"] = directionName(connection.direction);
-        pin["pull"] = pullName(connection.pull);
-        pin["active_low"] = connection.activeLow;
-        if (connection.resistor.valid())
-        {
-            JsonArray resistor = pin["resistor"].to<JsonArray>();
-            resistor.add(connection.resistor.firstDigit());
-            resistor.add(connection.resistor.secondDigit());
-            resistor.add(connection.resistor.exponent());
-        }
+        JsonObject item = connections.add<JsonObject>();
+        JsonObject from = item["from"].to<JsonObject>();
+        from["kind"] = endpointKindName(connection.from.kind);
+        from["index"] = connection.from.index;
+        from["terminal"] = connection.from.terminal;
+        JsonObject to = item["to"].to<JsonObject>();
+        to["kind"] = endpointKindName(connection.to.kind);
+        to["index"] = connection.to.index;
+        to["terminal"] = connection.to.terminal;
+        item["net"] = connection.net;
+        item["group"] = connection.group;
     }
 }
 
@@ -248,6 +324,7 @@ void TelemetryService::buildPositionalHardware(JsonDocument &doc) const
     const NMHardware::Profile profile = NMHardware::getProfile();
     JsonArray root = doc.to<JsonArray>();
     root.add(NMHardware::TopologyVersion);
+    root.add(profile.hostBoard);
     JsonArray boards = root.add<JsonArray>();
     for (size_t i = 0; i < profile.boardCount; ++i)
     {
@@ -262,22 +339,42 @@ void TelemetryService::buildPositionalHardware(JsonDocument &doc) const
         item.add(profile.devices[i].id != nullptr ? profile.devices[i].id : "");
         item.add(profile.devices[i].model != nullptr ? profile.devices[i].model : "");
         item.add(profile.devices[i].board);
+        const bool hasForm = profile.devices[i].form != nullptr &&
+                             profile.devices[i].form[0] != '\0';
+        if (profile.devices[i].kind != NMHardware::DeviceKind::Unknown || hasForm)
+            item.add(static_cast<uint8_t>(profile.devices[i].kind));
+        if (hasForm)
+            item.add(profile.devices[i].form);
+    }
+    JsonArray nets = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.netCount; ++i)
+    {
+        const NMHardware::Net &net = profile.nets[i];
+        JsonArray item = nets.add<JsonArray>();
+        item.add(net.id != nullptr ? net.id : "");
+        item.add(static_cast<uint8_t>(net.type));
+        item.add(net.bus);
+        item.add(static_cast<uint8_t>(net.direction));
+        item.add(static_cast<uint8_t>(net.pull));
+        item.add(net.activeLow);
+        if (net.resistor.valid())
+            item.add(net.resistor.encoded());
     }
     JsonArray connections = root.add<JsonArray>();
     for (size_t i = 0; i < profile.connectionCount; ++i)
     {
         const NMHardware::Connection &connection = profile.connections[i];
         JsonArray item = connections.add<JsonArray>();
-        item.add(connection.pin);
-        item.add(connection.device);
-        item.add(connection.signal);
-        item.add(connection.bus);
-        item.add(static_cast<uint8_t>(connection.type));
-        item.add(static_cast<uint8_t>(connection.direction));
-        item.add(static_cast<uint8_t>(connection.pull));
-        item.add(connection.activeLow);
-        if (connection.resistor.valid())
-            item.add(connection.resistor.encoded());
+        JsonArray from = item.add<JsonArray>();
+        from.add(static_cast<uint8_t>(connection.from.kind));
+        from.add(connection.from.index);
+        from.add(connection.from.terminal);
+        JsonArray to = item.add<JsonArray>();
+        to.add(static_cast<uint8_t>(connection.to.kind));
+        to.add(connection.to.index);
+        to.add(connection.to.terminal);
+        item.add(connection.net);
+        item.add(connection.group);
     }
 }
 

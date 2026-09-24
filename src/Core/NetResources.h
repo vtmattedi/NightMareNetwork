@@ -126,6 +126,8 @@ private:
  *
  *   <device>/manifest                   manifest, retained
  *   <device>/manifest/msgpack           compact manifest, retained
+ *   <device>/manifest/consume           remote dependencies, retained
+ *   <device>/manifest/consume/msgpack   compact remote dependencies, retained
  *   <device>/resource/<name>/state      value state, retained
  *   <device>/resource/<name>/set        write request, transient
  *   <device>/resource/<name>/invoke     action request, transient
@@ -207,6 +209,8 @@ enum class ManifestFormat : uint8_t
  *     JSON instead of breaking them.
  * ------------------------------------------------------------------------- */
 constexpr uint8_t ManifestEncodingVersion = 1;
+constexpr uint8_t ConsumeManifestEncodingVersion = 1;
+constexpr uint8_t ConsumeManifestVersion = 1;
 
 /// Positions within the top-level array. Position 0 is fixed for all time; see
 /// rule 1 above.
@@ -237,6 +241,10 @@ String resolveResourceManifestTopic(const String &deviceName);
 /// `<device>/manifest`; MSGPACK adds `/msgpack` below it. This encoding-named
 /// path leaves room for siblings such as `/manifest/cbor`.
 String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format);
+
+/// @brief Retained dependencies derived from bound, resolved Remote Resources.
+String resolveResourceConsumeManifestTopic(const String &deviceName,
+                                           ManifestFormat format = ManifestFormat::JSON);
 
 /// @brief `<device>/resource`: the root every resource hangs below. Separate
 /// from the manifest topic, deliberately -- see ManifestFormat.

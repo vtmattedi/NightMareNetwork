@@ -99,7 +99,7 @@ Profile getProfile()
     return projectProfile();
 #else
     static const Board boards[] = {{"main", "unspecified"}};
-    return {boards, 1, nullptr, 0, nullptr, 0};
+    return {0, boards, 1, nullptr, 0, nullptr, 0, nullptr, 0};
 #endif
 }
 }

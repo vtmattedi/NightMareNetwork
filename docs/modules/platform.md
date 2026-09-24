@@ -215,32 +215,59 @@ struct Board
     const char *model;
 };
 
+enum class DeviceKind
+{
+    Unknown, Ic, Led, Button, Relay, Sensor, Display, Speaker,
+    Buzzer, Connector, Transistor, Diode, Resistor, Capacitor,
+    Motor, Storage
+};
+
 struct Device
 {
     const char *id;
     const char *model;
-    uint8_t board; // board index, or NoBoard for a standalone component
+    uint8_t board; // board index, or NoBoard for an external discrete part
+    DeviceKind kind; // defaults to Unknown
+    const char *form; // defaults to nullptr
 };
 
-struct Connection
+enum class EndpointKind { Board, Device, External };
+
+struct Endpoint
 {
-    int16_t pin;
-    uint8_t device;
-    const char *signal;
-    uint8_t bus;
+    EndpointKind kind;
+    uint8_t index;
+    const char *terminal;
+};
+
+struct Net
+{
+    const char *id;
     SignalType type;
+    uint8_t bus;
     Direction direction;
     Pull pull;
     bool activeLow;
     Resistor resistor;
 };
 
+struct Connection
+{
+    Endpoint from;
+    Endpoint to;
+    uint8_t net;
+    uint8_t group;
+};
+
 struct Profile
 {
+    uint8_t hostBoard;
     const Board *boards;
     size_t boardCount;
     const Device *devices;
     size_t deviceCount;
+    const Net *nets;
+    size_t netCount;
     const Connection *connections;
     size_t connectionCount;
 };
@@ -272,16 +299,21 @@ If no `NightMareHardware.h` exists, NightMare returns:
 ```text
 boards:      [{ id: main, model: unspecified }]
 devices:     none
+nets:        none
 connections: none
 ```
 
-The model of `boards[0]` also feeds INFO/HARDWARE. The complete topology is
+The model of `hostBoard` also feeds INFO/HARDWARE. The complete topology is
 published at `<device>/hardware` and `<device>/hardware/msgpack` and is
 available through the `HW` command.
 
-Use `NoBoard` for a sensor, termination, or other discrete component that is
-physically connected to the topology but is not integrated into a declared
-board or module.
+A physical PCB/module should normally be a Board; a chip/component mounted on
+it is a Device. `NoBoard` is reserved for genuinely external discrete parts.
+Connections are explicit endpoint-to-endpoint physical segments. Nets carry
+electrical meaning, while non-zero connection groups describe bundled wires.
+Optional Device `kind` and `form` values improve visualization without being
+required. `kind` is a broad category such as `Sensor` or `Led`; `form` is a
+stable lowercase physical-form slug and is not a UI artwork identifier.
 
 ## `startNightMareESP()`
 

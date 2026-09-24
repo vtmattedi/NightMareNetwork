@@ -393,6 +393,63 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
     return true;
 }
 
+bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument &into)
+{
+    JsonDocument packed;
+    if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) ||
+        !packed.is<JsonArray>())
+        return false;
+
+    JsonArrayConst root = packed.as<JsonArrayConst>();
+    if (root.size() < 3 ||
+        root[0].as<uint8_t>() != ConsumeManifestEncodingVersion ||
+        !root[2].is<JsonArrayConst>())
+        return false;
+
+    into.clear();
+    into["version"] = root[1].as<int>();
+    JsonArray consumes = into["consumes"].to<JsonArray>();
+    for (JsonVariantConst element : root[2].as<JsonArrayConst>())
+    {
+        JsonArrayConst entry = element.as<JsonArrayConst>();
+        if (entry.size() < 3)
+            return false;
+        const uint8_t kind = entry[0].as<uint8_t>();
+        JsonObject item = consumes.add<JsonObject>();
+        item["device"] = entry[1].as<const char *>();
+        item["resource"] = entry[2].as<const char *>();
+        if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
+        {
+            if (entry.size() < 5)
+                return false;
+            item["kind"] = "value";
+            item["access"] = accessName(static_cast<AccessPolicy>(entry[3].as<uint8_t>()));
+            item["type"] = valueTypeName(static_cast<NetValueType>(entry[4].as<uint8_t>()));
+        }
+        else if (kind == static_cast<uint8_t>(NetResourceType::ACTION))
+        {
+            if (entry.size() < 4 || !entry[3].is<JsonArrayConst>())
+                return false;
+            item["kind"] = "action";
+            JsonArray args = item["arguments"].to<JsonArray>();
+            for (JsonVariantConst argumentElement : entry[3].as<JsonArrayConst>())
+            {
+                JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+                if (argument.size() < 3)
+                    return false;
+                JsonObject out = args.add<JsonObject>();
+                out["name"] = argument[0].as<const char *>();
+                out["type"] = valueTypeName(
+                    static_cast<NetValueType>(argument[1].as<uint8_t>()));
+                out["required"] = argument[2].as<bool>();
+            }
+        }
+        else
+            return false;
+    }
+    return true;
+}
+
 void ResourcesManager::subscribeResource(const NetResource &resource, bool includeManifest)
 {
     if (subscriber_ == nullptr)
@@ -592,6 +649,8 @@ bool ResourcesManager::bindResource(NetResource *resource)
         if (resource->kind_ == NetResourceType::VALUE)
             publishState(*static_cast<NetValueResource *>(resource));
     }
+    else
+        publishConsumeManifest();
     return true;
 }
 
@@ -623,6 +682,8 @@ void ResourcesManager::unbindResource(NetResource *resource)
                             !remoteOwnerInUse(resource->ownerDevice_.deviceName, resource));
         if (managed)
             publishManifest();
+        else
+            publishConsumeManifest();
         return;
     }
 }
@@ -649,7 +710,10 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     }
 
     if (!sourceConfigured(resource))
+    {
+        publishConsumeManifest();
         return; // Registered, but not pointed at anything yet.
+    }
 
     // setSource() cannot fail, so a target that is unusable or would make
     // routing ambiguous is refused by detaching the resource instead: with no
@@ -669,6 +733,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
         LOG_ERROR("RM", "Refused source '%s/%s' for remote resource: %s",
                   newOwner.c_str(), resource.name_.c_str(), refusal);
         resource.ownerDevice_.deviceName = String();
+        publishConsumeManifest();
         return;
     }
 
@@ -681,6 +746,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
         if (ingress.length() != 0)
             subscriber_->subscribe(ingress);
     }
+    publishConsumeManifest();
 }
 
 bool ResourcesManager::publishManifest()
@@ -722,6 +788,37 @@ bool ResourcesManager::publishManifest(ManifestFormat format)
     String payload;
     return serializeManifest(payload, format) &&
            publisher_->publish(resolveResourceManifestTopic(thisDevice, format), payload, true);
+}
+
+bool ResourcesManager::publishConsumeManifest()
+{
+    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
+        return false;
+
+    String json;
+    if (!serializeConsumeManifest(json, ManifestFormat::JSON) ||
+        !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice), json, true))
+        return false;
+
+    String packed;
+    if (!serializeConsumeManifest(packed, ManifestFormat::MSGPACK) ||
+        !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice,
+                                                                 ManifestFormat::MSGPACK),
+                             packed, true))
+        LOG_WARNING("RM", "Published the JSON consume manifest but not the MessagePack one");
+    return true;
+}
+
+bool ResourcesManager::publishConsumeManifest(ManifestFormat format)
+{
+    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
+        return false;
+    String payload;
+    return serializeConsumeManifest(payload, format) &&
+           publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice, format),
+                               payload, true);
 }
 
 // The JSON manifest, unchanged since the protocol first defined it: named keys,
@@ -803,6 +900,76 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
     }
 }
 
+void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
+{
+    doc["version"] = ConsumeManifestVersion;
+    JsonArray consumes = doc["consumes"].to<JsonArray>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned() || !hasResolvedSource(resource))
+            continue;
+        JsonObject item = consumes.add<JsonObject>();
+        item["device"] = resource.ownerDevice_.deviceName;
+        item["resource"] = resource.name_;
+        item["kind"] = kindName(resource.kind_);
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item["access"] = accessName(value.access_);
+            item["type"] = valueTypeName(value.valueType_);
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item["arguments"].to<JsonArray>();
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonObject argument = args.add<JsonObject>();
+                argument["name"] = action.argument(a).name;
+                argument["type"] = valueTypeName(action.argument(a).type);
+                argument["required"] = action.argument(a).required;
+            }
+        }
+    }
+}
+
+void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
+{
+    JsonArray root = doc.to<JsonArray>();
+    root.add(ConsumeManifestEncodingVersion);
+    root.add(ConsumeManifestVersion);
+    JsonArray consumes = root.add<JsonArray>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned() || !hasResolvedSource(resource))
+            continue;
+        JsonArray item = consumes.add<JsonArray>();
+        item.add(static_cast<uint8_t>(resource.kind_));
+        item.add(resource.ownerDevice_.deviceName);
+        item.add(resource.name_);
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item.add(static_cast<uint8_t>(value.access_));
+            item.add(static_cast<uint8_t>(value.valueType_));
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item.add<JsonArray>();
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonArray argument = args.add<JsonArray>();
+                argument.add(action.argument(a).name);
+                argument.add(static_cast<uint8_t>(action.argument(a).type));
+                argument.add(action.argument(a).required);
+            }
+        }
+    }
+}
+
 bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format) const
 {
     // ArduinoJson 7 documents size themselves, growing through a chain of small
@@ -839,6 +1006,23 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     {
         LOG_WARNING("RM", "Manifest is %u bytes, over the %u-byte ceiling; publishing nothing",
                     (unsigned)payload.length(), (unsigned)MaxManifestLength);
+        payload = String();
+        return false;
+    }
+    return true;
+}
+
+bool ResourcesManager::serializeConsumeManifest(String &payload, ManifestFormat format) const
+{
+    JsonDocument doc;
+    const bool packed = format == ManifestFormat::MSGPACK;
+    if (packed)
+        buildPositionalConsumeManifest(doc);
+    else
+        buildNamedConsumeManifest(doc);
+    if (!serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
+                                payload) || payload.length() > MaxManifestLength)
+    {
         payload = String();
         return false;
     }
@@ -944,9 +1128,9 @@ ActionResult ResourcesManager::listResources() const
 
 bool ResourcesManager::announceAll()
 {
-    if (!publishManifest())
-        return false;
-    bool published = true;
+    bool published = publishManifest();
+    if (!publishConsumeManifest())
+        published = false;
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
@@ -987,6 +1171,12 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
                              String(), true))
         withdrawn = false;
     if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName, ManifestFormat::MSGPACK),
+                             String(), true))
+        withdrawn = false;
+    if (!publisher_->publish(resolveResourceConsumeManifestTopic(oldDeviceName), String(), true))
+        withdrawn = false;
+    if (!publisher_->publish(resolveResourceConsumeManifestTopic(oldDeviceName,
+                                                                 ManifestFormat::MSGPACK),
                              String(), true))
         withdrawn = false;
     return withdrawn;
