@@ -4,6 +4,7 @@
 #include "Telemetry.h"
 #include "DeviceIdentity.h"
 #include "Scheduler.h"
+#include <esp_heap_caps.h>
 #include "DocumentPayload.h"
 #include <NightMare/HardwareProfile.h>
 #include <Network/MQTT.h>
@@ -478,9 +479,13 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     // value to a failed allocation, and a non-empty payload is no evidence that
     // it did not. These documents are retained, so a half-built one would be
     // read as this device's description until something replaced it.
-    result.valid = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
+    const PayloadResult outcome = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
+    result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
-        LOG_WARNING("TEL", "Could not build the complete info document; publishing nothing");
+        LOG_WARNING("TEL", "Not publishing the info document: %s (8bit heap free=%u largest=%u)",
+                    describePayloadResult(outcome),
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     return result;
 }
 
@@ -521,11 +526,17 @@ TelemetryResult TelemetryService::getHardware(HardwareFormat format) const
     // The compact form needs this doubly -- its connections encode Direction,
     // SignalType and the device index as bare numbers, and every one of those
     // enums starts at 0, which MessagePack writes as the byte 0x00.
-    result.valid = serializeWholeDocument(
+    const size_t measured = packed ? measureMsgPack(doc) : measureJson(doc);
+    const PayloadResult outcome = serializeWholeDocument(
         doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON, result.data);
+    result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
-        LOG_WARNING("TEL", "Could not build the complete %s hardware document; publishing nothing",
-                    packed ? "MessagePack" : "JSON");
+        LOG_WARNING("TEL", "Not publishing the %s hardware document (%u bytes): %s "
+                          "(8bit heap free=%u largest=%u)",
+                    packed ? "MessagePack" : "JSON", (unsigned)measured,
+                    describePayloadResult(outcome),
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     return result;
 }
 

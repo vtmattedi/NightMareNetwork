@@ -991,11 +991,17 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     // reader that later asks what this device offers is told the truncated
     // answer. Refusing leaves the previous manifest up, which is at worst out
     // of date rather than wrong.
-    if (!serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
-                                payload))
+    const size_t measured = packed ? measureMsgPack(doc) : measureJson(doc);
+    const PayloadResult outcome = serializeWholeDocument(
+        doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON, payload);
+    if (outcome != PayloadResult::Complete)
     {
-        LOG_WARNING("RM", "Could not build the complete %s manifest; publishing nothing",
-                    packed ? "MessagePack" : "JSON");
+        LOG_WARNING("RM", "Not publishing the %s manifest (%u bytes): %s "
+                          "(8bit heap free=%u largest=%u)",
+                    packed ? "MessagePack" : "JSON", (unsigned)measured,
+                    describePayloadResult(outcome),
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         return false;
     }
 
@@ -1020,8 +1026,9 @@ bool ResourcesManager::serializeConsumeManifest(String &payload, ManifestFormat 
         buildPositionalConsumeManifest(doc);
     else
         buildNamedConsumeManifest(doc);
-    if (!serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
-                                payload) || payload.length() > MaxManifestLength)
+    if (serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
+                               payload) != PayloadResult::Complete ||
+        payload.length() > MaxManifestLength)
     {
         payload = String();
         return false;
