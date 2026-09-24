@@ -26,61 +26,76 @@ namespace
 {
     struct RequestRetry
     {
-        uint8_t attempts = 0;
+        uint32_t delayMs = 0;
         uint32_t retryAtMs = 0;
+        bool scheduled = false;
     };
 
     RequestRetry requestRetries[SystemRequestCount];
 
     bool retryReady(const RequestRetry &retry, uint32_t now)
     {
-        return retry.attempts == 0 ||
-               static_cast<int32_t>(now - retry.retryAtMs) >= 0;
+        return retry.scheduled && static_cast<int32_t>(now - retry.retryAtMs) >= 0;
+    }
+
+    uint32_t nextRetryDelay(uint32_t previous)
+    {
+        if (previous == 0)
+            return NM_SYSTEM_REQUEST_RETRY_MS;
+        if (previous >= NM_SYSTEM_REQUEST_MAX_RETRY_MS / 2)
+            return NM_SYSTEM_REQUEST_MAX_RETRY_MS;
+        const uint32_t doubled = previous * 2;
+        return doubled < NM_SYSTEM_REQUEST_MAX_RETRY_MS
+                   ? doubled
+                   : NM_SYSTEM_REQUEST_MAX_RETRY_MS;
     }
 
     bool processSystemRequest(SystemRequest request)
     {
+        if (!MQTT_Connected() && request != SystemRequest::Count)
+            return false;
+
         switch (request)
         {
         case SystemRequest::PublishStatus:
 #if NM_ENABLE_MQTT
-            return MQTT_Connected() && MQTT_Publish("status", deviceStatusJson(true), true, true);
+            return MQTT_Publish("status", deviceStatusJson(true), true, true);
 #else
             return true;
 #endif
         case SystemRequest::PublishManifest:
 #if NM_ENABLE_MQTT
-            return MQTT_Connected() && gResourcesManager.publishManifest();
+            return  gResourcesManager.publishManifest();
 #else
             return true;
 #endif
         case SystemRequest::PublishConsumeManifest:
 #if NM_ENABLE_MQTT
-            return MQTT_Connected() && gResourcesManager.publishConsumeManifest();
+            return gResourcesManager.publishConsumeManifest();
 #else
             return true;
 #endif
         case SystemRequest::PublishResourceStates:
 #if NM_ENABLE_MQTT
-            return MQTT_Connected() && gResourcesManager.publishResourceStates();
+            return gResourcesManager.publishResourceStates();
 #else
             return true;
 #endif
         case SystemRequest::PublishInfo:
 #if NM_ENABLE_TELEMETRY
-            return MQTT_Connected() && Telemetry.publishInfo(InfoType::INFO);
+            return  Telemetry.publishInfo(InfoType::INFO);
 #else
             return true;
 #endif
         case SystemRequest::PublishHardwareJson:
 #if NM_ENABLE_TELEMETRY
-            return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::JSON);
+            return Telemetry.publishHardware(HardwareFormat::JSON);
 #else
             return true;
 #endif
         case SystemRequest::PublishHardwareMsgPack:
 #if NM_ENABLE_TELEMETRY
-            return MQTT_Connected() && Telemetry.publishHardware(HardwareFormat::MSGPACK);
+            return Telemetry.publishHardware(HardwareFormat::MSGPACK);
 #else
             return true;
 #endif
@@ -98,14 +113,15 @@ namespace
             "PublishConsumeManifest",
             "PublishResourceStates",
             "PublishInfo",
-            "PublishHardwareJson",
             "PublishHardwareMsgPack",
+            "PublishHardwareJson",
             "Count"};
         String result = "";
         for (size_t i = 0; i < SystemRequestCount; ++i)
         {
             int index = (start + i) % SystemRequestCount;
-            if (SystemState.pending(static_cast<SystemRequest>(index)))
+            if (SystemState.pending(static_cast<SystemRequest>(index)) ||
+                requestRetries[index].scheduled)
             {
                 if (!result.isEmpty())
                     result += ", ";
@@ -119,8 +135,8 @@ namespace
     {
         static uint16_t next = 0;
 #if NM_ENABLE_MQTT
-        // All current requests publish through MQTT. Keep them pending while
-        // offline without spending an attempt or entering a retry loop.
+        // All current requests publish through MQTT. Stay idle while offline;
+        // an expired delay becomes ready after reconnect, without a busy loop.
         if (!MQTT_Connected())
             return;
 #endif
@@ -131,26 +147,32 @@ namespace
             const SystemRequest request = static_cast<SystemRequest>(index);
             // Serial.printf("Processing system request: %d  queue: [%s]\n", index, debugSystemRequest().c_str());
             RequestRetry &retry = requestRetries[index];
-            if (!SystemState.pending(request) || !retryReady(retry, now) ||
-                !SystemState.take(request))
+            const bool fresh = SystemState.pending(request);
+            if (fresh)
+            {
+                if (!SystemState.take(request))
+                    continue;
+                // A new request supersedes an older failed attempt and starts
+                // this request's backoff sequence again from zero.
+                retry = RequestRetry{};
+            }
+            else if (!retryReady(retry, now))
+            {
                 continue;
+            }
             next = (index + 1) % SystemRequestCount;
-            ++retry.attempts;
             if (processSystemRequest(request))
             {
                 retry = RequestRetry{};
             }
-            else if (retry.attempts < NM_SYSTEM_REQUEST_MAX_ATTEMPTS)
-            {
-                retry.retryAtMs = now + NM_SYSTEM_REQUEST_RETRY_MS;
-                SystemState.request(request);
-            }
             else
             {
-                LOG_WARNING("NM", "Dropping system request %u after %u failed attempts",
+                retry.delayMs = nextRetryDelay(retry.delayMs);
+                retry.retryAtMs = now + retry.delayMs;
+                retry.scheduled = true;
+                LOG_WARNING("NM", "System request %u failed; retrying in %lu ms",
                             static_cast<unsigned>(index),
-                            static_cast<unsigned>(retry.attempts));
-                retry = RequestRetry{};
+                            static_cast<unsigned long>(retry.delayMs));
             }
             return;
         }

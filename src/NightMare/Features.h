@@ -102,16 +102,22 @@
 #ifndef NM_IDENTITY_CLEANUP_RETRY_MS
 #define NM_IDENTITY_CLEANUP_RETRY_MS 60000UL
 #endif
-// Deferred framework publications use bounded, delayed retries. A permanent
-// failure must not turn into work attempted on every cooperative tick.
-#ifndef NM_SYSTEM_REQUEST_MAX_ATTEMPTS
-#define NM_SYSTEM_REQUEST_MAX_ATTEMPTS 3
-#endif
+// Deferred framework publications retry with exponential backoff so a
+// permanent failure cannot become work attempted on every cooperative tick.
 #ifndef NM_SYSTEM_REQUEST_RETRY_MS
 #define NM_SYSTEM_REQUEST_RETRY_MS 1000UL
 #endif
-#if NM_SYSTEM_REQUEST_MAX_ATTEMPTS < 1
-#error "NM_SYSTEM_REQUEST_MAX_ATTEMPTS must be at least 1"
+#ifndef NM_SYSTEM_REQUEST_MAX_RETRY_MS
+#define NM_SYSTEM_REQUEST_MAX_RETRY_MS 300000UL
+#endif
+#if NM_SYSTEM_REQUEST_RETRY_MS < 1
+#error "NM_SYSTEM_REQUEST_RETRY_MS must be at least 1"
+#endif
+#if NM_SYSTEM_REQUEST_MAX_RETRY_MS < NM_SYSTEM_REQUEST_RETRY_MS
+#error "NM_SYSTEM_REQUEST_MAX_RETRY_MS must not be shorter than NM_SYSTEM_REQUEST_RETRY_MS"
+#endif
+#if NM_SYSTEM_REQUEST_MAX_RETRY_MS > 2147483647UL
+#error "NM_SYSTEM_REQUEST_MAX_RETRY_MS must fit the wrap-safe millis interval"
 #endif
 // Refresh of <device>/telemetry/network. Slow on purpose: it is bookkeeping,
 // while /status owns presence.

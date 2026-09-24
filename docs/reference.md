@@ -727,8 +727,8 @@ enum class SystemRequest : uint16_t
     PublishConsumeManifest,
     PublishResourceStates,
     PublishInfo,
-    PublishHardwareJson,
     PublishHardwareMsgPack,
+    PublishHardwareJson,
     Count
 };
 
@@ -753,13 +753,15 @@ are task-safe and allocation-free; there is no ISR-safe API.
 Deferred publication processing defaults to:
 
 ```cpp
-NM_SYSTEM_REQUEST_MAX_ATTEMPTS == 3
 NM_SYSTEM_REQUEST_RETRY_MS == 1000UL
+NM_SYSTEM_REQUEST_MAX_RETRY_MS == 300000UL
 ```
 
-Offline time does not consume an attempt. After a failed attempt, the request
-moves behind other ready work and cannot run again until the retry interval.
-The final failure is logged and dropped.
+After a failure, the delay doubles from the initial retry interval up to the
+five-minute cap. The request moves behind other ready work and remains eligible
+for future retries. A new request for the same work clears its existing delay
+and runs as fresh work. No retry is attempted while MQTT is offline; a delay
+that elapsed during the outage is ready after reconnect.
 
 ## StateStore
 

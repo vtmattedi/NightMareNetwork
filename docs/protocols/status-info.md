@@ -512,9 +512,9 @@ retained information documents:
 ```
 
 `tickNightMareESP()` publishes at most one ready document per call. A failed
-publication moves behind other ready work, waits before retrying, and is
-dropped after the configured final attempt. This spreads allocations across
-cooperative ticks instead of the connection callback.
+publication moves behind other ready work and retries with exponential backoff
+capped at five minutes. A fresh request resets its backoff. This spreads
+allocations across cooperative ticks instead of the connection callback.
 
 Each document is attempted even if publication of another document fails.
 

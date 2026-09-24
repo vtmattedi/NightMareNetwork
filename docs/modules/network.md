@@ -466,8 +466,9 @@ time request when wall time is invalid
 
 The console and time-request messages remain small immediate publications. The
 typed pending requests are consumed by `tickNightMareESP()`. A failed request
-moves behind other ready work, waits before retrying, and is dropped after its
-configured final attempt. Offline time does not consume an attempt.
+moves behind other ready work and retries with exponential backoff capped at
+five minutes. A fresh request resets its backoff. No retry is attempted while
+offline; an elapsed delay is ready after reconnect.
 
 ## Custom subscriptions
 
