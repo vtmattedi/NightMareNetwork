@@ -120,9 +120,12 @@ Its positional schema is:
 value  = [0, name, accessEnum, typeEnum]
 action = [1, name, arguments[]]
 arg    = [name, typeEnum, required]
+
+remote value  = [0, localName, bound, device, resource, accessEnum, typeEnum]
+remote action = [1, localName, bound, device, resource, arguments[]]
 ```
 
-Encoding version `1` is current. Array positions and numeric enums are
+Encoding version `1` is current (`remotes` was appended without a bump). Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
 
@@ -137,13 +140,18 @@ depends on:
 ```
 
 This is not an expansion of the provider manifest. `<device>/manifest` remains
-only what this device implements. The consume manifest version is `1` and is
-built automatically from bound Remote Resources with a resolved, valid source.
-Source-less or refused Remote Resources do not create dependency edges.
+only what this device implements. The consume manifest version is `2` and is
+built automatically. `consumes` lists only bound Remote Resources with a
+resolved, valid source; source-less or refused ones do not create dependency
+edges. Version 2 adds `remotes`: every Remote Resource this device declares,
+bound or not (`name` is the local name, `bound`, `device`/`resource` empty while
+unbound, plus `kind` and `access`/`type` or `arguments`). It exists so a
+controller can discover and configure them with `SOURCE`. Version 1 readers
+ignore it.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "consumes": [
     {"device": "weather-node", "resource": "temperature",
      "kind": "value", "access": "read", "type": "float"},
@@ -156,7 +164,7 @@ Source-less or refused Remote Resources do not create dependency edges.
 The compact positional schema is:
 
 ```text
-[encodingVersion, consumeVersion, consumes[]]
+[encodingVersion, consumeVersion, consumes[], remotes[]]
 
 value  = [0, device, resource, accessEnum, typeEnum]
 action = [1, device, resource, arguments[]]

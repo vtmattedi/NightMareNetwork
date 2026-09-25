@@ -396,7 +396,7 @@ static bool decodeConsumeManifest(
     JsonDocument &into);
 
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
-constexpr uint8_t ConsumeManifestVersion = 1;
+constexpr uint8_t ConsumeManifestVersion = 2;
 
 String resolveResourceConsumeManifestTopic(
     const String &deviceName,
