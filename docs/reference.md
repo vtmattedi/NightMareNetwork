@@ -132,21 +132,18 @@ enum class NetSyncStrategy
 };
 ```
 
-Declared dependencies (Managed wrappers only, chainable):
+Authoritative value mirroring (Managed Values only, one per Value, last call
+wins):
 
 ```cpp
-ManagedSensor<T> &dependsOn(const NetResource &input);
-ManagedState<T> &dependsOn(const NetResource &input);
-ManagedAction   &dependsOn(const NetResource &input);
+ManagedSensor<T> &dependsOn(NetValueResource &source);
+ManagedState<T>  &dependsOn(NetValueResource &source);
 ```
 
-Read back from any Resource:
+Read back from any Value:
 
 ```cpp
-size_t dependencyCount() const;
-const NetResource &dependency(size_t index) const;
-
-constexpr size_t NetResourceMaxDependencies = NM_MAX_RESOURCE_DEPENDENCIES;
+const NetValueResource *dependency() const;
 ```
 
 ## NetValue<T>

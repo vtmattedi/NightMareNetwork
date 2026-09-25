@@ -103,27 +103,26 @@ bool NetResource::clearRemoteSource()
     return setRemoteSource(String(), String());
 }
 
-bool NetResource::addDependency(const NetResource &input)
+bool NetValueResource::setDependency(const NetValueResource &source)
 {
-    // A resource cannot be its own input, and the manifest would publish an
-    // edge no reader could do anything with.
-    if (&input == this)
+    // A value cannot mirror itself, and the manifest would publish an edge no
+    // reader could do anything with.
+    if (&source == this)
     {
         LOG_WARNING("NET", "Resource '%s' cannot depend on itself", name_.c_str());
         return false;
     }
-    for (uint8_t i = 0; i < dependencyCount_; ++i)
+    // Mirroring copies the encoded value straight across, so the two have to
+    // agree on what the encoding means. This is the only part of "these are the
+    // same value" that can be checked here; the rest is the caller's claim.
+    if (source.valueType_ != valueType_)
     {
-        if (dependencies_[i] == &input)
-            return true; // Already declared; saying it twice is not an error.
-    }
-    if (dependencyCount_ >= NetResourceMaxDependencies)
-    {
-        LOG_WARNING("NET", "Resource '%s' already has %u dependencies; '%s' was not added",
-                    name_.c_str(), (unsigned)NetResourceMaxDependencies, input.name_.c_str());
+        LOG_WARNING("NET", "Resource '%s' cannot depend on '%s': value type %u is not %u",
+                    name_.c_str(), source.name_.c_str(), (unsigned)source.valueType_,
+                    (unsigned)valueType_);
         return false;
     }
-    dependencies_[dependencyCount_++] = &input;
+    dependency_ = &source; // One dependency: the last call wins.
 #if NM_ENABLE_RESOURCES
     // Declared before binding in the usual setup order, in which case the
     // manifest has not been published yet and this does nothing.

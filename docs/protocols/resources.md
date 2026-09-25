@@ -82,14 +82,11 @@ A representative manifest is:
       "type": "boolean"
     },
     {
-      "name": "ac_state",
+      "name": "ac_door",
       "kind": "value",
       "access": "read",
-      "type": "integer",
-      "depends_on": [
-        "door",
-        "temperature"
-      ]
+      "type": "boolean",
+      "depends_on": "door"
     },
     {
       "name": "set_timer",
@@ -127,15 +124,16 @@ Its positional schema is:
 ```text
 [encodingVersion, manifestVersion, resources[]]
 
-value  = [0, name, accessEnum, typeEnum, dependsOn[]?]
-action = [1, name, arguments[], dependsOn[]?]
+value  = [0, name, accessEnum, typeEnum, dependsOn?]
+action = [1, name, arguments[]]
 arg    = [name, typeEnum, required]
 ```
 
-`dependsOn[]` is appended only when the Resource declares dependencies, so a
-Resource without them encodes exactly as it did in manifest version `2`.
+`dependsOn` is a single local Resource name, appended only when the Value
+declares one, so a Value without one encodes exactly as it did in manifest
+version `2`. Actions have no dependencies.
 
-Encoding version `1` is current (`dependsOn[]` was appended without a bump). Array positions and numeric enums are
+Encoding version `1` is current (`dependsOn` was appended without a bump). Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
 
@@ -198,52 +196,113 @@ encodings under the old device name.
 
 ## Resource dependencies
 
-A Managed Resource may declare the local Resources its implementation uses:
+A Managed Value may declare that it **is** another Value:
 
 ```cpp
-acControllerState.dependsOn(doorSensor)
-                 .dependsOn(temperatureSensor)
-                 .dependsOn(acPower);
+acDoor.dependsOn(doorSensor);
 ```
 
-Those names appear in the provider manifest as `depends_on`.
+This asserts that `ac_door` and `door` are the same logical value and that
+`door` is authoritative. Every time `door` receives an authoritative update,
+the Manager copies it into `ac_door` and publishes `ac_door`'s state. No
+application code runs in between.
 
-A dependency names a **local** Resource, never `<device>/<resource>`. This is
+The declaration appears in the provider manifest as a singular `depends_on`:
+
+```json
+{
+  "name": "ac_door",
+  "kind": "value",
+  "access": "read",
+  "type": "boolean",
+  "depends_on": "door"
+}
+```
+
+### Local-name addressing
+
+`depends_on` names a **local** Resource, never `<device>/<resource>`. This is
 what keeps the two documents independent:
 
 ```text
 Mycroft/door            ManagedSensor<bool>, the authoritative observation
-  ^ source
+  |  source
 Adler/door              RemoteSensor<bool>, a local handle for it
-  ^ dependsOn
-Adler/ac_state          ManagedSensor<int8_t>, Adler's own controller state
+  |  dependsOn
+Adler/ac_door           ManagedSensor<bool>, Adler's own representation
 ```
 
-The manifest says `ac_state` depends on `door`. The consume manifest says
-`door` currently reads `Mycroft/door`. Retargeting `door` to `Moriarty/door`
-changes only the second document; nothing that depends on `door` is touched.
+The manifest says `ac_door` depends on `door`. The consume manifest says `door`
+currently reads `Mycroft/door`. Retargeting `door` to `Moriarty/door` changes
+only the second document; nothing that mirrors `door` is touched.
 
-A reader resolves each `depends_on` name against the same device: a Managed
-input is in that device's manifest, a Remote one in its consume manifest under
+A reader resolves the `depends_on` name against the same device: a Managed
+source is in that device's manifest, a Remote one in its consume manifest under
 `remotes`. A name that appears in neither was declared against a Resource that
 was never bound.
 
-`dependsOn` is a dependency, not a derivation. It claims that the input
-participates in the Resource's value or behavior, not that the value is a
-function of it. Only Managed Resources can declare dependencies: a Remote
-Resource's value is its source's value, so there is nothing local for it to
-depend on.
+### Semantic identity is the application's claim
 
-A Resource may declare at most `NM_MAX_RESOURCE_DEPENDENCIES` inputs, which
-defaults to:
+`dependsOn()` asserts semantic identity, not merely causal dependency. The
+application author is responsible for declaring only Resources that represent
+the same logical value. NightMare and backend tooling may detect structural and
+type inconsistencies but cannot guarantee semantic equivalence.
+
+The firmware checks only what it can see: a Value cannot depend on itself, and
+the two wire types must match.
 
 ```text
-4
+bool    -> bool      OK
+float   -> float     OK
+integer -> integer   OK
+
+bool    -> integer   rejected
+float   -> string    rejected
 ```
 
-Dependencies are firmware declarations. They are not persisted, not
-configurable at runtime, and do not affect routing, subscriptions, or
-freshness. Nothing in the framework reads them; they exist to be published.
+Wire-type equality is not exact type equality: `int8_t` and `uint32_t` are both
+`integer` on the wire, so a mismatch between them is not caught.
+
+`occupied.dependsOn(doorOpen)` passes every check the firmware can make and is
+still nonsense. Backend tooling is expected to report unresolved names, type
+mismatches, self-dependencies, and unsupported chains; semantic correctness
+remains the application's.
+
+### Limits of version 1
+
+One dependency per Value, and the last `dependsOn()` call wins:
+
+```cpp
+a.dependsOn(b);
+a.dependsOn(c);
+
+// final relationship:
+a -> c
+```
+
+Values only. Actions have no dependencies, and a Remote Value cannot declare
+one: it already mirrors its own source.
+
+Propagation is one level. A dependent is not treated as a source in turn, so a
+chain `a -> b -> c` stops at `b`. The manifest publishes only the direct local
+edge and does not resolve the full path.
+
+Chain resolution, source-of-truth discovery across devices, and automatic
+subscription redirection are future protocol features:
+
+```text
+B -> A -> C
+
+getChain(B)       = [B, A, C]
+sourceOfTruth(B)  = C
+```
+
+A future implementation may redirect `B` from `C` to `D` when `A` is
+retargeted, while preserving `B`'s configured source as `A`. None of that
+exists today.
+
+Dependencies are firmware declarations. They are not persisted and cannot be
+configured at runtime.
 
 ## Resource kinds
 

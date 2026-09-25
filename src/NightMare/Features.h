@@ -93,12 +93,6 @@
 #ifndef NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
 #define NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
 #endif
-// Inputs one Managed Resource may declare with dependsOn(). The storage is a
-// pointer per slot on every Resource, declared or not, so raising this costs
-// memory across the whole registry rather than only where it is used.
-#ifndef NM_MAX_RESOURCE_DEPENDENCIES
-#define NM_MAX_RESOURCE_DEPENDENCIES 4
-#endif
 // Which encoding `>manifest` returns when asked for neither: json or mpack.
 #ifndef NM_DEFAULT_MANIFEST_FORMAT
 #define NM_DEFAULT_MANIFEST_FORMAT json

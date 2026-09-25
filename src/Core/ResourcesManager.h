@@ -221,6 +221,10 @@ private:
     /// device instead, which is a different question.
     static bool verifiesRemoteManifests();
     bool publishState(const NetValueResource &resource);
+    /// @brief Copies an authoritative value into every Managed value that
+    /// declared it with dependsOn(), and publishes each one. One level only;
+    /// see the definition.
+    void propagateToDependents(const NetValueResource &source);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION

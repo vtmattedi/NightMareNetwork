@@ -424,41 +424,32 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
         item["name"] = entry[1].as<const char *>();
         item["kind"] = kindName(static_cast<NetResourceType>(kind));
 
-        // Where the dependency array sits depends on the shape that precedes it.
-        size_t dependsOnSlot = 0;
         if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
         {
             if (entry.size() < 4)
                 continue;
             item["access"] = accessName(static_cast<AccessPolicy>(entry[2].as<uint8_t>()));
             item["type"] = valueTypeName(static_cast<NetValueType>(entry[3].as<uint8_t>()));
-            dependsOnSlot = 4;
-        }
-        else
-        {
-            JsonArray args = item["arguments"].to<JsonArray>();
-            if (entry.size() < 3)
-                continue;
-            for (JsonVariantConst argumentElement : entry[2].as<JsonArrayConst>())
-            {
-                JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
-                if (argument.size() < 3)
-                    continue;
-                JsonObject out = args.add<JsonObject>();
-                out["name"] = argument[0].as<const char *>();
-                out["type"] = valueTypeName(static_cast<NetValueType>(argument[1].as<uint8_t>()));
-                out["required"] = argument[2].as<bool>();
-            }
-            dependsOnSlot = 3;
+            // Absent from an older manifest, and from a value that mirrors
+            // nothing.
+            if (entry.size() > 4 && entry[4].is<const char *>())
+                item["depends_on"] = entry[4].as<const char *>();
+            continue;
         }
 
-        // Absent in a version 2 manifest, and in a version 3 one from a
-        // resource that declares no inputs.
-        if (entry.size() <= dependsOnSlot || !entry[dependsOnSlot].is<JsonArrayConst>())
+        JsonArray args = item["arguments"].to<JsonArray>();
+        if (entry.size() < 3)
             continue;
-        JsonArray dependsOn = item["depends_on"].to<JsonArray>();
-        for (JsonVariantConst dependency : entry[dependsOnSlot].as<JsonArrayConst>())
-            dependsOn.add(dependency.as<const char *>());
+        for (JsonVariantConst argumentElement : entry[2].as<JsonArrayConst>())
+        {
+            JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+            if (argument.size() < 3)
+                continue;
+            JsonObject out = args.add<JsonObject>();
+            out["name"] = argument[0].as<const char *>();
+            out["type"] = valueTypeName(static_cast<NetValueType>(argument[1].as<uint8_t>()));
+            out["required"] = argument[2].as<bool>();
+        }
     }
     return true;
 }
@@ -1128,6 +1119,12 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item["access"] = accessName(value.access_);
             item["type"] = valueTypeName(value.valueType_);
+            // The local name of the value this one mirrors, resolved by the
+            // reader against this same device: a Managed source appears above,
+            // a Remote one in the consume manifest. Omitted when there is none,
+            // so a value that declares no dependency is unchanged on the wire.
+            if (value.dependency() != nullptr)
+                item["depends_on"] = value.dependency()->name();
         }
         else
         {
@@ -1142,16 +1139,6 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
                 argument["type"] = valueTypeName(action.argument(a).type);
                 argument["required"] = action.argument(a).required;
             }
-        }
-        // Local names, resolved by the reader against this same device: a
-        // Managed one appears above, a Remote one in the consume manifest.
-        // Omitted entirely when there are none, so a manifest that declares no
-        // dependencies is byte-identical to the version 2 one.
-        if (resource.dependencyCount() != 0)
-        {
-            JsonArray dependsOn = item["depends_on"].to<JsonArray>();
-            for (size_t d = 0; d < resource.dependencyCount(); ++d)
-                dependsOn.add(resource.dependency(d).name());
         }
     }
 }
@@ -1181,27 +1168,22 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
-        }
-        else
-        {
-            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
-            JsonArray args = item.add<JsonArray>();
-            for (size_t a = 0; a < action.argumentCount(); ++a)
-            {
-                JsonArray argument = args.add<JsonArray>();
-                argument.add(action.argument(a).name);
-                argument.add(static_cast<uint8_t>(action.argument(a).type));
-                argument.add(action.argument(a).required);
-            }
+            // Appended (rule 2), and only when one was declared: a reader that
+            // stops at the shape it knows reads exactly what it read before.
+            if (value.dependency() != nullptr)
+                item.add(value.dependency()->name());
+            continue;
         }
 
-        // Appended (rule 2), and only when there are any: a reader that stops
-        // at the shapes it knows reads exactly what version 2 said.
-        if (resource.dependencyCount() == 0)
-            continue;
-        JsonArray dependsOn = item.add<JsonArray>();
-        for (size_t d = 0; d < resource.dependencyCount(); ++d)
-            dependsOn.add(resource.dependency(d).name());
+        const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+        JsonArray args = item.add<JsonArray>();
+        for (size_t a = 0; a < action.argumentCount(); ++a)
+        {
+            JsonArray argument = args.add<JsonArray>();
+            argument.add(action.argument(a).name);
+            argument.add(static_cast<uint8_t>(action.argument(a).type));
+            argument.add(action.argument(a).required);
+        }
     }
 }
 
@@ -1591,7 +1573,49 @@ bool ResourcesManager::setValue(NetValueResource &resource, const String &encode
     if (publisher_ != nullptr && hasResolvedSource(resource))
         publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::STATE),
                             encoded, true);
+    propagateToDependents(resource);
     return true;
+}
+
+// Every value that declared this one as its dependency now holds the same
+// value and says so. Declaring the relationship is the whole point: the
+// application writes the source and nothing else.
+//
+// One level, deliberately. A dependent is not treated as a source in turn, so
+// a chain a -> b -> c stops at b and a cycle cannot spin. Chain resolution is
+// a protocol feature that does not exist yet, and until it does, a mirror of a
+// mirror is a declaration the application should not be making.
+//
+// A linear scan of the registry, with no reverse index: at most a hundred
+// resources, only on an authoritative change, and the alternative costs
+// permanent RAM to save a walk that is already cheap.
+void ResourcesManager::propagateToDependents(const NetValueResource &source)
+{
+    const String encoded = source.encodedCurrentValue();
+    if (encoded.length() == 0 || encoded.length() > MaxValueLength)
+        return;
+
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        NetResource *candidate = resources_[i];
+        if (candidate->kind_ != NetResourceType::VALUE || !candidate->isOwned())
+            continue;
+        NetValueResource &dependent = *static_cast<NetValueResource *>(candidate);
+        if (dependent.dependency_ != &source)
+            continue;
+
+        // The owner path, not the write path: the source changing underneath a
+        // ManagedState is not a request to change it, so onWrite must not see
+        // it. setDependency() already checked that the two agree on the type,
+        // so a failure here is a codec refusing its own encoding.
+        if (!dependent.applyEncodedOwnerValue(encoded))
+        {
+            LOG_WARNING("RM", "Could not mirror '%s' into '%s'", source.name_.c_str(),
+                        dependent.name_.c_str());
+            continue;
+        }
+        publishState(dependent);
+    }
 }
 
 bool ResourcesManager::invoke(NetActionResource &resource, const String &payload)
@@ -1891,6 +1915,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
                     value.ownerDevice_.deviceName.c_str(), value.sourceResourceName_.c_str());
         return false;
     }
+    propagateToDependents(value);
     return true;
 }
 
@@ -1914,6 +1939,7 @@ bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
         return false;
     }
     publishState(value);
+    propagateToDependents(value);
     return true;
 }
 

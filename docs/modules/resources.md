@@ -408,51 +408,101 @@ Bindings are stored by stable local name:
 
 ## Declaring dependencies
 
-A Managed Resource can declare the local Resources its implementation uses:
+A Managed Value can declare that it **is** another Value:
 
 ```cpp
-ManagedSensor<int8_t> acControllerState("ac_state");
-RemoteSensor<bool> doorSensor("door");
-RemoteSensor<float> temperatureSensor("temperature");
+ManagedSensor<bool> door("door");
+ManagedSensor<bool> acDoor("ac_door");
 
-void setup()
-{
-    acControllerState.dependsOn(doorSensor)
-                     .dependsOn(temperatureSensor);
-}
+acDoor.dependsOn(door);
 ```
 
-`dependsOn()` is available on `ManagedSensor<T>`, `ManagedState<T>` and
-`ManagedAction`, and is chainable. The input may be any Resource declared by
-this device, Managed or Remote.
+This means `ac_door` and `door` are the same logical value, and `door` is
+authoritative. When `door` changes, `ResourcesManager` copies the value into
+`ac_door` and publishes `ac_door`'s state. There is no project synchronization
+code:
 
-The declared names appear in the manifest as `depends_on`:
-
-```json
-{
-  "name": "ac_state",
-  "kind": "value",
-  "access": "read",
-  "type": "integer",
-  "depends_on": ["door", "temperature"]
-}
+```cpp
+// Not needed, and not the intent:
+door.onUpdate = [](auto &, bool value) { acDoor.setValue(value); };
 ```
 
-The edge names the **local** Resource, so retargeting `door` to another device
-does not touch anything that depends on it. A reader joins the manifest with
-the consume manifest to get the full path from `Adler/ac_state` back to
-`Mycroft/door`.
+The relationship is declared once and the framework maintains it.
 
-Remote Resources cannot declare dependencies: their value is their source's
-value.
+### What propagation does
 
-Declaring the same input twice records it once. Declaring more than
-`NM_MAX_RESOURCE_DEPENDENCIES` inputs, or declaring a Resource as its own
-input, logs a warning and is ignored.
+An authoritative update to the source is mirrored into every Managed Value that
+declared it:
 
-Dependencies are firmware declarations. They are never persisted, cannot be
-changed at runtime, and are read by nothing in the framework: they exist to be
-published. Declaring them before `bindResource()` avoids republishing the
+```text
+source receives an authoritative update
+    -> publish the source as usual
+    -> copy its encoded value into each dependent
+    -> mark each dependent authoritative and fresh
+    -> publish each dependent's state
+```
+
+The sources of an authoritative update are a local `setValue()`, an accepted
+`/set` from another device, and `/state` arriving for a Remote Value.
+
+Mirroring uses the internal owner path, so for a `ManagedState` it does **not**
+call `onWrite`:
+
+```text
+external SET ac_door    -> ac_door.onWrite runs
+door changes            -> ac_door mirrors it, onWrite does not run
+```
+
+`onWrite` stays reserved for a request to change the state. A mirrored update
+is the source changing underneath it, which is not a request.
+
+`onUpdate` still fires on a dependent whose effective value changed.
+
+### Rules
+
+`dependsOn()` exists on `ManagedSensor<T>` and `ManagedState<T>` only. It is
+absent from `RemoteSensor`, `RemoteState`, `ManagedAction` and `RemoteAction`:
+a Remote Value already mirrors its source, and an Action has no value to
+mirror.
+
+A Value has at most one dependency, and the last call wins:
+
+```cpp
+a.dependsOn(b);
+a.dependsOn(c);
+
+// final relationship:
+a -> c
+```
+
+A declaration is rejected, with a warning, when the Value depends on itself or
+the two wire types differ. Wire types are compared, not C++ types, so
+`int8_t` and `uint32_t` are both `integer` and a mismatch between them is not
+caught.
+
+Propagation is one level. A dependent is not treated as a source in turn, so a
+chain `a -> b -> c` stops at `b`. Chain resolution is a future protocol
+feature.
+
+### Semantic identity is your claim
+
+`dependsOn()` asserts semantic identity, not merely causal dependency. You are
+responsible for declaring it only between Resources that represent the same
+logical value. NightMare and backend tooling may detect structural and type
+inconsistencies but cannot guarantee semantic equivalence.
+
+```cpp
+roomOccupied.dependsOn(doorOpen);   // compiles, propagates, and is nonsense
+```
+
+Both are `bool`, so nothing in the firmware can object.
+
+For a Value influenced by several inputs through controller logic, do not use
+`dependsOn()`. Write the logic and call `setValue()`; multi-input dependency
+declarations are not part of this model.
+
+Dependencies are firmware declarations: never persisted, not runtime
+configurable. Declaring them before `bindResource()` avoids republishing the
 manifest once per call.
 
 ## ManagedAction
@@ -805,7 +855,7 @@ bound Resources:          100
 Resource-name length:     64 characters
 Value/Action payload:     2048 bytes
 manifest payload limit:   16384 bytes
-dependencies per Resource: 4   (NM_MAX_RESOURCE_DEPENDENCIES)
+dependencies per Value:   1
 ```
 
 For wire details, see [Resource protocol](../protocols/resources.md).

@@ -8,11 +8,6 @@ class ResourcesManager;
 template <typename T>
 class NetValue;
 
-/// @brief Inputs one Managed resource may declare, from Features.h. Each costs
-/// a pointer per resource whether or not it is used, so the default is small.
-constexpr size_t NetResourceMaxDependencies = NM_MAX_RESOURCE_DEPENDENCIES;
-static_assert(NetResourceMaxDependencies >= 1,
-              "NM_MAX_RESOURCE_DEPENDENCIES must be at least 1");
 constexpr size_t NetResourceMaxPayloadLength = 2048;
 constexpr size_t NetResourceMaxManifestLength = 16384;
 constexpr size_t NetResourceMaxCommandLength = NetResourceMaxManifestLength + 256;
@@ -95,32 +90,7 @@ public:
     bool isBound() const { return resourceManager_ != nullptr; }
     bool isRemote() const { return role_ == ResourceRole::REMOTE; }
 
-    /// @brief The inputs this device's implementation of the resource uses.
-    /// Declared with dependsOn(); see addDependency().
-    size_t dependencyCount() const { return dependencyCount_; }
-    const NetResource &dependency(size_t index) const { return *dependencies_[index]; }
-
 protected:
-    /// @brief Records that this resource's value or behaviour depends on
-    /// `input`, which must be another resource declared on this device.
-    ///
-    /// The edge is stored as a pointer and published as `input`'s LOCAL name,
-    /// never as `<device>/<resource>`. That is the whole point: a Remote input
-    /// keeps a stable local identity while its source is configured, so
-    /// retargeting `door` from Mycroft to Moriarty leaves every resource that
-    /// depends on `door` untouched. A reader joins the two documents -- the
-    /// manifest says `ac_state` depends on `door`, the consume manifest says
-    /// `door` currently reads `Mycroft/door`.
-    ///
-    /// This is a dependency, not a derivation: it claims only that the input
-    /// participates, not that the value is a function of it.
-    ///
-    /// Declaring the same input twice is accepted and recorded once. The input
-    /// must outlive this resource, which it does when both are the usual
-    /// long-lived declarations.
-    bool addDependency(const NetResource &input);
-
-
     // A MANAGED resource leaves ownerDevice empty for good: its owner is always
     // the current device identity, read when a topic is resolved (see
     // resolveResourceOwner). Nothing is copied at construction or bind time, so
@@ -151,9 +121,6 @@ private:
     const ResourceRole role_;
     String sourceResourceName_;
     ResourcesManager *resourceManager_ = nullptr; // Non-owning; set by bindResource().
-    // Non-owning, like resourceManager_: declarations outlive each other.
-    const NetResource *dependencies_[NetResourceMaxDependencies] = {};
-    uint8_t dependencyCount_ = 0;
 
     bool isOwned() const { return role_ == ResourceRole::MANAGED; }
 
@@ -213,13 +180,18 @@ enum class ManifestFormat : uint8_t
  *
  *   manifest := [ encodingVersion:uint, manifestVersion:uint, resources:array ]
  *
- *   resource := [ 0, name:str, access:uint, type:uint ]   // kind 0 = VALUE
- *             | [ 1, name:str, arguments:array ]          // kind 1 = ACTION
+ *   resource := [ 0, name:str, access:uint, type:uint, dependsOn:str? ]  // VALUE
+ *             | [ 1, name:str, arguments:array ]                        // ACTION
  *
  *   argument := [ name:str, type:uint, required:bool ]
  *
  * `kind` leads each resource so a reader knows the shape before reading the
  * rest. The numbers are NetResourceType, AccessPolicy and NetValueType.
+ *
+ * `dependsOn` is the LOCAL name of the value this one mirrors, present only
+ * when one was declared, so a value without one encodes exactly as it did
+ * before the field existed. It is a single name, never an array and never
+ * `<device>/<resource>`: see NetValueResource::setDependency().
  *
  * Positions rather than keys because MessagePack has no string table: it writes
  * every key in full, every time, and on a real 20-resource manifest the repeated
@@ -316,7 +288,34 @@ class NetValueResource : public NetResource
 public:
     NetValueType type() const { return valueType_; }
 
+    /// @brief The value this one mirrors, or nullptr. See setDependency().
+    const NetValueResource *dependency() const { return dependency_; }
+
 protected:
+    /// @brief Declares that this value IS `source`: the same logical value,
+    /// with `source` authoritative. Every time `source` receives an
+    /// authoritative update the Manager copies it here and publishes this
+    /// resource's state, with no application code in between.
+    ///
+    /// This is mirroring, not derivation. `dependsOn` asserts semantic
+    /// identity, and only the application can know whether two resources
+    /// really mean the same thing: matching wire types is all that can be
+    /// checked here, and `occupied.dependsOn(doorOpen)` passes that check while
+    /// being nonsense. Declare it only between resources that represent the
+    /// same fact.
+    ///
+    /// The edge is published as `source`'s LOCAL name, never
+    /// `<device>/<resource>`. That is what keeps it stable: a Remote source
+    /// keeps its local identity while its own source is reconfigured, so
+    /// retargeting `door` from Mycroft to Moriarty leaves everything that
+    /// mirrors `door` untouched.
+    ///
+    /// A value has at most one dependency and the last call wins. `source`
+    /// must outlive this resource, which it does when both are the usual
+    /// long-lived declarations.
+    bool setDependency(const NetValueResource &source);
+
+
     NetValueResource(const String &resourceName, const String &resourceOwner,
                      AccessPolicy resourceAccess, NetValueType resourceValueType,
                      ResourceRole resourceRole)
@@ -333,6 +332,8 @@ protected:
 private:
     AccessPolicy access_ = AccessPolicy::READ;
     NetValueType valueType_ = NetValueType::STRING;
+    // Non-owning, like resourceManager_: declarations outlive each other.
+    const NetValueResource *dependency_ = nullptr;
     NetSyncStrategy syncStrategy_ = NetSyncStrategy::STRICT;
     uint32_t optimisticWindowMs_ = 5000;
     ResourceFreshness freshness_ = ResourceFreshness::UNKNOWN;
@@ -511,17 +512,18 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, false); }
 
-    /* dependsOn() is on the Managed leaves only, and it is the same three-line
-     * wrapper on each rather than one method on NetResource, because only the
-     * device that implements a resource can say what its implementation uses. A
-     * Remote resource's value is its source's value; there is nothing local for
-     * it to depend on, so the operation is absent there rather than present and
-     * rejected -- the same reason setValue() is absent from RemoteSensor. */
+    /* dependsOn() is on the two Managed VALUE leaves only, as the same wrapper
+     * on each rather than one method further up, because only a device that
+     * implements a value can publish a mirror of another one. A Remote value
+     * already mirrors its source, and an action has no value to mirror, so the
+     * operation is absent there rather than present and rejected -- the same
+     * reason setValue() is absent from RemoteSensor. */
 
-    /// @brief Chainable: `state.dependsOn(door).dependsOn(temperature);`
-    ManagedSensor<T> &dependsOn(const NetResource &input)
+    /// @brief Mirrors `source`, which becomes authoritative for this value.
+    /// One dependency, last call wins; see NetValueResource::setDependency().
+    ManagedSensor<T> &dependsOn(NetValueResource &source)
     {
-        this->addDependency(input);
+        this->setDependency(source);
         return *this;
     }
 };
@@ -571,10 +573,12 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, true); }
 
-    /// @brief Chainable; see ManagedSensor<T>::dependsOn().
-    ManagedState<T> &dependsOn(const NetResource &input)
+    /// @brief Mirrors `source`; see ManagedSensor<T>::dependsOn(). A mirrored
+    /// update is the source changing underneath this state, not a request to
+    /// change it, so onWrite is deliberately not called.
+    ManagedState<T> &dependsOn(NetValueResource &source)
     {
-        this->addDependency(input);
+        this->setDependency(source);
         return *this;
     }
 
@@ -717,14 +721,6 @@ public:
     // This declaration is the authoritative contract the device publishes. The
     // handler still gets the canonical payload String and parses it itself.
     Handler onInvoke = nullptr;
-
-    /// @brief The inputs this action's implementation reads or acts through.
-    /// Chainable; see ManagedSensor<T>::dependsOn().
-    ManagedAction &dependsOn(const NetResource &input)
-    {
-        addDependency(input);
-        return *this;
-    }
 
 private:
     ActionResult execute(const String &payload) override

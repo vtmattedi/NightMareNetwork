@@ -131,26 +131,38 @@ metadata, so requiring a second project declaration would create drift.
 **Consequence:** bind, source changes, unbind, reconnect, and identity cleanup
 also maintain the retained JSON and MessagePack consume manifests.
 
-## Resource dependencies reference local names
+## dependsOn() means authoritative value mirroring
 
-**Decision:** a Managed Resource may declare `dependsOn(input)`, published as
-`depends_on` in the provider manifest (version 3). The edge names the input's
-local Resource name, never `<device>/<resource>`.
+**Decision:** `a.dependsOn(b)` declares that `a` and `b` are the same logical
+value with `b` authoritative. `ResourcesManager` copies every authoritative
+update of `b` into `a` and publishes `a`. A Managed Value has at most one
+dependency and the last call wins. The edge is published as a singular
+`depends_on` naming `b`'s local Resource name.
 
-**Reason:** a Remote Resource already has a stable local identity whose source
-is separately configurable. Recording the resolved address in the dependency
-edge would duplicate that addressing and invalidate every dependent declaration
-whenever a source was retargeted. Naming the local Resource keeps provenance
-(`<device>/manifest/consume`) and dependency (`<device>/manifest`) as one join
+**Reason:** the useful relationship between two Resources that represent one
+fact is mirroring, not arbitrary causation. Expressing it as a general
+dependency list would describe something the framework cannot act on, and would
+leave the synchronization as project code the declaration was supposed to
+replace. A Remote Resource already has a stable local identity whose source is
+separately configurable, so naming the local Resource keeps provenance
+(`<device>/manifest/consume`) and mirroring (`<device>/manifest`) as one join
 rather than two competing address systems.
 
-**Consequence:** a reader assembles the graph across both documents.
-Dependencies are firmware declarations: not persisted, not runtime
-configurable, and read by nothing in the framework. Remote Resources cannot
-declare dependencies, because their value is their source's value.
+**Consequence:** mirroring uses the internal owner path, so `ManagedState`'s
+`onWrite` never sees it -- that handler means "someone is asking to change
+this", which a source changing underneath it is not. Propagation is one level
+and scans the registry rather than keeping a reverse index. Values only:
+Actions and Remote Values cannot declare a dependency.
 
-`dependsOn` deliberately claims participation, not derivation: a controller
-state that uses a door reading among several inputs is not a transform of it.
+`dependsOn()` asserts semantic identity, and only the application can know
+whether two Resources mean the same thing. The firmware validates what it can
+see -- no self-dependency, matching wire types -- and backend tooling is
+expected to report unresolved names, type mismatches and unsupported chains.
+Semantic correctness belongs to the application.
+
+Chain resolution, cross-device source-of-truth discovery and automatic
+subscription redirection are deliberately deferred; the manifest publishes only
+the direct local edge.
 
 ## Status is presence, not Resource freshness
 
