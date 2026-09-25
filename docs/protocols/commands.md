@@ -798,12 +798,21 @@ encryptionType
 ### Change credentials
 
 ```text
-WIFI CHANGE <ssid> <password>
+WIFI CHANGE <ssid> <password> [dBm|AUTO]
 ```
 
-Quote arguments containing spaces.
+Quote arguments containing spaces. The optional last argument sets the TX power; omitted, the stored power is kept.
 
-The implementation attempts the new connection before persisting the new credentials and falls back to the previous credentials if the change fails.
+The implementation attempts the new connection (SSID, password and TX power together) before persisting anything, in a single write, and falls back to the previous profile if the change fails.
+
+### TX power
+
+```text
+WIFI TXPOWER
+WIFI TXPOWER <dBm|AUTO>
+```
+
+With no argument, reports the live and configured power. `AUTO` means the library never sets the TX power and the driver default applies. Otherwise the value must be an exact driver level: `-1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5` dBm. Anything else is rejected, not rounded. The change reconnects and is persisted only if the connection succeeds; otherwise the previous profile is restored.
 
 ### Reconnect
 

@@ -22,7 +22,9 @@
 
 namespace NightMare
 {
-    /// Tx power in dBm. AUTO (0) means do not set it; the driver default stays.
+    /// Tx power in quarter-dBm, the driver's own unit (wifi_power_t): 34 = 8.5 dBm,
+    /// 78 = 19.5 dBm. Only the levels the driver defines are valid; anything else
+    /// is rejected, not rounded. AUTO (0) means do not set it; the driver default stays.
     constexpr int NM_TX_POWER_AUTO = 0;
     struct WiFiProfile
     {
@@ -46,8 +48,11 @@ const char *WiFi_getStatusName(wl_status_t status);
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
 /// The stored profile (creds.h defaults / AUTO when nothing is stored).
 NightMare::WiFiProfile WiFi_getProfile();
-/// Sets and persists the tx power in dBm (or NM_TX_POWER_AUTO). Applied now unless AUTO.
-bool WiFi_setTxPower(int txPowerDbm);
+/// True for NM_TX_POWER_AUTO or an exact driver level (quarter-dBm).
+bool WiFi_isValidTxPower(int quarterDbm);
+/// Changes only the tx power, through the same transaction as WiFi_changeProfile:
+/// applied, verified by reconnecting, and persisted only if that works.
+bool WiFi_setTxPower(int quarterDbm);
 /// Live driver tx power in dBm, or NM_TX_POWER_AUTO if WiFi is off.
 float WiFi_getTxPowerDbm();
 #endif // NM_ENABLE_WIFI

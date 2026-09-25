@@ -12,20 +12,30 @@ static TaskHandle_t WiFiTaskHandle = nullptr;
 static bool firstConnection = true;
 static int gTxPower = NightMare::NM_TX_POWER_AUTO;
 
-/// Applies the configured tx power. AUTO leaves the driver alone.
-static void applyTxPower(int dbm)
+// Every level wifi_power_t defines, in quarter-dBm.
+static const int8_t kTxPowerLevels[] = {78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
+
+bool WiFi_isValidTxPower(int quarterDbm)
 {
-    if (dbm == NightMare::NM_TX_POWER_AUTO)
-        return;
-    // wifi_power_t is in 0.25 dBm units; only these levels exist.
-    static const int8_t levels[] = {78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
-    int target = dbm * 4;
-    int best = levels[0];
-    for (int8_t level : levels)
-        if (abs(level - target) < abs(best - target))
-            best = level;
-    WiFi.setTxPower(static_cast<wifi_power_t>(best));
+    if (quarterDbm == NightMare::NM_TX_POWER_AUTO)
+        return true;
+    for (int8_t level : kTxPowerLevels)
+        if (level == quarterDbm)
+            return true;
+    return false;
 }
+
+/// Applies the configured tx power. AUTO leaves the driver alone; an invalid
+/// value or a driver refusal is a failure, never a silent substitution.
+static bool applyTxPower(int quarterDbm)
+{
+    if (quarterDbm == NightMare::NM_TX_POWER_AUTO)
+        return true;
+    if (!WiFi_isValidTxPower(quarterDbm))
+        return false;
+    return WiFi.setTxPower(static_cast<wifi_power_t>(quarterDbm));
+}
+
 /// @brief Set a callback function to be called when WiFi is connected
 /// @param callback The callback function to be set
 /// The callback function should have the signature: bool callback(bool firstConnection)
@@ -102,7 +112,11 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
 {
     WiFi.disconnect(true, true); // disconnect and erase old credentials
     WiFi.mode(WIFI_STA);
-    applyTxPower(gTxPower);
+    if (!applyTxPower(gTxPower))
+    {
+        LOG_ERROR("WiFi", "Could not apply tx power %d", gTxPower);
+        return false;
+    }
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
     gDeviceIdentity.lockAddress();
     // // A prior scanNetworks() (or a previous failed connect) can leave the
@@ -142,7 +156,11 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
 {
     WiFi.disconnect(true, true); // disconnect and erase old credentials
     WiFi.mode(WIFI_STA);
-    applyTxPower(gTxPower);
+    if (!applyTxPower(gTxPower))
+    {
+        LOG_ERROR("WiFi", "Could not apply tx power %d", gTxPower);
+        return false;
+    }
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
     // See WiFi_Connect: clears any stale status left by a prior scan/connect
     WiFi.begin(ssid, password);
@@ -161,7 +179,7 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
                                        1,
                                        &WiFiTaskHandle,
                                        tskNO_AFFINITY);
-    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s, %s", OK_LOG(res), ssid, password);
+    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s", OK_LOG(res), ssid);
 
     return res;
 }
@@ -190,13 +208,11 @@ bool WiFi_Auto()
     return WiFi_ConnectAsync(profile.ssid.c_str(), profile.password.c_str(), true);
 }
 
-bool WiFi_setTxPower(int txPowerDbm)
+bool WiFi_setTxPower(int quarterDbm)
 {
-    gTxPower = txPowerDbm;
-    PersistentSettings.set(NightMare::PersistentKey::WifiTxPower, String(txPowerDbm));
-    PersistentSettings.save();
-    applyTxPower(txPowerDbm);
-    return true;
+    NightMare::WiFiProfile profile = WiFi_getProfile();
+    profile.txPower = quarterDbm;
+    return WiFi_changeProfile(profile);
 }
 
 float WiFi_getTxPowerDbm()
@@ -224,6 +240,8 @@ void WiFi_Scan()
 
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
 {
+    if (!WiFi_isValidTxPower(profile.txPower))
+        return false;
     NightMare::WiFiProfile old = WiFi_getProfile();
     WiFi_Disconnect();
     gTxPower = profile.txPower;
@@ -233,11 +251,12 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
         WiFi_ConnectAsync(old.ssid.c_str(), old.password.c_str(), true);
         return false;
     }
-    PersistentSettings.set(NightMare::PersistentKey::WifiSsid, profile.ssid);
-    PersistentSettings.set(NightMare::PersistentKey::WifiPassword, profile.password);
-    PersistentSettings.set(NightMare::PersistentKey::WifiTxPower, String(profile.txPower));
-    PersistentSettings.save();
-    return true;
+    // One write for the whole profile: a partial one would pair a new network
+    // with the old power, or the reverse.
+    const String keys[] = {NightMare::PersistentKey::WifiSsid, NightMare::PersistentKey::WifiPassword,
+                           NightMare::PersistentKey::WifiTxPower};
+    const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
+    return PersistentSettings.setMany(keys, values, 3);
 }
 
 bool WiFi_ChangeCredentials(const String &ssid, const String &password)

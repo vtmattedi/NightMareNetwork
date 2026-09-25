@@ -16,6 +16,30 @@
 #include <LittleFS.h>
 #endif
 
+#if NM_ENABLE_WIFI
+// "AUTO" or a dBm value such as "8.5" -> the driver's quarter-dBm level. Exact
+// only: 9 is rejected rather than rounded to 8.5.
+static bool parseTxPowerArg(String arg, int &quarterDbm)
+{
+    arg.trim();
+    arg.toUpperCase();
+    if (arg == "AUTO")
+    {
+        quarterDbm = NightMare::NM_TX_POWER_AUTO;
+        return true;
+    }
+    if (arg.length() == 0)
+        return false;
+    const float dbm = arg.toFloat();
+    const int quarter = static_cast<int>(dbm * 4.0f + (dbm < 0 ? -0.5f : 0.5f));
+    if (quarter == NightMare::NM_TX_POWER_AUTO || fabsf(dbm * 4.0f - quarter) > 0.01f ||
+        !WiFi_isValidTxPower(quarter))
+        return false;
+    quarterDbm = quarter;
+    return true;
+}
+#endif
+
 /// @brief  Global function pointer to the command resolver function. This function should be set by the user of the library to handle incoming commands.
 NightMareResults (*resolveCommand)(const NightMareMessage &message) = nullptr;
 
@@ -1026,29 +1050,27 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         }
         else if (parsedMsg.subcommand == "TXPOWER")
         {
-            String arg = parsedMsg.args[1];
-            arg.toUpperCase();
-            int dbm = arg.toInt();
-            if (arg.length() == 0)
+            if (parsedMsg.args[1].length() == 0)
             {
-                int cfg = WiFi_getProfile().txPower;
+                const int cfg = WiFi_getProfile().txPower;
                 result.response = "TX power: " + String(WiFi_getTxPowerDbm()) + " dBm (" +
-                                  (cfg == NightMare::NM_TX_POWER_AUTO ? String("auto") : "configured " + String(cfg) + " dBm") + ")";
-            }
-            else if (arg == "AUTO")
-            {
-                WiFi_setTxPower(NightMare::NM_TX_POWER_AUTO);
-                result.response = "TX power set to AUTO (driver default, takes effect on next connect).";
-            }
-            else if (dbm < -1 || dbm > 20 || dbm == 0)
-            {
-                result.response = "Invalid TX power. Use AUTO or an integer dBm in [-1, 20], excluding 0.";
-                result.result = false;
+                                  (cfg == NightMare::NM_TX_POWER_AUTO ? String("auto") : "configured " + String(cfg / 4.0f) + " dBm") + ")";
             }
             else
             {
-                WiFi_setTxPower(dbm);
-                result.response = "TX power set to " + String(dbm) + " dBm.";
+                int quarter = 0;
+                if (!parseTxPowerArg(parsedMsg.args[1], quarter))
+                {
+                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5 dBm.";
+                    result.result = false;
+                }
+                else if (WiFi_setTxPower(quarter))
+                    result.response = "TX power set.";
+                else
+                {
+                    result.response = "TX power change failed; previous settings restored.";
+                    result.result = false;
+                }
             }
         }
         else if (parsedMsg.subcommand == "RECONNECT")
@@ -1111,11 +1133,12 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 NightMare::WiFiProfile profile = WiFi_getProfile();
                 profile.ssid = ssid;
                 profile.password = parsedMsg.args[2];
-                if (parsedMsg.args[3].length() > 0)
+                if (parsedMsg.args[3].length() > 0 &&
+                    !parseTxPowerArg(parsedMsg.args[3], profile.txPower))
                 {
-                    String tx = parsedMsg.args[3];
-                    tx.toUpperCase();
-                    profile.txPower = tx == "AUTO" ? NightMare::NM_TX_POWER_AUTO : tx.toInt();
+                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5 dBm.";
+                    result.result = false;
+                    return result;
                 }
                 bool changeResult = WiFi_changeProfile(profile);
                 result.response = String("WiFi credentials change ") +

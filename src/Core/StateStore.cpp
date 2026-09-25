@@ -77,6 +77,16 @@ bool StateStore::set(const String &key, const String &value)
     return !persistent_ || save();
 }
 
+bool StateStore::setMany(const String *keys, const String *values, size_t count)
+{
+    if (!begin())
+        return false;
+    for (size_t i = 0; i < count; ++i)
+        if (!RuntimeState::set(keys[i], values[i]))
+            return false;
+    return !persistent_ || save();
+}
+
 String StateStore::get(const String &key, const String &defaultValue) const
 {
     return const_cast<StateStore *>(this)->begin()
