@@ -30,7 +30,7 @@ The central rule is:
 The current Resource manifest version is:
 
 ```text
-2
+3
 ```
 
 The version appears in the retained manifest document.
@@ -67,7 +67,7 @@ A representative manifest is:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "resources": [
     {
       "name": "temperature",
@@ -80,6 +80,16 @@ A representative manifest is:
       "kind": "value",
       "access": "read_write",
       "type": "boolean"
+    },
+    {
+      "name": "ac_state",
+      "kind": "value",
+      "access": "read",
+      "type": "integer",
+      "depends_on": [
+        "door",
+        "temperature"
+      ]
     },
     {
       "name": "set_timer",
@@ -117,15 +127,15 @@ Its positional schema is:
 ```text
 [encodingVersion, manifestVersion, resources[]]
 
-value  = [0, name, accessEnum, typeEnum]
-action = [1, name, arguments[]]
+value  = [0, name, accessEnum, typeEnum, dependsOn[]?]
+action = [1, name, arguments[], dependsOn[]?]
 arg    = [name, typeEnum, required]
-
-remote value  = [0, localName, bound, device, resource, accessEnum, typeEnum]
-remote action = [1, localName, bound, device, resource, arguments[]]
 ```
 
-Encoding version `1` is current (`remotes` was appended without a bump). Array positions and numeric enums are
+`dependsOn[]` is appended only when the Resource declares dependencies, so a
+Resource without them encodes exactly as it did in manifest version `2`.
+
+Encoding version `1` is current (`dependsOn[]` was appended without a bump). Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
 
@@ -157,6 +167,13 @@ ignore it.
      "kind": "value", "access": "read", "type": "float"},
     {"device": "door-node", "resource": "unlock",
      "kind": "action", "arguments": []}
+  ],
+  "remotes": [
+    {"name": "temperature", "bound": true,
+     "device": "weather-node", "resource": "temperature",
+     "kind": "value", "access": "read", "type": "float"},
+    {"name": "door", "bound": false, "device": "", "resource": "",
+     "kind": "value", "access": "read", "type": "boolean"}
   ]
 }
 ```
@@ -169,11 +186,64 @@ The compact positional schema is:
 value  = [0, device, resource, accessEnum, typeEnum]
 action = [1, device, resource, arguments[]]
 arg    = [name, typeEnum, required]
+
+remote value  = [0, localName, bound, device, resource, accessEnum, typeEnum]
+remote action = [1, localName, bound, device, resource, arguments[]]
 ```
 
-Encoding version `1` is current. The document is republished when a Remote
-Resource is bound, retargeted, detached, or unbound, and on reconnect. Identity
-cleanup tombstones both retained encodings under the old device name.
+Encoding version `1` is current (`remotes[]` was appended without a bump). The
+document is republished when a Remote Resource is bound, retargeted, detached,
+or unbound, and on reconnect. Identity cleanup tombstones both retained
+encodings under the old device name.
+
+## Resource dependencies
+
+A Managed Resource may declare the local Resources its implementation uses:
+
+```cpp
+acControllerState.dependsOn(doorSensor)
+                 .dependsOn(temperatureSensor)
+                 .dependsOn(acPower);
+```
+
+Those names appear in the provider manifest as `depends_on`.
+
+A dependency names a **local** Resource, never `<device>/<resource>`. This is
+what keeps the two documents independent:
+
+```text
+Mycroft/door            ManagedSensor<bool>, the authoritative observation
+  ^ source
+Adler/door              RemoteSensor<bool>, a local handle for it
+  ^ dependsOn
+Adler/ac_state          ManagedSensor<int8_t>, Adler's own controller state
+```
+
+The manifest says `ac_state` depends on `door`. The consume manifest says
+`door` currently reads `Mycroft/door`. Retargeting `door` to `Moriarty/door`
+changes only the second document; nothing that depends on `door` is touched.
+
+A reader resolves each `depends_on` name against the same device: a Managed
+input is in that device's manifest, a Remote one in its consume manifest under
+`remotes`. A name that appears in neither was declared against a Resource that
+was never bound.
+
+`dependsOn` is a dependency, not a derivation. It claims that the input
+participates in the Resource's value or behavior, not that the value is a
+function of it. Only Managed Resources can declare dependencies: a Remote
+Resource's value is its source's value, so there is nothing local for it to
+depend on.
+
+A Resource may declare at most `NM_MAX_RESOURCE_DEPENDENCIES` inputs, which
+defaults to:
+
+```text
+4
+```
+
+Dependencies are firmware declarations. They are not persisted, not
+configurable at runtime, and do not affect routing, subscriptions, or
+freshness. Nothing in the framework reads them; they exist to be published.
 
 ## Resource kinds
 

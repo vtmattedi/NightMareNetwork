@@ -131,6 +131,27 @@ metadata, so requiring a second project declaration would create drift.
 **Consequence:** bind, source changes, unbind, reconnect, and identity cleanup
 also maintain the retained JSON and MessagePack consume manifests.
 
+## Resource dependencies reference local names
+
+**Decision:** a Managed Resource may declare `dependsOn(input)`, published as
+`depends_on` in the provider manifest (version 3). The edge names the input's
+local Resource name, never `<device>/<resource>`.
+
+**Reason:** a Remote Resource already has a stable local identity whose source
+is separately configurable. Recording the resolved address in the dependency
+edge would duplicate that addressing and invalidate every dependent declaration
+whenever a source was retargeted. Naming the local Resource keeps provenance
+(`<device>/manifest/consume`) and dependency (`<device>/manifest`) as one join
+rather than two competing address systems.
+
+**Consequence:** a reader assembles the graph across both documents.
+Dependencies are firmware declarations: not persisted, not runtime
+configurable, and read by nothing in the framework. Remote Resources cannot
+declare dependencies, because their value is their source's value.
+
+`dependsOn` deliberately claims participation, not derivation: a controller
+state that uses a door reading among several inputs is not a transform of it.
+
 ## Status is presence, not Resource freshness
 
 **Decision:** `<device>/status` contains the logical name, hardware signature, configured timezone, and online/offline presence.

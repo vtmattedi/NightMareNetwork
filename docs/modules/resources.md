@@ -406,6 +406,55 @@ Bindings are stored by stable local name:
 }
 ```
 
+## Declaring dependencies
+
+A Managed Resource can declare the local Resources its implementation uses:
+
+```cpp
+ManagedSensor<int8_t> acControllerState("ac_state");
+RemoteSensor<bool> doorSensor("door");
+RemoteSensor<float> temperatureSensor("temperature");
+
+void setup()
+{
+    acControllerState.dependsOn(doorSensor)
+                     .dependsOn(temperatureSensor);
+}
+```
+
+`dependsOn()` is available on `ManagedSensor<T>`, `ManagedState<T>` and
+`ManagedAction`, and is chainable. The input may be any Resource declared by
+this device, Managed or Remote.
+
+The declared names appear in the manifest as `depends_on`:
+
+```json
+{
+  "name": "ac_state",
+  "kind": "value",
+  "access": "read",
+  "type": "integer",
+  "depends_on": ["door", "temperature"]
+}
+```
+
+The edge names the **local** Resource, so retargeting `door` to another device
+does not touch anything that depends on it. A reader joins the manifest with
+the consume manifest to get the full path from `Adler/ac_state` back to
+`Mycroft/door`.
+
+Remote Resources cannot declare dependencies: their value is their source's
+value.
+
+Declaring the same input twice records it once. Declaring more than
+`NM_MAX_RESOURCE_DEPENDENCIES` inputs, or declaring a Resource as its own
+input, logs a warning and is ignored.
+
+Dependencies are firmware declarations. They are never persisted, cannot be
+changed at runtime, and are read by nothing in the framework: they exist to be
+published. Declaring them before `bindResource()` avoids republishing the
+manifest once per call.
+
 ## ManagedAction
 
 Use `ManagedAction` when this device exposes an operation rather than persistent state.
@@ -756,6 +805,7 @@ bound Resources:          100
 Resource-name length:     64 characters
 Value/Action payload:     2048 bytes
 manifest payload limit:   16384 bytes
+dependencies per Resource: 4   (NM_MAX_RESOURCE_DEPENDENCIES)
 ```
 
 For wire details, see [Resource protocol](../protocols/resources.md).

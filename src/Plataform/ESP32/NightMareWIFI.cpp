@@ -219,7 +219,9 @@ float WiFi_getTxPowerDbm()
 {
     if (WiFi.getMode() == WIFI_OFF)
         return NightMare::NM_TX_POWER_AUTO;
-    return WiFi.getTxPower() / 4.0f;
+    // Cast first: wifi_power_t is an enum, and arithmetic straight from it to
+    // float is deprecated.
+    return static_cast<int>(WiFi.getTxPower()) / 4.0f;
 }
 
 void WiFi_Scan()

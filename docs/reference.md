@@ -132,6 +132,23 @@ enum class NetSyncStrategy
 };
 ```
 
+Declared dependencies (Managed wrappers only, chainable):
+
+```cpp
+ManagedSensor<T> &dependsOn(const NetResource &input);
+ManagedState<T> &dependsOn(const NetResource &input);
+ManagedAction   &dependsOn(const NetResource &input);
+```
+
+Read back from any Resource:
+
+```cpp
+size_t dependencyCount() const;
+const NetResource &dependency(size_t index) const;
+
+constexpr size_t NetResourceMaxDependencies = NM_MAX_RESOURCE_DEPENDENCIES;
+```
+
 ## NetValue<T>
 
 Important methods/state:

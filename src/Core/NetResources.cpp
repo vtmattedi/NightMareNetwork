@@ -103,6 +103,36 @@ bool NetResource::clearRemoteSource()
     return setRemoteSource(String(), String());
 }
 
+bool NetResource::addDependency(const NetResource &input)
+{
+    // A resource cannot be its own input, and the manifest would publish an
+    // edge no reader could do anything with.
+    if (&input == this)
+    {
+        LOG_WARNING("NET", "Resource '%s' cannot depend on itself", name_.c_str());
+        return false;
+    }
+    for (uint8_t i = 0; i < dependencyCount_; ++i)
+    {
+        if (dependencies_[i] == &input)
+            return true; // Already declared; saying it twice is not an error.
+    }
+    if (dependencyCount_ >= NetResourceMaxDependencies)
+    {
+        LOG_WARNING("NET", "Resource '%s' already has %u dependencies; '%s' was not added",
+                    name_.c_str(), (unsigned)NetResourceMaxDependencies, input.name_.c_str());
+        return false;
+    }
+    dependencies_[dependencyCount_++] = &input;
+#if NM_ENABLE_RESOURCES
+    // Declared before binding in the usual setup order, in which case the
+    // manifest has not been published yet and this does nothing.
+    if (resourceManager_ != nullptr)
+        resourceManager_->publishManifest();
+#endif
+    return true;
+}
+
 void NetValueResource::resetRemoteState()
 {
     freshness_ = ResourceFreshness::UNKNOWN;

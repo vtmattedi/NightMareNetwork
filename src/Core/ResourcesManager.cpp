@@ -20,7 +20,9 @@ namespace
     constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
     constexpr size_t MaxRemoteResourcesLength =
         ResourcesManager::MaxResources * (MaxSegmentLength * 6 + 16) + 2;
-    constexpr int ManifestVersion = 2;
+    // 3 adds each resource's declared dependencies (`depends_on`), omitted when
+    // a resource declares none. Version 2 readers ignore it.
+    constexpr int ManifestVersion = 3;
     constexpr const char *RemoteResourcesFile = "/remoteresources.json";
     /// Every device's manifest, for a handler that wants the whole network.
     constexpr const char *AllManifestsFilter = "+/manifest";
@@ -422,28 +424,41 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
         item["name"] = entry[1].as<const char *>();
         item["kind"] = kindName(static_cast<NetResourceType>(kind));
 
+        // Where the dependency array sits depends on the shape that precedes it.
+        size_t dependsOnSlot = 0;
         if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
         {
             if (entry.size() < 4)
                 continue;
             item["access"] = accessName(static_cast<AccessPolicy>(entry[2].as<uint8_t>()));
             item["type"] = valueTypeName(static_cast<NetValueType>(entry[3].as<uint8_t>()));
-            continue;
+            dependsOnSlot = 4;
+        }
+        else
+        {
+            JsonArray args = item["arguments"].to<JsonArray>();
+            if (entry.size() < 3)
+                continue;
+            for (JsonVariantConst argumentElement : entry[2].as<JsonArrayConst>())
+            {
+                JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+                if (argument.size() < 3)
+                    continue;
+                JsonObject out = args.add<JsonObject>();
+                out["name"] = argument[0].as<const char *>();
+                out["type"] = valueTypeName(static_cast<NetValueType>(argument[1].as<uint8_t>()));
+                out["required"] = argument[2].as<bool>();
+            }
+            dependsOnSlot = 3;
         }
 
-        JsonArray args = item["arguments"].to<JsonArray>();
-        if (entry.size() < 3)
+        // Absent in a version 2 manifest, and in a version 3 one from a
+        // resource that declares no inputs.
+        if (entry.size() <= dependsOnSlot || !entry[dependsOnSlot].is<JsonArrayConst>())
             continue;
-        for (JsonVariantConst argumentElement : entry[2].as<JsonArrayConst>())
-        {
-            JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
-            if (argument.size() < 3)
-                continue;
-            JsonObject out = args.add<JsonObject>();
-            out["name"] = argument[0].as<const char *>();
-            out["type"] = valueTypeName(static_cast<NetValueType>(argument[1].as<uint8_t>()));
-            out["required"] = argument[2].as<bool>();
-        }
+        JsonArray dependsOn = item["depends_on"].to<JsonArray>();
+        for (JsonVariantConst dependency : entry[dependsOnSlot].as<JsonArrayConst>())
+            dependsOn.add(dependency.as<const char *>());
     }
     return true;
 }
@@ -1128,6 +1143,16 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
                 argument["required"] = action.argument(a).required;
             }
         }
+        // Local names, resolved by the reader against this same device: a
+        // Managed one appears above, a Remote one in the consume manifest.
+        // Omitted entirely when there are none, so a manifest that declares no
+        // dependencies is byte-identical to the version 2 one.
+        if (resource.dependencyCount() != 0)
+        {
+            JsonArray dependsOn = item["depends_on"].to<JsonArray>();
+            for (size_t d = 0; d < resource.dependencyCount(); ++d)
+                dependsOn.add(resource.dependency(d).name());
+        }
     }
 }
 
@@ -1156,18 +1181,27 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
-            continue;
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item.add<JsonArray>();
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonArray argument = args.add<JsonArray>();
+                argument.add(action.argument(a).name);
+                argument.add(static_cast<uint8_t>(action.argument(a).type));
+                argument.add(action.argument(a).required);
+            }
         }
 
-        const NetActionResource &action = static_cast<const NetActionResource &>(resource);
-        JsonArray args = item.add<JsonArray>();
-        for (size_t a = 0; a < action.argumentCount(); ++a)
-        {
-            JsonArray argument = args.add<JsonArray>();
-            argument.add(action.argument(a).name);
-            argument.add(static_cast<uint8_t>(action.argument(a).type));
-            argument.add(action.argument(a).required);
-        }
+        // Appended (rule 2), and only when there are any: a reader that stops
+        // at the shapes it knows reads exactly what version 2 said.
+        if (resource.dependencyCount() == 0)
+            continue;
+        JsonArray dependsOn = item.add<JsonArray>();
+        for (size_t d = 0; d < resource.dependencyCount(); ++d)
+            dependsOn.add(resource.dependency(d).name());
     }
 }
 
