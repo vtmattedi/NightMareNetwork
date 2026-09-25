@@ -216,114 +216,33 @@ That file should expose the project's hardware profile through:
 NMHardware::Profile projectProfile();
 ```
 
-The model is:
+The model is built from `Assembly`, `HardwareDefinition`, `Device`, `Terminal`,
+`Connector`, `ConnectorContact`, `EndpointRef`, and `Connection`. Arrays are
+static pointer/count pairs suitable for firmware declarations. `Profile`
+contains the reusable definitions, one or more deployed root assemblies, the
+absolute host-assembly path, and deployment-level connections.
 
-```cpp
-struct Board
-{
-    const char *id;
-    const char *model;
-};
-
-enum class DeviceKind
-{
-    Unknown, Ic, Led, Button, Relay, Sensor, Display, Speaker,
-    Buzzer, Connector, Transistor, Diode, Resistor, Capacitor,
-    Motor, Storage
-};
-
-struct Device
-{
-    const char *id;
-    const char *model;
-    uint8_t board; // board index, or NoBoard for an external discrete part
-    DeviceKind kind; // defaults to Unknown
-    const char *form; // defaults to nullptr
-};
-
-enum class EndpointKind { Board, Device, External };
-
-struct Endpoint
-{
-    EndpointKind kind;
-    uint8_t index;
-    const char *terminal;
-};
-
-struct Net
-{
-    const char *id;
-    SignalType type;
-    uint8_t bus;
-    Direction direction;
-    Pull pull;
-    bool activeLow;
-    Resistor resistor;
-};
-
-struct Connection
-{
-    Endpoint from;
-    Endpoint to;
-    uint8_t net;
-    uint8_t group;
-};
-
-struct Profile
-{
-    uint8_t hostBoard;
-    const Board *boards;
-    size_t boardCount;
-    const Device *devices;
-    size_t deviceCount;
-    const Net *nets;
-    size_t netCount;
-    const Connection *connections;
-    size_t connectionCount;
-};
-```
-
-Directions:
-
-```text
-Input
-Output
-Bidirectional
-Power
-Ground
-Bus
-```
-
-Pulls:
-
-```text
-None
-Up
-Down
-ExternalUp
-ExternalDown
-```
+Endpoint paths inside definitions or assemblies are relative to that assembly;
+top-level endpoint paths are absolute from a deployment root. Slash is reserved
+as the path separator and cannot appear in an ID.
 
 If no `NightMareHardware.h` exists, NightMare returns:
 
 ```text
-boards:      [{ id: main, model: unspecified }]
-devices:     none
-nets:        none
+host assembly: main
+roots:          [{ id: main, kind: Generic }]
+definitions:    none
 connections: none
 ```
 
-The model of `hostBoard` also feeds INFO/HARDWARE. The complete topology is
-published at `<device>/hardware` and `<device>/hardware/msgpack` and is
-available through the `HW` command.
+The host assembly model feeds INFO/HARDWARE. The complete source configuration
+is retained at `<device>/hardware` and is available through `HW`.
 
-A physical PCB/module should normally be a Board; a chip/component mounted on
-it is a Device. `NoBoard` is reserved for genuinely external discrete parts.
-Connections are explicit endpoint-to-endpoint physical segments. Nets carry
-electrical meaning, while non-zero connection groups describe bundled wires.
-Optional Device `kind` and `form` values improve visualization without being
-required. `kind` is a broad category such as `Sensor` or `Led`; `form` is a
-stable lowercase physical-form slug and is not a UI artwork identifier.
+`validateHwConfig()` checks references, IDs, definition cycles, connector-only
+assembly crossings, duplicates, capacity, and canonical-net contradictions.
+`buildTopologyGraph()` creates endpoint nodes and physical edges;
+`inferNets()` computes connected components. See
+[Hardware configuration v2](../hwconfig-v2-model.md) for the normative schema.
 
 ## `startNightMareESP()`
 

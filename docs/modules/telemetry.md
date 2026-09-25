@@ -21,8 +21,8 @@ The data is split by lifecycle:
 INFO
     identity, hardware, build, boot
 
-HARDWARE TOPOLOGY
-    board, devices, buses/signals, pins and electrical attributes
+HARDWARE CONFIGURATION
+    assemblies, definitions, devices, connectors and physical connections
 
 SYSTEM
     changing runtime system health
@@ -31,8 +31,7 @@ NETWORK
     changing network bookkeeping
 ```
 
-INFO, SYSTEM and NETWORK have JSON MQTT topics. Hardware topology has both JSON
-and MessagePack retained topics.
+INFO, SYSTEM, NETWORK, and hardware configuration have JSON MQTT topics.
 
 ## InfoType
 
@@ -265,19 +264,18 @@ returns `false`.
 Telemetry.publishAll();
 ```
 
-attempts the INFO, both hardware, and both telemetry documents:
+attempts INFO, hardware configuration, and both telemetry documents:
 
 ```text
 INFO
-HARDWARE JSON
-HARDWARE MSGPACK
+HARDWARE
 SYSTEM
 NETWORK
 ```
 
 even if an earlier publication fails.
 
-The return value is `true` only if all five publications succeed.
+The return value is `true` only if all four publications succeed.
 
 ## Automatic startup
 
@@ -336,13 +334,12 @@ Every MQTT connection requests cooperative publication of:
 
 ```cpp
 Telemetry.publishInfo(InfoType::INFO);
-Telemetry.publishHardware(HardwareFormat::JSON);
-Telemetry.publishHardware(HardwareFormat::MSGPACK);
+Telemetry.publishHardware();
 ```
 
 when telemetry is enabled.
 
-`tickNightMareESP()` processes one request per call, so the three
+`tickNightMareESP()` processes one request per call, so the two
 allocation-heavy static documents are not built during the MQTT/TLS connection
 callback. SYSTEM and NETWORK continue on their periodic schedules.
 
@@ -394,9 +391,9 @@ Resources already define:
 
 Duplicating those fields into telemetry would create a second source of application truth.
 
-## Hardware topology
+## Hardware configuration
 
-Hardware topology uses:
+Hardware configuration uses:
 
 ```cpp
 NMHardware::getProfile();
@@ -405,54 +402,33 @@ NMHardware::getProfile();
 If no project `NightMareHardware.h` exists, the profile defaults to:
 
 ```text
-boards: [{ id: main, model: unspecified }]
-host_board: 0
-devices: none
-nets: none
+host_assembly: main
+roots: [{ id: main, kind: generic }]
+definitions: none
 connections: none
 ```
 
-The retained topics are:
+The retained topic is:
 
 ```text
 <device>/hardware
-<device>/hardware/msgpack
 ```
 
-The readable form is available through:
+The readable JSON form is available through:
 
 ```cpp
-Telemetry.getHardware(HardwareFormat::JSON);
+Telemetry.getHardware();
 ```
 
-Publication methods are:
+Publication uses:
 
 ```cpp
-Telemetry.publishHardware(HardwareFormat::JSON);
-Telemetry.publishHardware(HardwareFormat::MSGPACK);
-Telemetry.publishHardware(); // both
+Telemetry.publishHardware();
 ```
 
-The version 3 compact schema is
-`[version, hostBoard, boards[], devices[], nets[], connections[]]`. A device is
-`[id, model, board, kind?, form?]`; default devices retain the three-position
-form. `kind` is a broad append-only semantic enum and `form` is an optional
-stable lowercase slug such as `to92` or `waterproof-probe`. A net is
-`[id, signalType, bus, direction, pull, activeLow, resistor?]`. A connection is
-`[fromEndpoint, toEndpoint, net, group]`, and each endpoint is
-`[kind, index, terminal]`. `hostBoard` identifies the board running NightMare.
-Connections describe each physical segment explicitly; equal net indices mean
-electrical continuity, while equal non-zero groups mean physical bundling only.
-
-A `Resistor` occupies two bytes: BCD digits `a,b` and signed exponent `c` for
-`a.b × 10^c` ohms. Constructors accept numeric ohms and strings such as
-`"3k3"`, `"4.7k"`, `"4M7"`, and `"0.33"`.
-
-Pull modes are `None`, `Up`, `Down`, `ExternalUp`, and `ExternalDown`.
-Rendering coordinates, SVG, icons, footprints, and artwork remain server-side.
-
-The implementation bounds hardware connections to 128 entries and boards,
-devices, and nets to 255 each. A profile must contain a valid host board; every
-device and endpoint must reference a valid index, and every connection must
-reference a valid net. An unusable profile causes
-topology generation to fail rather than silently serialize invalid memory.
+Version 2 stores assemblies, devices, connectors, contacts, terminals, reusable
+definitions, and physical connections. It does not store normal nets. The
+firmware validates the expanded configuration and infers connected components
+with `buildTopologyGraph()` and `inferNets()`. Invalid or over-capacity
+configuration fails publication rather than producing a partial retained
+document. See [Hardware configuration v2](../hwconfig-v2-model.md).

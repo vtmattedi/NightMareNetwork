@@ -39,7 +39,6 @@ The current standard topic families are:
 
 <device>/info
 <device>/hardware
-<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 
@@ -72,8 +71,7 @@ NightMare uses retained messages for current state and current description.
 |---|---:|---|
 | `<device>/status` | yes | name, hardware signature, timezone + online/offline presence |
 | `<device>/info` | yes | boot-scoped/static device information |
-| `<device>/hardware` | yes | readable hardware topology JSON |
-| `<device>/hardware/msgpack` | yes | compact positional hardware topology |
+| `<device>/hardware` | yes | reconstructable hardware configuration JSON |
 | `<device>/telemetry/system` | yes | last published runtime system telemetry |
 | `<device>/telemetry/network` | yes | last published network bookkeeping |
 | `<device>/manifest` | yes | Resource manifest |

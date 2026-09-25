@@ -427,7 +427,7 @@ Before the project callback, the framework has already:
 - restored subscriptions,
 - requested online status,
 - requested Resource state and provider/consume manifest re-announcement,
-- requested INFO and both hardware documents when telemetry is enabled,
+- requested INFO and the hardware configuration document when telemetry is enabled,
 - flushed queued messages.
 
 The requested publications are completed cooperatively by later
@@ -458,8 +458,7 @@ Resource manifest
 consume manifest
 Managed Value state
 INFO
-hardware JSON
-hardware MessagePack
+hardware configuration
 console connection message
 time request when wall time is invalid
 ```

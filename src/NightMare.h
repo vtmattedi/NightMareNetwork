@@ -2,6 +2,7 @@
 
 #include <NightMare/Features.h>
 #include <NightMare/HardwareProfile.h>
+#include <NightMare/HardwareDefinitions.h>
 #include <Core/NightMareTypes.h>
 #include <Core/DeviceIdentity.h>
 #include <Core/RuntimeState.h>

@@ -193,7 +193,6 @@ Current retained families include:
 <device>/status
 <device>/info
 <device>/hardware
-<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 <device>/manifest
@@ -318,8 +317,8 @@ Telemetry is separated by lifecycle rather than by every possible category.
 /info
     mostly static / boot-scoped aggregate
 
-/hardware, /hardware/msgpack
-    hardware-only topology, readable and compact encodings
+/hardware
+    reconstructable hardware configuration JSON
 
 /telemetry/system
     regular runtime health
@@ -421,7 +420,7 @@ online status publication
 Resource manifest/state re-announcement
 consume-manifest re-announcement
 /info refresh
-hardware JSON/MessagePack refresh
+hardware configuration refresh
 queued MQTT messages
 project connected callback
 ```

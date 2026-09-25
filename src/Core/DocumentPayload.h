@@ -3,8 +3,7 @@
 #include <ArduinoJson.h>
 
 /// @brief Which encoding a document is serialized into. Deliberately separate
-/// from ManifestFormat and HardwareFormat: those say what a particular document
-/// is published as, this says only how the bytes are produced.
+/// from higher-level document selection: this says only how bytes are produced.
 enum class DocumentEncoding : uint8_t
 {
     JSON,

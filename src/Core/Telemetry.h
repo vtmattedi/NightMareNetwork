@@ -5,8 +5,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-// The sections that can be asked for. Hardware topology has its own retained
-// documents and HW command, so it is deliberately not an INFO section.
+// The sections that can be asked for. Hardware configuration has its own retained
+// document and HW command, so it is deliberately not an INFO section.
 enum class InfoType : uint8_t
 {
     INVALID,
@@ -30,16 +30,9 @@ struct TelemetryResult
     String data;
 };
 
-enum class HardwareFormat : uint8_t
-{
-    JSON,
-    MSGPACK
-};
-
-// Device-wide information, split by how often it changes. Five retained documents:
+// Device-wide information, split by how often it changes. Four retained documents:
 //   <device>/info               identity, hardware, build, boot: fixed per boot
-//   <device>/hardware           hardware topology as retained JSON
-//   <device>/hardware/msgpack   the same topology as retained MessagePack
+//   <device>/hardware           hardware configuration as retained JSON
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
 // Static INFO and hardware documents are requested on every MQTT connection
@@ -61,18 +54,14 @@ public:
     bool publishInfo(InfoType type = InfoType::INFO);
     bool publishInfo(const String &type);
 
-    /// @brief Builds the hardware-only topology document in readable JSON or
-    /// compact positional MessagePack form.
-    TelemetryResult getHardware(HardwareFormat format = HardwareFormat::JSON) const;
+    /// @brief Builds the validated hardware configuration JSON document.
+    TelemetryResult getHardware() const;
 
-    /// @brief Publishes one retained hardware topology encoding.
-    bool publishHardware(HardwareFormat format);
-
-    /// @brief Publishes both retained hardware topology encodings.
+    /// @brief Publishes the retained hardware configuration document.
     bool publishHardware();
 
-    /// @brief /info, both /hardware encodings, and both telemetry documents.
-    /// True only if all five went out.
+    /// @brief /info, /hardware, and both telemetry documents.
+    /// True only if all four went out.
     bool publishAll();
 
 private:
@@ -86,7 +75,6 @@ private:
     void appendSystem(JsonObject dst) const;
     void appendNetwork(JsonObject dst) const;
     void buildNamedHardware(JsonDocument &doc) const;
-    void buildPositionalHardware(JsonDocument &doc) const;
 
     bool started_ = false;
 };

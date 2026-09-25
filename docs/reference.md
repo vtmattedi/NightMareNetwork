@@ -762,7 +762,6 @@ enum class SystemRequest : uint16_t
     PublishConsumeManifest,
     PublishResourceStates,
     PublishInfo,
-    PublishHardwareMsgPack,
     PublishHardwareJson,
     Count
 };
@@ -948,11 +947,6 @@ struct TelemetryResult
     String data;
 };
 
-enum class HardwareFormat
-{
-    JSON,
-    MSGPACK
-};
 ```
 
 API:
@@ -974,10 +968,7 @@ bool Telemetry.publishInfo(
 bool Telemetry.publishInfo(
     const String &type);
 
-TelemetryResult Telemetry.getHardware(
-    HardwareFormat format = HardwareFormat::JSON) const;
-
-bool Telemetry.publishHardware(HardwareFormat format);
+TelemetryResult Telemetry.getHardware() const;
 bool Telemetry.publishHardware();
 
 bool Telemetry.publishAll();
@@ -1157,113 +1148,146 @@ void loop()
 ```cpp
 namespace NMHardware
 {
-enum class Direction
+constexpr uint8_t HwConfigVersion = 2;
+
+enum class AssemblyKind
 {
-    Input,
-    Output,
-    Bidirectional,
-    Power,
-    Ground,
-    Bus
+    CustomBoard, MarketBoard, Module, SensorProbe,
+    Panel, Enclosure, External, Generic
 };
 
-enum class Pull
+enum class ConnectorKind
 {
-    None,
-    Up,
-    Down,
-    ExternalUp,
-    ExternalDown
+    Header, ScrewTerminal, Jst, Usb, Terminal,
+    DirectPin, DirectWire, Generic
 };
 
-enum class SignalType
+enum class CanonicalNet
 {
-    Gpio, SpiClock, SpiMosi, SpiMiso, SpiChipSelect,
-    I2cData, I2cClock, UartTransmit, UartReceive,
-    Pwm, Analog, OneWire, Power, Ground
+    None, Gnd, Vcc, V3v3, V5v,
+    AcPhase, AcNeutral, ProtectiveEarth
 };
 
-class Resistor
-{
-public:
-    explicit Resistor(double ohms);
-    explicit Resistor(const char *value);
-    bool valid() const;
-    uint8_t firstDigit() const;
-    uint8_t secondDigit() const;
-    int8_t exponent() const;
-    uint16_t encoded() const;
-    double ohms() const;
-};
-
-enum class DeviceKind : uint8_t
-{
-    Unknown, Ic, Led, Button, Relay, Sensor, Display, Speaker,
-    Buzzer, Connector, Transistor, Diode, Resistor, Capacitor,
-    Motor, Storage
-};
+struct Terminal { const char *id; CanonicalNet canonicalNet; const char *name; };
+struct ConnectorContact { const char *id; CanonicalNet canonicalNet; const char *name; };
 
 struct Device
 {
     const char *id;
+    const Terminal *terminals;
+    size_t terminalCount;
+    const char *name;
+    const char *kind;
     const char *model;
-    uint8_t board;
-    DeviceKind kind;
-    const char *form;
+    const char *manufacturer;
 };
 
-constexpr uint8_t NoBoard = 0xff;
-
-struct Board
+struct Connector
 {
     const char *id;
+    const ConnectorContact *contacts;
+    size_t contactCount;
+    const char *name;
+    ConnectorKind kind;
     const char *model;
+    const char *manufacturer;
 };
 
-enum class EndpointKind { Board, Device, External };
+enum class EndpointKind { DeviceTerminal, ConnectorContact };
 
-struct Endpoint
+struct EndpointRef
 {
+    const char *assembly;
     EndpointKind kind;
-    uint8_t index;
-    const char *terminal;
+    const char *owner;
+    const char *endpoint;
 };
 
-struct Net
+struct WireMetadata
 {
-    const char *id;
-    SignalType type;
-    uint8_t bus;
-    Direction direction;
-    Pull pull;
-    bool activeLow;
-    Resistor resistor;
+    const char *color;
+    const char *gauge;
+    const char *label;
+    uint32_t lengthMm;
 };
 
 struct Connection
 {
-    Endpoint from;
-    Endpoint to;
-    uint8_t net;
-    uint8_t group;
+    EndpointRef a;
+    EndpointRef b;
+    WireMetadata wire;
 };
 
-struct Profile
+struct Assembly;
+
+struct AssemblyMembers
 {
-    uint8_t hostBoard;
-    const Board *boards;
-    size_t boardCount;
+    const Assembly *assemblies;
+    size_t assemblyCount;
     const Device *devices;
     size_t deviceCount;
-    const Net *nets;
-    size_t netCount;
+    const Connector *connectors;
+    size_t connectorCount;
     const Connection *connections;
     size_t connectionCount;
 };
 
+struct Assembly
+{
+    const char *id;
+    const char *definition;
+    const char *name;
+    AssemblyKind kind;
+    const char *model;
+    const char *manufacturer;
+    const char *serialNumber;
+    const char *location;
+    AssemblyMembers members;
+};
+
+struct HardwareDefinition
+{
+    const char *id;
+    AssemblyKind kind;
+    const char *name;
+    const char *model;
+    const char *manufacturer;
+    AssemblyMembers members;
+};
+
+struct ValidationResult;
+struct TopologyGraph;
+struct InferredNets;
+
+struct Profile
+{
+    const char *hostAssembly;
+    const HardwareDefinition *definitions;
+    size_t definitionCount;
+    const Assembly *roots;
+    size_t rootCount;
+    const Connection *connections;
+    size_t connectionCount;
+};
+
+ValidationResult validateHwConfig(const Profile &config);
+bool buildTopologyGraph(const Profile &config, TopologyGraph &graph,
+                        ValidationResult *diagnostics = nullptr);
+bool inferNets(const TopologyGraph &graph, InferredNets &nets);
+const char *assemblyModel(const Profile &config, const char *absolutePath);
 Profile getProfile();
+
+const HardwareDefinition &esp32C3SuperMiniRev1();
+const HardwareDefinition &mycroftYControllerRev1();
+const HardwareDefinition &ds18b20ProbeDefinition();
+const HardwareDefinition &genericRelayModule1Ch();
+const HardwareDefinition *standardDefinitions(size_t &count);
 }
 ```
+
+The complete declarations, constructors, diagnostic codes, and fixed graph
+capacities are in `NightMare/HardwareProfile.h`. The normative semantics and
+JSON field contract are in [Hardware configuration v2](hwconfig-v2-model.md).
 
 A consuming project may provide `NightMareHardware.h` with:
 

@@ -40,7 +40,6 @@ Examples include:
 <device>/status
 <device>/info
 <device>/hardware
-<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 <device>/manifest
@@ -86,37 +85,32 @@ Examples include:
 ## `/info` groups static data by lifecycle
 
 **Decision:** `/info` aggregates identity, hardware facts, build information,
-and boot-scoped information. Hardware connections are published separately at
-`/hardware` and `/hardware/msgpack`.
+and boot-scoped information. Physical configuration is published separately as
+retained JSON at `/hardware`.
 
-**Reason:** topology has a compact positional schema and a separate consumer
-lifecycle, while ordinary device information remains readable JSON.
+**Reason:** physical configuration has its own validation and consumer
+lifecycle, while ordinary device information remains compact device metadata.
 
-**Consequence:** INFO no longer contains `hwconnections`. Hardware topology is
-available in retained JSON and MessagePack, and rendering metadata remains a
-server concern.
+**Consequence:** INFO does not contain connections. The previous positional
+MessagePack hardware form is removed while the new schema stabilizes.
 
-## Physical boards are first-class topology owners
+## Assemblies and connectors define physical topology
 
-**Decision:** hardware topology version 3 represents every physical PCB/module
-in `boards[]`, identifies the firmware host explicitly with `hostBoard`, and
-represents mounted chips/components in `devices[]`. Electrical meaning lives in
-`nets[]`; `connections[]` contains every physical endpoint-to-endpoint segment.
+**Decision:** hardware configuration version 2 uses assemblies as the generic
+physical composition primitive. Boards are assembly kinds. Devices expose
+terminals, assemblies expose connector contacts, and connections store physical
+conductors. Nets are inferred from connected components.
 
-**Reason:** “onboard” is not an intrinsic device property. What matters for
-rendering and physical reasoning is which board instance owns a component.
-Separating an instance `id` from a stable board `model` also allows two
-identical expansion boards in the same topology.
+**Reason:** a flat board/device/net model could not reconstruct enclosure,
+probe, panel, module, and direct-wire boundaries without hidden assumptions or
+manually maintained derived nets.
 
-**Consequence:** no board-array position has special meaning. Board crossings
-must not be inferred or collapsed. Segments sharing a net are electrically
-continuous; a non-zero connection group says only that conductors travel in the
-same cable. `NoBoard` remains for exceptional external discrete components,
-not as the normal representation of standalone modules.
-
-Device `kind` and `form` are optional progressive hints. Kind is a small,
-append-only semantic enum; form is an extensible stable slug. Firmware does not
-publish artwork names, UI component names, coordinates, or colors.
+**Consequence:** a device cannot connect directly across an assembly boundary;
+both crossing endpoints must be connector contacts. Direct solder exits are
+explicit `direct_pin` or `direct_wire` connectors. Reusable definitions and
+deployed instances remain separate, and the firmware validates the complete
+expanded topology before publishing it. The normative contract is
+[Hardware configuration v2](../hwconfig-v2-model.md).
 
 ## Provider and consumer Resource manifests are separate
 

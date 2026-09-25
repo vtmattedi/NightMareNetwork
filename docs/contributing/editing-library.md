@@ -205,6 +205,11 @@ Telemetry
     docs/modules/telemetry.md
     docs/protocols/status-info.md
 
+Hardware configuration
+    docs/hwconfig-v2-model.md
+    docs/modules/platform.md
+    docs/protocols/status-info.md
+
 Time
     docs/modules/time.md
 

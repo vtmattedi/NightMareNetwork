@@ -19,7 +19,6 @@ enum class SystemRequest : uint16_t
     PublishConsumeManifest,
     PublishResourceStates,
     PublishInfo,
-    PublishHardwareMsgPack,
     PublishHardwareJson,
 
     Count

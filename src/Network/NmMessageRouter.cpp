@@ -83,7 +83,6 @@ void onConnected()
 #if NM_ENABLE_TELEMETRY
     SystemState.request(SystemRequest::PublishInfo);
     SystemState.request(SystemRequest::PublishHardwareJson);
-    SystemState.request(SystemRequest::PublishHardwareMsgPack);
 #endif
 #if NM_ENABLE_CONSOLE
     MQTT_Publish("console/out", firstConnection ? "Booted" : "Connected");

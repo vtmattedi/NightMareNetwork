@@ -432,13 +432,12 @@ See [Status, info, and telemetry](status-info.md).
 ## HW
 
 ```text
-HW [PUBLISH] [JSON|MSGPACK]
+HW [PUBLISH]
 ```
 
-`HW` or `HW JSON` returns the readable topology. `HW PUBLISH` republishes both
-retained encodings. Selecting `MSGPACK`, with or without `PUBLISH`, republishes
-`<device>/hardware/msgpack` and returns `Republished to MQTT.` rather than raw
-binary on the text command transport.
+`HW` (and the accepted explicit alias `HW JSON`) returns the readable hardware
+configuration. `HW PUBLISH` republishes `<device>/hardware` and returns
+`Republished to MQTT.`.
 
 ## TIME
 

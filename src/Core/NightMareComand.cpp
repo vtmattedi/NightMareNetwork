@@ -603,41 +603,28 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         return executeJobCommand(parsedMsg, context);
 #endif
 #if NM_ENABLE_TELEMETRY
-    // HW [PUBLISH] [JSON|MSGPACK]. Binary MessagePack is never returned through
-    // a text command transport; requesting it republishes the retained topic.
+    // HW returns the readable configuration; HW PUBLISH republishes it.
     if (parsedMsg.command == "HW")
     {
-        String formatText;
         bool publish = false;
         if (parsedMsg.subcommand == "PUBLISH")
-        {
             publish = true;
-            formatText = parsedMsg.args[1];
-        }
-        else
-            formatText = parsedMsg.subcommand;
-        formatText.toUpperCase();
 
-        if (parsedMsg.argc > (publish ? 2 : 1) ||
-            (formatText.length() != 0 && formatText != "JSON" && formatText != "MSGPACK" &&
-             formatText != "MPACK"))
+        if (parsedMsg.argc > 1 || (!publish && parsedMsg.subcommand.length() != 0 &&
+                                   parsedMsg.subcommand != "JSON"))
         {
             result.result = false;
-            result.response = "Usage: HW [PUBLISH] [JSON|MSGPACK]";
+            result.response = "Usage: HW [PUBLISH]";
             return result;
         }
 
-        if (publish && formatText.length() == 0)
+        if (publish)
             result.result = Telemetry.publishHardware();
-        else if (formatText == "MSGPACK" || formatText == "MPACK")
-            result.result = Telemetry.publishHardware(HardwareFormat::MSGPACK);
-        else if (publish)
-            result.result = Telemetry.publishHardware(HardwareFormat::JSON);
         else
         {
-            const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
+            const TelemetryResult hardware = Telemetry.getHardware();
             result.result = hardware.valid;
-            result.response = hardware.valid ? hardware.data : "Could not serialize hardware topology.";
+            result.response = hardware.valid ? hardware.data : "Could not serialize hardware configuration.";
             return result;
         }
         result.response = result.result ? "Republished to MQTT." : "Hardware publish failed.";

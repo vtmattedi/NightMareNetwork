@@ -177,51 +177,87 @@ void setup()
                         timezoneQuery.result && timezoneQuery.response.indexOf(timezone) >= 0 &&
                             timezoneSet.result && gDeviceIdentity.getTimezone() == timezone &&
                             !invalidAdopt.result);
-    const NMHardware::Resistor r330(330);
-    const NMHardware::Resistor r3k3("3k3");
-    const NMHardware::Resistor r4k7("4.7k");
-    const NMHardware::Resistor rSub("0.33");
-    const NMHardware::Resistor rSubNumeric(0.33);
-    const TelemetryResult hardware = Telemetry.getHardware(HardwareFormat::JSON);
-    const TelemetryResult packedHardware = Telemetry.getHardware(HardwareFormat::MSGPACK);
-    JsonDocument packedHardwareDoc;
-    const bool hardwareCompactMetadata =
-        packedHardware.valid &&
-        !deserializeMsgPack(packedHardwareDoc, packedHardware.data.c_str(),
-                            packedHardware.data.length()) &&
-        packedHardwareDoc[3][0].as<JsonArrayConst>().size() == 3 &&
-        packedHardwareDoc[3][1].as<JsonArrayConst>().size() == 5 &&
-        packedHardwareDoc[3][1][3].as<uint8_t>() ==
-            static_cast<uint8_t>(NMHardware::DeviceKind::Sensor) &&
-        packedHardwareDoc[3][1][4].as<String>() == "waterproof-probe" &&
-        packedHardwareDoc[3][2].as<JsonArrayConst>().size() == 5 &&
-        packedHardwareDoc[3][2][3].as<uint8_t>() == 0 &&
-        packedHardwareDoc[3][2][4].as<String>() == "panel-mount";
+    const NMHardware::Profile profile = NMHardware::getProfile();
+    static const NMHardware::ValidationResult hardwareValidation =
+        NMHardware::validateHwConfig(profile);
+    size_t standardDefinitionCount = 0;
+    const NMHardware::HardwareDefinition *standardDefinitions =
+        NMHardware::standardDefinitions(standardDefinitionCount);
+    static const NMHardware::Assembly catalogRoots[] = {
+        {"mycroft", "mycroft-y-controller-rev1"},
+        {"catalog_probe", "ds18b20-waterproof-probe"},
+        {"catalog_relay", "generic-relay-module-1ch"},
+    };
+    const NMHardware::Profile catalogProfile{
+        "mycroft/esp32", standardDefinitions, standardDefinitionCount,
+        catalogRoots, 3, nullptr, 0};
+    const bool standardDefinitionsValid =
+        NMHardware::validateHwConfig(catalogProfile).valid();
+    static const NMHardware::Connection illegalBoundary[] = {
+        {{"controller", NMHardware::EndpointKind::DeviceTerminal, "mcu", "GPIO4"},
+         {"probe", NMHardware::EndpointKind::DeviceTerminal, "sensor", "DATA"}},
+    };
+    const NMHardware::Profile illegalBoundaryProfile{
+        profile.hostAssembly, profile.definitions, profile.definitionCount,
+        profile.roots, profile.rootCount, illegalBoundary, 1};
+    static const NMHardware::ValidationResult boundaryValidation =
+        NMHardware::validateHwConfig(illegalBoundaryProfile);
+    bool boundaryRejected = false;
+    for (size_t i = 0; i < boundaryValidation.diagnosticCount; ++i)
+        boundaryRejected = boundaryRejected ||
+            boundaryValidation.diagnostics[i].code ==
+                NMHardware::DiagnosticCode::CrossAssemblyDeviceConnection;
+    static const NMHardware::Connection canonicalConflict[] = {
+        {{"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "VDD"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "GND"}},
+    };
+    const NMHardware::Profile canonicalConflictProfile{
+        profile.hostAssembly, profile.definitions, profile.definitionCount,
+        profile.roots, profile.rootCount, canonicalConflict, 1};
+    static const NMHardware::ValidationResult canonicalValidation =
+        NMHardware::validateHwConfig(canonicalConflictProfile);
+    bool canonicalConflictRejected = false;
+    for (size_t i = 0; i < canonicalValidation.diagnosticCount; ++i)
+        canonicalConflictRejected = canonicalConflictRejected ||
+            canonicalValidation.diagnostics[i].code ==
+                NMHardware::DiagnosticCode::CanonicalNetConflict;
+    static NMHardware::TopologyGraph topologyGraph;
+    static NMHardware::InferredNets inferredNets;
+    const bool graphBuilt = NMHardware::buildTopologyGraph(profile, topologyGraph) &&
+                            NMHardware::inferNets(topologyGraph, inferredNets);
+    int controllerData = -1;
+    int probeData = -1;
+    for (size_t i = 0; i < topologyGraph.nodeCount; ++i)
+    {
+        const NMHardware::GraphNode &node = topologyGraph.nodes[i];
+        if (node.assembly == "controller" && !strcmp(node.owner, "mcu") &&
+            !strcmp(node.endpoint, "GPIO4"))
+            controllerData = static_cast<int>(i);
+        if (node.assembly == "probe" && !strcmp(node.owner, "sensor") &&
+            !strcmp(node.endpoint, "DATA"))
+            probeData = static_cast<int>(i);
+    }
+    const bool dataNetInferred = controllerData >= 0 && probeData >= 0 &&
+        inferredNets.netByNode[controllerData] == inferredNets.netByNode[probeData];
+    const TelemetryResult hardware = Telemetry.getHardware();
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
     const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
     smokeState.setFlag("hardware_topology",
-                        sizeof(NMHardware::Resistor) == 2 &&
-                            r330.firstDigit() == 3 && r330.secondDigit() == 3 &&
-                            r330.exponent() == 2 && r3k3.exponent() == 3 &&
-                            r4k7.firstDigit() == 4 && r4k7.secondDigit() == 7 &&
-                            r4k7.exponent() == 3 &&
-                            rSub.exponent() == -1 && rSubNumeric.exponent() == -1 &&
+                        hardwareValidation.valid() && standardDefinitionsValid &&
+                            boundaryRejected && canonicalConflictRejected &&
+                            graphBuilt && dataNetInferred &&
                             hardware.valid &&
                             hardware.data.indexOf("esp32-devkit:test") >= 0 &&
-                            hardware.data.indexOf("button-board:test") >= 0 &&
-                            hardware.data.indexOf("\"host_board\":0") >= 0 &&
-                            hardware.data.indexOf("\"boards\"") >= 0 &&
-                            hardware.data.indexOf("\"board\":1") >= 0 &&
-                            hardware.data.indexOf("\"kind\":\"sensor\"") >= 0 &&
-                            hardware.data.indexOf("\"form\":\"waterproof-probe\"") >= 0 &&
-                            hardware.data.indexOf("\"form\":\"panel-mount\"") >= 0 &&
-                            hardware.data.indexOf("\"kind\":\"unknown\"") < 0 &&
-                            hardware.data.indexOf("\"nets\"") >= 0 &&
-                            hardware.data.indexOf("\"from\"") >= 0 &&
-                            hardware.data.indexOf("\"group\":0") >= 0 &&
+                            hardware.data.indexOf("\"version\":2") >= 0 &&
+                            hardware.data.indexOf("\"host_assembly\":\"controller\"") >= 0 &&
+                            hardware.data.indexOf("\"definitions\"") >= 0 &&
+                            hardware.data.indexOf("\"kind\":\"sensor_probe\"") >= 0 &&
+                            hardware.data.indexOf("\"canonical_net\":\"GND\"") >= 0 &&
+                            hardware.data.indexOf("\"wire\":{\"color\":\"yellow\"}") >= 0 &&
+                            hardware.data.indexOf("\"a\"") >= 0 &&
                             hardware.data.indexOf("\"connections\"") >= 0 &&
-                            hardwareCompactMetadata && packedHardware.data.length() > 0 && info.valid &&
+                            hardware.data.indexOf("\"nets\"") < 0 && info.valid &&
                             info.data.indexOf("hwconnections") < 0 &&
                             hardwareCommand.result && !removedConnections.result);
     Telemetry.start();

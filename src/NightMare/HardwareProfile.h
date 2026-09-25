@@ -4,212 +4,265 @@
 
 namespace NMHardware
 {
-constexpr uint8_t TopologyVersion = 3;
-constexpr uint8_t NoBoard = 0xff;
-constexpr uint8_t NoBus = 0xff;
+constexpr uint8_t HwConfigVersion = 2;
+constexpr size_t MaxDiagnostics = 24;
+constexpr size_t MaxGraphEndpoints = 192;
+constexpr size_t MaxGraphEdges = 192;
 
-// Values are part of the MessagePack wire format. Append; never renumber.
-enum class Direction : uint8_t
-{
-    Input = 0,
-    Output = 1,
-    Bidirectional = 2,
-    Power = 3,
-    Ground = 4,
-    Bus = 5
-};
+enum class AssemblyKind : uint8_t { CustomBoard, MarketBoard, Module, SensorProbe, Panel, Enclosure, External, Generic };
+enum class ConnectorKind : uint8_t { Header, ScrewTerminal, Jst, Usb, Terminal, DirectPin, DirectWire, Generic };
+enum class CanonicalNet : uint8_t { None, Gnd, Vcc, V3v3, V5v, AcPhase, AcNeutral, ProtectiveEarth };
 
-enum class Pull : uint8_t
-{
-    None = 0,
-    Up = 1,
-    Down = 2,
-    ExternalUp = 3,
-    ExternalDown = 4
-};
-
-enum class SignalType : uint8_t
-{
-    Gpio = 0,
-    SpiClock = 1,
-    SpiMosi = 2,
-    SpiMiso = 3,
-    SpiChipSelect = 4,
-    I2cData = 5,
-    I2cClock = 6,
-    UartTransmit = 7,
-    UartReceive = 8,
-    Pwm = 9,
-    Analog = 10,
-    OneWire = 11,
-    Power = 12,
-    Ground = 13
-};
-
-// Exactly two bytes: one BCD byte contains the significant digits `a` and `b`,
-// and one signed byte contains `c` in a.b x 10^c. For example, 330 ohms is
-// (3,3,2), 3k3 is (3,3,3), and 0.33 ohms is (3,3,-1).
-class Resistor
-{
-public:
-    Resistor() = default;
-    explicit Resistor(double ohms) { setValue(ohms); }
-    explicit Resistor(const char *value) { setText(value); }
-    explicit Resistor(const String &value) { setText(value.c_str()); }
-
-    bool valid() const { return digits_ != InvalidDigits; }
-    uint8_t firstDigit() const { return valid() ? (digits_ >> 4) & 0x0f : 0; }
-    uint8_t secondDigit() const { return valid() ? digits_ & 0x0f : 0; }
-    uint8_t digits() const { return digits_; }
-    int8_t exponent() const { return valid() ? exponent_ : 0; }
-    uint16_t encoded() const
-    {
-        return static_cast<uint16_t>(digits_) << 8 |
-               static_cast<uint8_t>(exponent_);
-    }
-    double ohms() const;
-
-private:
-    static constexpr uint8_t InvalidDigits = 0xff;
-    void setValue(double ohms);
-    void setText(const char *value);
-
-    uint8_t digits_ = InvalidDigits;
-    int8_t exponent_ = 0;
-};
-static_assert(sizeof(Resistor) == 2, "Resistor wire value must remain exactly two bytes");
-
-struct Board
+struct Terminal
 {
     const char *id;
-    const char *model;
+    CanonicalNet canonicalNet = CanonicalNet::None;
+    const char *name = nullptr;
+    constexpr Terminal(const char *terminalId, CanonicalNet net = CanonicalNet::None,
+                       const char *terminalName = nullptr)
+        : id(terminalId), canonicalNet(net), name(terminalName) {}
 };
 
-// Values are part of the MessagePack wire format. Append; never renumber.
-// This is a broad semantic category, never a specific component model.
-enum class DeviceKind : uint8_t
+struct ConnectorContact
 {
-    Unknown = 0,
-    Ic = 1,
-    Led = 2,
-    Button = 3,
-    Relay = 4,
-    Sensor = 5,
-    Display = 6,
-    Speaker = 7,
-    Buzzer = 8,
-    Connector = 9,
-    Transistor = 10,
-    Diode = 11,
-    Resistor = 12,
-    Capacitor = 13,
-    Motor = 14,
-    Storage = 15
+    const char *id;
+    CanonicalNet canonicalNet = CanonicalNet::None;
+    const char *name = nullptr;
+    constexpr ConnectorContact(const char *contactId,
+                               CanonicalNet net = CanonicalNet::None,
+                               const char *contactName = nullptr)
+        : id(contactId), canonicalNet(net), name(contactName) {}
 };
 
 struct Device
 {
     const char *id;
-    const char *model;
-    // NoBoard is for a genuinely external discrete component. A standalone
-    // physical PCB/module should normally be represented as its own Board.
-    uint8_t board;
-    DeviceKind kind;
-    // Optional stable, lowercase physical-form slug. Presentation artwork
-    // remains a viewer concern.
-    const char *form;
-
-    constexpr Device(const char *deviceId, const char *deviceModel,
-                     uint8_t boardIndex, DeviceKind deviceKind = DeviceKind::Unknown,
-                     const char *deviceForm = nullptr)
-        : id(deviceId), model(deviceModel), board(boardIndex), kind(deviceKind),
-          form(deviceForm) {}
+    const Terminal *terminals = nullptr;
+    size_t terminalCount = 0;
+    const char *name = nullptr;
+    const char *kind = nullptr;
+    const char *model = nullptr;
+    const char *manufacturer = nullptr;
+    constexpr Device(const char *deviceId, const Terminal *deviceTerminals = nullptr,
+                     size_t count = 0, const char *deviceName = nullptr,
+                     const char *deviceKind = nullptr, const char *deviceModel = nullptr,
+                     const char *deviceManufacturer = nullptr)
+        : id(deviceId), terminals(deviceTerminals), terminalCount(count),
+          name(deviceName), kind(deviceKind), model(deviceModel),
+          manufacturer(deviceManufacturer) {}
 };
 
-// Values are part of the MessagePack wire format. Append; never renumber.
-enum class EndpointKind : uint8_t
-{
-    Board = 0,
-    Device = 1,
-    External = 2
-};
-
-struct Endpoint
-{
-    EndpointKind kind;
-    uint8_t index;
-    const char *terminal;
-
-    constexpr Endpoint(EndpointKind endpointKind, uint8_t endpointIndex,
-                       const char *terminalName)
-        : kind(endpointKind), index(endpointIndex), terminal(terminalName) {}
-};
-
-// A Net is one electrically continuous conductor. Metadata belongs here rather
-// than being repeated on every physical segment of the conductor.
-struct Net
+struct Connector
 {
     const char *id;
-    SignalType type;
-    uint8_t bus;
-    Direction direction;
-    Pull pull;
-    bool activeLow;
-    Resistor resistor;
-
-    Net(const char *netId, SignalType signalType, uint8_t busIndex,
-        Direction signalDirection, Pull pullMode = Pull::None,
-        bool isActiveLow = false, Resistor pullResistor = Resistor())
-        : id(netId), type(signalType), bus(busIndex), direction(signalDirection),
-          pull(pullMode), activeLow(isActiveLow), resistor(pullResistor) {}
+    const ConnectorContact *contacts = nullptr;
+    size_t contactCount = 0;
+    const char *name = nullptr;
+    ConnectorKind kind = ConnectorKind::Generic;
+    const char *model = nullptr;
+    const char *manufacturer = nullptr;
+    constexpr Connector(const char *connectorId,
+                        const ConnectorContact *connectorContacts = nullptr,
+                        size_t count = 0, const char *connectorName = nullptr,
+                        ConnectorKind connectorKind = ConnectorKind::Generic,
+                        const char *connectorModel = nullptr,
+                        const char *connectorManufacturer = nullptr)
+        : id(connectorId), contacts(connectorContacts), contactCount(count),
+          name(connectorName), kind(connectorKind), model(connectorModel),
+          manufacturer(connectorManufacturer) {}
 };
 
-// A Connection is one physical segment. Segments sharing `net` are
-// electrically continuous; segments sharing a non-zero `group` merely travel
-// together in the same cable or harness.
+enum class EndpointKind : uint8_t { DeviceTerminal, ConnectorContact };
+
+// `assembly` is slash-delimited. It is absolute in Profile::connections and
+// relative to the containing assembly in definition/assembly connections.
+// Empty means the containing assembly itself.
+struct EndpointRef
+{
+    const char *assembly;
+    EndpointKind kind;
+    const char *owner;
+    const char *endpoint;
+    constexpr EndpointRef(const char *assemblyPath, EndpointKind endpointKind,
+                          const char *ownerId, const char *endpointId)
+        : assembly(assemblyPath), kind(endpointKind), owner(ownerId), endpoint(endpointId) {}
+};
+
+struct WireMetadata
+{
+    const char *color = nullptr;
+    const char *gauge = nullptr;
+    const char *label = nullptr;
+    uint32_t lengthMm = 0;
+    constexpr WireMetadata(const char *wireColor = nullptr,
+                           const char *wireGauge = nullptr,
+                           const char *wireLabel = nullptr,
+                           uint32_t wireLengthMm = 0)
+        : color(wireColor), gauge(wireGauge), label(wireLabel),
+          lengthMm(wireLengthMm) {}
+};
+
 struct Connection
 {
-    Endpoint from;
-    Endpoint to;
-    uint8_t net;
-    uint8_t group;
+    EndpointRef a;
+    EndpointRef b;
+    WireMetadata wire;
+    constexpr Connection(EndpointRef endpointA, EndpointRef endpointB,
+                         WireMetadata wireMetadata = WireMetadata())
+        : a(endpointA), b(endpointB), wire(wireMetadata) {}
+};
 
-    constexpr Connection(Endpoint fromEndpoint, Endpoint toEndpoint,
-                         uint8_t netIndex, uint8_t physicalGroup = 0)
-        : from(fromEndpoint), to(toEndpoint), net(netIndex), group(physicalGroup) {}
+struct Assembly;
+
+struct AssemblyMembers
+{
+    const Assembly *assemblies = nullptr;
+    size_t assemblyCount = 0;
+    const Device *devices = nullptr;
+    size_t deviceCount = 0;
+    const Connector *connectors = nullptr;
+    size_t connectorCount = 0;
+    const Connection *connections = nullptr;
+    size_t connectionCount = 0;
+    constexpr AssemblyMembers(const Assembly *childAssemblies = nullptr,
+                              size_t children = 0,
+                              const Device *memberDevices = nullptr,
+                              size_t devices = 0,
+                              const Connector *memberConnectors = nullptr,
+                              size_t connectors = 0,
+                              const Connection *memberConnections = nullptr,
+                              size_t connections = 0)
+        : assemblies(childAssemblies), assemblyCount(children),
+          devices(memberDevices), deviceCount(devices),
+          connectors(memberConnectors), connectorCount(connectors),
+          connections(memberConnections), connectionCount(connections) {}
+};
+
+struct Assembly
+{
+    const char *id;
+    const char *definition = nullptr;
+    const char *name = nullptr;
+    AssemblyKind kind = AssemblyKind::Generic;
+    const char *model = nullptr;
+    const char *manufacturer = nullptr;
+    const char *serialNumber = nullptr;
+    const char *location = nullptr;
+    AssemblyMembers members;
+    constexpr Assembly(const char *assemblyId, const char *definitionId = nullptr,
+                       const char *assemblyName = nullptr,
+                       AssemblyKind assemblyKind = AssemblyKind::Generic,
+                       const char *assemblyModel = nullptr,
+                       const char *assemblyManufacturer = nullptr,
+                       const char *assemblySerialNumber = nullptr,
+                       const char *assemblyLocation = nullptr,
+                       AssemblyMembers assemblyMembers = AssemblyMembers())
+        : id(assemblyId), definition(definitionId), name(assemblyName),
+          kind(assemblyKind), model(assemblyModel), manufacturer(assemblyManufacturer),
+          serialNumber(assemblySerialNumber), location(assemblyLocation),
+          members(assemblyMembers) {}
+};
+
+struct HardwareDefinition
+{
+    const char *id;
+    AssemblyKind kind;
+    const char *name = nullptr;
+    const char *model = nullptr;
+    const char *manufacturer = nullptr;
+    AssemblyMembers members;
+    constexpr HardwareDefinition(const char *definitionId,
+                                 AssemblyKind assemblyKind,
+                                 const char *definitionName = nullptr,
+                                 const char *definitionModel = nullptr,
+                                 const char *definitionManufacturer = nullptr,
+                                 AssemblyMembers definitionMembers = AssemblyMembers())
+        : id(definitionId), kind(assemblyKind), name(definitionName),
+          model(definitionModel), manufacturer(definitionManufacturer),
+          members(definitionMembers) {}
 };
 
 struct Profile
 {
-    uint8_t hostBoard;
-    const Board *boards;
-    size_t boardCount;
-    const Device *devices;
-    size_t deviceCount;
-    const Net *nets;
-    size_t netCount;
+    const char *hostAssembly;
+    const HardwareDefinition *definitions;
+    size_t definitionCount;
+    const Assembly *roots;
+    size_t rootCount;
     const Connection *connections;
     size_t connectionCount;
+    constexpr Profile(const char *host, const HardwareDefinition *profileDefinitions,
+                      size_t definitions, const Assembly *profileRoots,
+                      size_t rootsCount, const Connection *profileConnections,
+                      size_t connectionsCount)
+        : hostAssembly(host), definitions(profileDefinitions),
+          definitionCount(definitions), roots(profileRoots), rootCount(rootsCount),
+          connections(profileConnections), connectionCount(connectionsCount) {}
 };
 
-/* MessagePack topology schema (version 3):
- *
- *   [version, hostBoard, boards[], devices[], nets[], connections[]]
- *   board      := [id, model]
- *   device     := [id, model, boardIndex, kind?, form?]
- *   net        := [id, signalType, busIndex, direction, pull, activeLow,
- *                  resistor?]
- *   connection := [fromEndpoint, toEndpoint, netIndex, group]
- *   endpoint   := [kind, index, terminal]
- *
- * `hostBoard` identifies the board running NightMare; no array position has an
- * implicit role. A device board index of 0xff remains available for genuinely
- * external discrete components, but a standalone PCB/module should be a Board.
- * Enums and array fields are append-only. The optional resistor is the two-byte
- * value returned by Resistor::encoded().
- */
+enum class DiagnosticCode : uint8_t
+{
+    InvalidProfile, InvalidId, DuplicateId, UnknownDefinition, DefinitionCycle,
+    DuplicateMember, AssemblyNotFound, DeviceNotFound, ConnectorNotFound,
+    TerminalNotFound, ContactNotFound, CrossAssemblyDeviceConnection,
+    DuplicateConnection, CanonicalNetConflict, CapacityExceeded, InvalidValue
+};
 
-// If the project has no NightMareHardware.h, this returns one "main" board
-// with model "unspecified" and no advertised devices, nets or connections.
+struct Diagnostic
+{
+    DiagnosticCode code;
+    String path;
+    String message;
+};
+
+struct ValidationResult
+{
+    Diagnostic diagnostics[MaxDiagnostics];
+    size_t diagnosticCount = 0;
+    bool truncated = false;
+    bool valid() const { return diagnosticCount == 0 && !truncated; }
+};
+
+struct GraphNode
+{
+    String assembly;
+    EndpointKind kind;
+    const char *owner;
+    const char *endpoint;
+    CanonicalNet canonicalNet;
+};
+
+struct GraphEdge { uint16_t a; uint16_t b; };
+
+struct TopologyGraph
+{
+    GraphNode nodes[MaxGraphEndpoints];
+    size_t nodeCount = 0;
+    GraphEdge edges[MaxGraphEdges];
+    size_t edgeCount = 0;
+};
+
+struct InferredNets
+{
+    uint16_t netByNode[MaxGraphEndpoints]{};
+    CanonicalNet canonicalByNet[MaxGraphEndpoints]{};
+    bool conflictByNet[MaxGraphEndpoints]{};
+    size_t netCount = 0;
+};
+
+const char *assemblyKindName(AssemblyKind kind);
+const char *connectorKindName(ConnectorKind kind);
+const char *endpointKindName(EndpointKind kind);
+const char *canonicalNetName(CanonicalNet net);
+const char *diagnosticCodeName(DiagnosticCode code);
+
+ValidationResult validateHwConfig(const Profile &config);
+bool buildTopologyGraph(const Profile &config, TopologyGraph &graph,
+                        ValidationResult *diagnostics = nullptr);
+bool inferNets(const TopologyGraph &graph, InferredNets &nets);
+const char *assemblyModel(const Profile &config, const char *absolutePath);
+
+// Projects provide this in NightMareHardware.h. Without one, the library
+// returns a minimal generic root assembly named `main`.
 Profile getProfile();
 }

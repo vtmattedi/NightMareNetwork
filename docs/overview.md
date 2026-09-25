@@ -146,9 +146,8 @@ NightMare separates information by lifecycle.
     mostly static / boot-scoped description
 
 <device>/hardware
-<device>/hardware/msgpack
-    topology v3: host board, boards, mounted devices, electrical nets,
-    and explicit physical connection segments
+    hardware configuration v2: assemblies, reusable definitions, devices,
+    connectors, and explicit physical connections; nets are inferred
 
 <device>/telemetry/system
     runtime system health

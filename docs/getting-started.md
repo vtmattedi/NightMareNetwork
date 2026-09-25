@@ -171,7 +171,7 @@ mqtt://
 
 ## Optional hardware profile
 
-To make INFO report the board and to publish physical topology, create:
+To make INFO report the host hardware and publish physical configuration, create:
 
 ```text
 include/NightMareHardware.h
@@ -188,35 +188,30 @@ namespace NMHardware
 {
 inline Profile projectProfile()
 {
-    static const Board boards[] = {
-        {"main", "esp32-c3-supermini:v1"},
-        {"front", "status-panel:v1"},
+    static const Terminal terminals[] = {
+        {"GPIO9"},
+        {"GND", CanonicalNet::Gnd},
     };
     static const Device devices[] = {
-        {"button", "momentary-switch", 0},
-        {"status", "LED", 1, DeviceKind::Led, "5mm-tht"},
+        {"mcu", terminals, 2, "ESP32-C3", "mcu", "ESP32-C3"},
     };
-    static const Net nets[] = {
-        {"button", SignalType::Gpio, NoBus, Direction::Input, Pull::Up, true},
-        {"status_led", SignalType::Gpio, NoBus, Direction::Output},
+    static const ConnectorContact contacts[] = {{"SIGNAL"}, {"GND", CanonicalNet::Gnd}};
+    static const Connector connectors[] = {
+        {"j_switch", contacts, 2, "Wall switch", ConnectorKind::ScrewTerminal},
     };
-    static const Connection connections[] = {
-        {{EndpointKind::Board, 0, "GPIO9"},
-         {EndpointKind::Device, 0, "1"}, 0},
-        {{EndpointKind::Board, 0, "GPIO8"},
-         {EndpointKind::Board, 1, "LED"}, 1, 1},
-        {{EndpointKind::Board, 1, "LED"},
-         {EndpointKind::Device, 1, "A"}, 1},
+    static const Connection internal[] = {
+        {{"", EndpointKind::DeviceTerminal, "mcu", "GPIO9"},
+         {"", EndpointKind::ConnectorContact, "j_switch", "SIGNAL"}},
+        {{"", EndpointKind::DeviceTerminal, "mcu", "GND"},
+         {"", EndpointKind::ConnectorContact, "j_switch", "GND"}},
     };
-
-    return {
-        0,
-        boards, sizeof(boards) / sizeof(boards[0]),
-        devices, sizeof(devices) / sizeof(devices[0]),
-        nets, sizeof(nets) / sizeof(nets[0]),
-        connections,
-        sizeof(connections) / sizeof(connections[0])
+    static const HardwareDefinition definitions[] = {
+        {"controller-v1", AssemblyKind::CustomBoard, "Controller",
+         "esp32-c3-supermini:v1", nullptr,
+         {nullptr, 0, devices, 1, connectors, 1, internal, 2}},
     };
+    static const Assembly roots[] = {{"controller", "controller-v1"}};
+    return {"controller", definitions, 1, roots, 1, nullptr, 0};
 }
 }
 ```
@@ -224,21 +219,15 @@ inline Profile projectProfile()
 If this file is absent, NightMare reports:
 
 ```text
-boards: [{ id: main, model: unspecified }]
-devices: none
-nets: none
-connections: none
+host assembly: main
+roots: [{ id: main, kind: generic }]
 ```
 
-`hostBoard` identifies the board running this firmware; array position zero has
-no implicit meaning. Board IDs identify physical PCB/module instances, and
-board models select stable definitions. Devices are chips/components mounted
-on boards. Nets identify common electrical conductors, while Connections make
-every physical segment and board crossing explicit. A non-zero connection
-group marks conductors bundled in one cable without electrically joining them.
-Device `kind` and `form` are optional visualization hints, so the three-field
-declaration remains valid. Kinds stay broad (`Sensor`, `Led`, `Button`); model
-and a stable lowercase form slug carry specific identity and package shape.
+`hostAssembly` is the absolute ID path of the assembly running the firmware.
+Assemblies may reference reusable definitions. Devices expose terminals;
+connectors expose contacts. A physical connection that crosses an assembly
+boundary must connect two connector contacts. Electrical nets are inferred
+from the connection graph. See [Hardware configuration v2](hwconfig-v2-model.md).
 
 ## Declare Resources
 

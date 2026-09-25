@@ -16,8 +16,8 @@ NightMare separates device-level information according to lifecycle:
 /info
     boot-scoped / effectively static description
 
-/hardware, /hardware/msgpack
-    hardware-only topology in readable and compact forms
+/hardware
+    reconstructable hardware configuration as JSON
 
 /telemetry/system
     changing runtime system health
@@ -203,101 +203,41 @@ heap_bytes
 psram_bytes
 ```
 
-`board` is the model of `host_board` in the active NightMare hardware profile.
+`board` is the effective model of `host_assembly` in the active NightMare hardware profile.
 
 The remaining hardware fields come from the ESP runtime.
 
-## Hardware topology
+## Hardware configuration
 
-Topology is not embedded in `/info`. It is retained separately as readable
-JSON at `<device>/hardware` and compact MessagePack at
-`<device>/hardware/msgpack`.
+Hardware configuration is not embedded in `/info`. It is retained as JSON at
+`<device>/hardware`. There is no compact hardware encoding while version 2 is
+stabilizing.
 
-The MessagePack schema is versioned and positional:
-
-```text
-[
-  version,
-  hostBoard,
-  boards[],
-  devices[],
-  nets[],
-  connections[]
-]
-
-board      = [id, model]
-device     = [id, model, boardIndex, kind?, form?]
-net        = [id, signalTypeEnum, busIndex, directionEnum, pullEnum,
-              activeLow, resistor?]
-endpoint   = [kindEnum, index, terminal]
-connection = [fromEndpoint, toEndpoint, netIndex, group]
-```
-
-Version 3 makes the firmware host explicit and separates electrical continuity
-from physical segments. `hostBoard` identifies the board running NightMare; no
-board-array position has an implicit role. A physical PCB/module is a Board. A
-chip or component mounted on one is a Device. `NoBoard` remains available for a
-genuinely external discrete component, but is not the normal representation of
-a standalone module.
-
-The readable JSON form names the same fields:
+The top-level shape is:
 
 ```json
 {
-  "version": 3,
-  "host_board": 0,
-  "boards": [
-    {"id": "main", "model": "esp32-3248s035c:v1"},
-    {"id": "io", "model": "mattediworks-io-expander:v1"}
-  ],
-  "devices": [
-    {"id": "display", "model": "ST7796", "board": 0, "kind": "display"},
-    {"id": "pcf", "model": "PCF8574", "board": 1},
-    {"id": "temperature", "model": "DS18B20", "board": 1,
-     "kind": "sensor", "form": "waterproof-probe"}
-  ],
-  "nets": [
-    {"id": "i2c_sda", "type": "i2c_data", "bus": 0,
-     "direction": "bus", "pull": "external_up", "active_low": false}
-  ],
-  "connections": [
-    {"from": {"kind": "board", "index": 0, "terminal": "GPIO8"},
-     "to": {"kind": "board", "index": 1, "terminal": "SDA"},
-     "net": 0, "group": 1}
-  ]
+  "version": 2,
+  "host_assembly": "controller/esp32",
+  "definitions": [],
+  "roots": [],
+  "connections": []
 }
 ```
 
-Connections never infer board crossings: each physical segment is explicit.
-Segments with the same `net` are electrically continuous. A non-zero `group`
-means conductors travel together physically; it does not connect their nets.
-Endpoint kinds are `0 board`, `1 device`, and `2 external`. Numeric enums are
-append-only:
+Assemblies model physical composition. Boards are assembly kinds rather than a
+universal container. Devices expose terminals and connectors expose contacts.
+Connections contain `a` and `b` endpoint references plus optional wire
+metadata. Endpoint references use `assembly`, `kind`, `owner`, and `endpoint`.
 
-```text
-direction:  0 input, 1 output, 2 bidirectional, 3 power, 4 ground, 5 bus
-pull:       0 none, 1 up, 2 down, 3 external-up, 4 external-down
-signal:     0 gpio, 1 SPI clock, 2 SPI MOSI, 3 SPI MISO, 4 SPI chip-select,
-            5 I2C data, 6 I2C clock, 7 UART transmit, 8 UART receive,
-            9 PWM, 10 analog, 11 one-wire, 12 power, 13 ground
-```
+The graph is authoritative: normal electrical nets are inferred from connected
+components and are not stored. Endpoint canonical identities may be `GND`,
+`VCC`, `+3V3`, `+5V`, `AC_PHASE`, `AC_NEUTRAL`, or `PE`. Conflicting identities
+make the document invalid.
 
-Device kinds are broad semantic hints: `0 unknown`, `1 ic`, `2 led`,
-`3 button`, `4 relay`, `5 sensor`, `6 display`, `7 speaker`, `8 buzzer`,
-`9 connector`, `10 transistor`, `11 diode`, `12 resistor`, `13 capacitor`,
-`14 motor`, and `15 storage`. Values are append-only. JSON omits `kind` when it
-is `unknown` and omits an absent/empty `form`. MessagePack omits both trailing
-positions for a default Device; when `form` exists with an unknown kind, the
-kind position is emitted as `0` before it.
-
-The optional resistor is a two-byte value. Its first byte contains two BCD
-digits `a` and `b`; its second byte is signed exponent `c`, representing
-`a.b × 10^c` ohms. Thus 330 Ω is `(3,3,2)`, 3k3 is `(3,3,3)`, and
-0.33 Ω is `(3,3,-1)`.
-
-The JSON document uses named keys and enum names while describing the same
-topology. Footprint coordinates, SVG artwork, icons, and rendering metadata are
-not device payload data and remain server-side.
+The exact field contract, containment rules, relative/absolute path behavior,
+and definition semantics are normative in
+[Hardware configuration v2](../hwconfig-v2-model.md).
 
 ## Build section
 
@@ -502,13 +442,12 @@ Use network telemetry as last-known bookkeeping.
 
 ## Publication on MQTT connection
 
-Every MQTT connection or broker switch requests a refresh of the three static
+Every MQTT connection or broker switch requests a refresh of the two static
 retained information documents:
 
 ```text
 <device>/info
 <device>/hardware
-<device>/hardware/msgpack
 ```
 
 `tickNightMareESP()` publishes at most one ready document per call. A failed
@@ -564,11 +503,10 @@ returns an object containing only hardware fields.
 Hardware connections use the separate command:
 
 ```text
-HW [PUBLISH] [JSON|MSGPACK]
+HW [PUBLISH]
 ```
 
-JSON can be returned directly. A MessagePack request republishes the retained
-MQTT document and answers `Republished to MQTT.`
+`HW` returns JSON directly. `HW PUBLISH` republishes the retained MQTT document.
 
 ## Publishable documents
 

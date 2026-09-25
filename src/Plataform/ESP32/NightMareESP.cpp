@@ -91,13 +91,7 @@ namespace
 #endif
         case SystemRequest::PublishHardwareJson:
 #if NM_ENABLE_TELEMETRY
-            return Telemetry.publishHardware(HardwareFormat::JSON);
-#else
-            return true;
-#endif
-        case SystemRequest::PublishHardwareMsgPack:
-#if NM_ENABLE_TELEMETRY
-            return Telemetry.publishHardware(HardwareFormat::MSGPACK);
+            return Telemetry.publishHardware();
 #else
             return true;
 #endif
@@ -115,7 +109,6 @@ namespace
             "PublishConsumeManifest",
             "PublishResourceStates",
             "PublishInfo",
-            "PublishHardwareMsgPack",
             "PublishHardwareJson",
             "Count"};
         String result = "";

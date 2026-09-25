@@ -337,22 +337,18 @@ boot
 
 The sections can be queried individually through the INFO interface without creating a separate MQTT topic for each section.
 
-## Hardware topology
+## Hardware configuration
 
-Hardware wiring is published separately from `/info` because it has its own
-compact representation. The two retained forms are:
+The retained `<device>/hardware` JSON document describes reconstructable
+physical composition and wiring. Assemblies contain assemblies, devices, and
+connectors. Devices expose terminals; connectors expose contacts. Connections
+are physical endpoint-to-endpoint conductors, and electrical nets are inferred
+from their connected components instead of being stored manually.
 
-```text
-<device>/hardware
-<device>/hardware/msgpack
-```
-
-They describe physical board instances and models, which board owns each
-integrated device, optional semantic device kinds and physical-form slugs,
-electrical nets, explicit physical segments, directions, pull modes, optional
-pull resistors, and active-low behavior.
-Artwork, footprints, coordinates, icons, and other rendering data remain
-server-side.
+Reusable hardware definitions are separate from deployed assembly instances.
+Separate assemblies can connect only through connector contacts. See
+[Hardware configuration v2](hwconfig-v2-model.md) for the normative model and
+wire shape.
 
 ## Telemetry
 
