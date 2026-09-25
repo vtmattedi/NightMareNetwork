@@ -10,6 +10,22 @@
 static WiFiConnectedCallback wifiConnectedCallback = nullptr;
 static TaskHandle_t WiFiTaskHandle = nullptr;
 static bool firstConnection = true;
+static int gTxPower = NightMare::NM_TX_POWER_AUTO;
+
+/// Applies the configured tx power. AUTO leaves the driver alone.
+static void applyTxPower(int dbm)
+{
+    if (dbm == NightMare::NM_TX_POWER_AUTO)
+        return;
+    // wifi_power_t is in 0.25 dBm units; only these levels exist.
+    static const int8_t levels[] = {78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
+    int target = dbm * 4;
+    int best = levels[0];
+    for (int8_t level : levels)
+        if (abs(level - target) < abs(best - target))
+            best = level;
+    WiFi.setTxPower(static_cast<wifi_power_t>(best));
+}
 /// @brief Set a callback function to be called when WiFi is connected
 /// @param callback The callback function to be set
 /// The callback function should have the signature: bool callback(bool firstConnection)
@@ -69,7 +85,7 @@ void WiFi_Task(void *pvParameters)
             old_state = WiFi.status();
         }
         int delayTime = old_state == WL_CONNECTED ? 5000 : 100;
-        LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(old_state));
+        // LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(old_state));
         vTaskDelay(delayTime / portTICK_PERIOD_MS);
     }
 }
@@ -84,13 +100,15 @@ void WiFi_Task(void *pvParameters)
 /// @return true if connected successfully, false otherwise
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *waitCallback(unsigned int))
 {
+    WiFi.disconnect(true, true); // disconnect and erase old credentials
     WiFi.mode(WIFI_STA);
+    applyTxPower(gTxPower);
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
     gDeviceIdentity.lockAddress();
-    // A prior scanNetworks() (or a previous failed connect) can leave the
-    // driver's status stuck on a stale value; disconnect first so begin()
-    // actually starts a fresh association instead of being ignored.
-    WiFi.disconnect();
+    // // A prior scanNetworks() (or a previous failed connect) can leave the
+    // // driver's status stuck on a stale value; disconnect first so begin()
+    // // actually starts a fresh association instead of being ignored.
+    // WiFi.disconnect();
     WiFi.begin(ssid, password);
     unsigned int start = millis();
     LOG("WiFi", "Connecting to WiFi: %s", ssid);
@@ -101,12 +119,12 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
         {
             waitCallback(millis() - start);
         }
-        if (WiFi.status() != lastStatus)
-        {
-            lastStatus = WiFi.status();
-            LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(lastStatus));
-        }
-        if (millis()%200 == 0)
+        // if (WiFi.status() != lastStatus)
+        // {
+        //     lastStatus = WiFi.status();
+        //     LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(lastStatus));
+        // }
+        if (millis() % 200 == 0)
         {
             Serial.print(".");
             vTaskDelay(1 / portTICK_PERIOD_MS);
@@ -122,13 +140,11 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
 
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect)
 {
-
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    WiFi.disconnect(true, true); // disconnect and erase old credentials
     WiFi.mode(WIFI_STA);
+    applyTxPower(gTxPower);
     WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
     // See WiFi_Connect: clears any stale status left by a prior scan/connect
-    // so begin() is guaranteed to start a fresh association attempt.
-    WiFi.disconnect();
     WiFi.begin(ssid, password);
 
     if (WiFiTaskHandle)
@@ -145,7 +161,7 @@ bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterC
                                        1,
                                        &WiFiTaskHandle,
                                        tskNO_AFFINITY);
-    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s, %s", OK_LOG(res), ssid, password );
+    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s, %s", OK_LOG(res), ssid, password);
 
     return res;
 }
@@ -156,19 +172,38 @@ void WiFi_Disconnect()
     WiFi.disconnect();
 }
 
-bool WiFi_Auto()
+NightMare::WiFiProfile WiFi_getProfile()
 {
     // Ensure StateStore module is initialized
     PersistentSettings.begin();
-    if (!PersistentSettings.exists(NightMare::PersistentKey::WifiSsid) ||
-        !PersistentSettings.exists(NightMare::PersistentKey::WifiPassword))
-    {
-        PersistentSettings.set(NightMare::PersistentKey::WifiSsid, DEFAULT_SSID);
-        PersistentSettings.set(NightMare::PersistentKey::WifiPassword, DEFAULT_PASSWORD);
-    }
-    String ssid = PersistentSettings.get(NightMare::PersistentKey::WifiSsid);
-    String password = PersistentSettings.get(NightMare::PersistentKey::WifiPassword);
-    return WiFi_ConnectAsync(ssid.c_str(), password.c_str(), true);
+    NightMare::WiFiProfile profile;
+    profile.ssid = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiSsid, DEFAULT_SSID);
+    profile.password = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiPassword, DEFAULT_PASSWORD);
+    profile.txPower = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiTxPower, String(NightMare::NM_TX_POWER_AUTO)).toInt();
+    return profile;
+}
+
+bool WiFi_Auto()
+{
+    NightMare::WiFiProfile profile = WiFi_getProfile();
+    gTxPower = profile.txPower;
+    return WiFi_ConnectAsync(profile.ssid.c_str(), profile.password.c_str(), true);
+}
+
+bool WiFi_setTxPower(int txPowerDbm)
+{
+    gTxPower = txPowerDbm;
+    PersistentSettings.set(NightMare::PersistentKey::WifiTxPower, String(txPowerDbm));
+    PersistentSettings.save();
+    applyTxPower(txPowerDbm);
+    return true;
+}
+
+float WiFi_getTxPowerDbm()
+{
+    if (WiFi.getMode() == WIFI_OFF)
+        return NightMare::NM_TX_POWER_AUTO;
+    return WiFi.getTxPower() / 4.0f;
 }
 
 void WiFi_Scan()
@@ -187,25 +222,34 @@ void WiFi_Scan()
     WiFi.scanDelete();
 }
 
-bool WiFi_ChangeCredentials(const String &ssid, const String &password)
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
 {
-    // Ensure StateStore module is initialized
+    NightMare::WiFiProfile old = WiFi_getProfile();
     WiFi_Disconnect();
-    bool result = WiFi_Connect(ssid.c_str(), password.c_str(), 15000);
-    if (!result)
+    gTxPower = profile.txPower;
+    if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), 15000))
     {
-        String old_ssid = PersistentSettings.get(NightMare::PersistentKey::WifiSsid);
-        String old_password = PersistentSettings.get(NightMare::PersistentKey::WifiPassword);
-        WiFi_ConnectAsync(old_ssid.c_str(), old_password.c_str(), true);
+        gTxPower = old.txPower;
+        WiFi_ConnectAsync(old.ssid.c_str(), old.password.c_str(), true);
         return false;
     }
-    PersistentSettings.set(NightMare::PersistentKey::WifiSsid, ssid);
-    PersistentSettings.set(NightMare::PersistentKey::WifiPassword, password);
+    PersistentSettings.set(NightMare::PersistentKey::WifiSsid, profile.ssid);
+    PersistentSettings.set(NightMare::PersistentKey::WifiPassword, profile.password);
+    PersistentSettings.set(NightMare::PersistentKey::WifiTxPower, String(profile.txPower));
     PersistentSettings.save();
     return true;
 }
 
-const char *WiFi_getStatusName (wl_status_t status)
+bool WiFi_ChangeCredentials(const String &ssid, const String &password)
+{
+    NightMare::WiFiProfile profile;
+    profile.ssid = ssid;
+    profile.password = password;
+    profile.txPower = gTxPower;
+    return WiFi_changeProfile(profile);
+}
+
+const char *WiFi_getStatusName(wl_status_t status)
 {
     switch (status)
     {

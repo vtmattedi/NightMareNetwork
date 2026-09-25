@@ -142,6 +142,12 @@
 #define NM_CONSOLE_SERIAL 0
 #endif
 
+// Whether WiFi_Auto() is called from startNightMareESP(). If not, the application must call it itself.
+// If NM_ENABLE_WIFI is 0, this has no effect.
+#ifndef NM_WIFI_AUTO
+#define NM_WIFI_AUTO NM_ENABLE_WIFI
+#endif
+
 #if NM_ENABLE_MQTT && !NM_ENABLE_NETWORK
 #error "NM_ENABLE_MQTT requires NM_ENABLE_NETWORK"
 #endif
@@ -192,4 +198,7 @@
 #endif
 #if NM_CONSOLE_SERIAL && !NM_ENABLE_CONSOLE
 #error "NM_CONSOLE_SERIAL requires NM_ENABLE_CONSOLE"
+#endif
+#if NM_WIFI_AUTO && !NM_ENABLE_WIFI
+#error "NM_WIFI_AUTO requires NM_ENABLE_WIFI"
 #endif

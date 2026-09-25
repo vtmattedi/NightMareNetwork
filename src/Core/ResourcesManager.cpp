@@ -502,6 +502,52 @@ bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument
         else
             return false;
     }
+
+    // Version 2 appended `remotes`; a version 1 document simply lacks it.
+    if (root.size() > 3 && root[3].is<JsonArrayConst>())
+    {
+        JsonArray remotes = into["remotes"].to<JsonArray>();
+        for (JsonVariantConst element : root[3].as<JsonArrayConst>())
+        {
+            JsonArrayConst entry = element.as<JsonArrayConst>();
+            if (entry.size() < 5)
+                return false;
+            const uint8_t kind = entry[0].as<uint8_t>();
+            JsonObject item = remotes.add<JsonObject>();
+            item["name"] = entry[1].as<const char *>();
+            item["bound"] = entry[2].as<bool>();
+            item["device"] = entry[3].as<const char *>();
+            item["resource"] = entry[4].as<const char *>();
+            if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
+            {
+                if (entry.size() < 7)
+                    return false;
+                item["kind"] = "value";
+                item["access"] = accessName(static_cast<AccessPolicy>(entry[5].as<uint8_t>()));
+                item["type"] = valueTypeName(static_cast<NetValueType>(entry[6].as<uint8_t>()));
+            }
+            else if (kind == static_cast<uint8_t>(NetResourceType::ACTION))
+            {
+                if (entry.size() < 6 || !entry[5].is<JsonArrayConst>())
+                    return false;
+                item["kind"] = "action";
+                JsonArray args = item["arguments"].to<JsonArray>();
+                for (JsonVariantConst argumentElement : entry[5].as<JsonArrayConst>())
+                {
+                    JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
+                    if (argument.size() < 3)
+                        return false;
+                    JsonObject out = args.add<JsonObject>();
+                    out["name"] = argument[0].as<const char *>();
+                    out["type"] = valueTypeName(
+                        static_cast<NetValueType>(argument[1].as<uint8_t>()));
+                    out["required"] = argument[2].as<bool>();
+                }
+            }
+            else
+                return false;
+        }
+    }
     return true;
 }
 
@@ -1157,6 +1203,40 @@ void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
             }
         }
     }
+
+    // Every Remote Resource, bound or not: a source-less one is not a
+    // dependency, but it has to be discoverable or nothing can SOURCE it.
+    JsonArray remotes = doc["remotes"].to<JsonArray>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned())
+            continue;
+        JsonObject item = remotes.add<JsonObject>();
+        item["name"] = resource.name_;
+        item["bound"] = hasResolvedSource(resource);
+        item["device"] = resource.ownerDevice_.deviceName;
+        item["resource"] = resource.sourceResourceName_;
+        item["kind"] = kindName(resource.kind_);
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item["access"] = accessName(value.access_);
+            item["type"] = valueTypeName(value.valueType_);
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item["arguments"].to<JsonArray>();
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonObject argument = args.add<JsonObject>();
+                argument["name"] = action.argument(a).name;
+                argument["type"] = valueTypeName(action.argument(a).type);
+                argument["required"] = action.argument(a).required;
+            }
+        }
+    }
 }
 
 void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
@@ -1172,6 +1252,39 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
             continue;
         JsonArray item = consumes.add<JsonArray>();
         item.add(static_cast<uint8_t>(resource.kind_));
+        item.add(resource.ownerDevice_.deviceName);
+        item.add(resource.sourceResourceName_);
+        if (resource.kind_ == NetResourceType::VALUE)
+        {
+            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
+            item.add(static_cast<uint8_t>(value.access_));
+            item.add(static_cast<uint8_t>(value.valueType_));
+        }
+        else
+        {
+            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
+            JsonArray args = item.add<JsonArray>();
+            for (size_t a = 0; a < action.argumentCount(); ++a)
+            {
+                JsonArray argument = args.add<JsonArray>();
+                argument.add(action.argument(a).name);
+                argument.add(static_cast<uint8_t>(action.argument(a).type));
+                argument.add(action.argument(a).required);
+            }
+        }
+    }
+
+    // Appended at position 3 (rule 2): all Remote Resources, bound or not.
+    JsonArray remotes = root.add<JsonArray>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned())
+            continue;
+        JsonArray item = remotes.add<JsonArray>();
+        item.add(static_cast<uint8_t>(resource.kind_));
+        item.add(resource.name_);
+        item.add(hasResolvedSource(resource));
         item.add(resource.ownerDevice_.deviceName);
         item.add(resource.sourceResourceName_);
         if (resource.kind_ == NetResourceType::VALUE)

@@ -21,6 +21,8 @@ public:
 
     bool set(const String &key, const String &value) override;
     String get(const String &key, const String &defaultValue = "") const override;
+    // Returns the value for the key if it exists, or (saves the default value) then return the default value if it does not exist.
+    String getOrSave(const String &key, const String &defaultValue) const;
     bool exists(const String &key) const override;
     bool remove(const String &key) override;
     void clear() override;

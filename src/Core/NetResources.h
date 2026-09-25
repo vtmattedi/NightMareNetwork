@@ -219,7 +219,16 @@ enum class ManifestFormat : uint8_t
  * ------------------------------------------------------------------------- */
 constexpr uint8_t ManifestEncodingVersion = 1;
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
-constexpr uint8_t ConsumeManifestVersion = 1;
+/// Version 2 appends `remotes` (position 3 of the compact form): every Remote
+/// Resource this device declares, bound or not, so a controller can find and
+/// configure them with SOURCE. `consumes` is unchanged and still lists only
+/// dependency edges. Version 1 readers ignore the extra element.
+///
+///   remote := [ 0, localName:str, bound:bool, device:str, resource:str, access:uint, type:uint ]
+///           | [ 1, localName:str, bound:bool, device:str, resource:str, arguments:array ]
+///
+/// device and resource are empty strings while unbound.
+constexpr uint8_t ConsumeManifestVersion = 2;
 
 /// Positions within the top-level array. Position 0 is fixed for all time; see
 /// rule 1 above.

@@ -241,8 +241,7 @@ void startNightMareESP()
     if (!Telemetry.start())
         LOG_ERROR("NM", "Could not schedule periodic telemetry");
 #endif
-#if NM_ENABLE_WIFI
-    Serial.println("Initializing WiFi...");
+#if NM_ENABLE_WIFI && NM_WIFI_AUTO
     WiFi_Auto();
 #endif
 }

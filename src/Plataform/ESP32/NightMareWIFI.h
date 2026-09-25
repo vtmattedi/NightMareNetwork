@@ -20,6 +20,18 @@
 #include <Util/TimeSyncronization.h>
 #endif
 
+namespace NightMare
+{
+    /// Tx power in dBm. AUTO (0) means do not set it; the driver default stays.
+    constexpr int NM_TX_POWER_AUTO = 0;
+    struct WiFiProfile
+    {
+        String ssid;
+        String password;
+        int txPower = NM_TX_POWER_AUTO;
+    };
+}
+
 typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0, void *waitCallback(unsigned int) = nullptr);
@@ -30,4 +42,12 @@ void WiFi_Scan();
 bool WiFi_ChangeCredentials(const String &ssid, const String &password);
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
 const char *WiFi_getStatusName(wl_status_t status);
+/// Connects with the profile (15 s timeout); persists it only on success, otherwise reverts.
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
+/// The stored profile (creds.h defaults / AUTO when nothing is stored).
+NightMare::WiFiProfile WiFi_getProfile();
+/// Sets and persists the tx power in dBm (or NM_TX_POWER_AUTO). Applied now unless AUTO.
+bool WiFi_setTxPower(int txPowerDbm);
+/// Live driver tx power in dBm, or NM_TX_POWER_AUTO if WiFi is off.
+float WiFi_getTxPowerDbm();
 #endif // NM_ENABLE_WIFI

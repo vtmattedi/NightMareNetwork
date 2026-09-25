@@ -83,6 +83,16 @@ String StateStore::get(const String &key, const String &defaultValue) const
                ? RuntimeState::get(key, defaultValue) : defaultValue;
 }
 
+String StateStore::getOrSave(const String &key, const String &defaultValue) const
+{
+    if (!const_cast<StateStore *>(this)->begin())
+        return defaultValue;
+    if (RuntimeState::exists(key))
+        return RuntimeState::get(key, defaultValue);
+    const_cast<StateStore *>(this)->set(key, defaultValue);
+    return defaultValue;
+}
+
 bool StateStore::exists(const String &key) const
 {
     return const_cast<StateStore *>(this)->begin() && RuntimeState::exists(key);

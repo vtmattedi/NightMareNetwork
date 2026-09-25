@@ -11,6 +11,7 @@
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
 #include <WiFi.h>
+#include <Plataform/ESP32/NightMareWIFI.h>
 #endif
 
 namespace
@@ -430,6 +431,7 @@ void TelemetryService::appendNetwork(JsonObject dst) const
     {
         dst["ip"] = WiFi.localIP().toString();
         dst["rssi_dbm"] = WiFi.RSSI();
+        dst["tx_power_dbm"] = WiFi_getTxPowerDbm();
     }
 #endif
     dst["mqtt_connected"] = MQTT_Connected();
