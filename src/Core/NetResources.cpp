@@ -77,28 +77,30 @@ String resolveResourceTopic(const String &deviceName, const String &resourceName
 
 String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation)
 {
-    return resolveResourceTopic(resource.owner(), resource.name(), operation);
+    return resolveResourceTopic(resource.owner(),
+                                resource.isRemote() ? resource.sourceResource() : resource.name(),
+                                operation);
 }
 
 // Retargets a REMOTE resource. The role is fixed at declaration, so ownership
 // is deliberately not recalculated from the new device name: what this object
 // is and what it currently points at are separate questions.
-void NetResource::setRemoteSource(const String &deviceName, const String &resourceName)
+bool NetResource::setRemoteSource(const String &deviceName, const String &resourceName)
 {
-    // Captured before the swap: the Manager still has the old source subscribed
-    // and cannot reconstruct those topics once they are overwritten.
-    const NetDeviceIdentity oldOwner = ownerDevice_;
-    const String oldName = name_;
-
-    ownerDevice_ = NetDeviceIdentity(deviceName);
-    name_ = resourceName;
-    resetRemoteState();
 #if NM_ENABLE_RESOURCES
-    if (resourceManager_ != nullptr)
-    {
-        resourceManager_->notifySourceChanged(*this, oldOwner, oldName);
-    }
+    ResourcesManager *manager = resourceManager_ != nullptr ? resourceManager_ : &gResourcesManager;
+    return manager->configureRemoteSource(*this, deviceName, resourceName);
+#else
+    ownerDevice_ = NetDeviceIdentity(deviceName);
+    sourceResourceName_ = resourceName;
+    resetRemoteState();
+    return true;
 #endif
+}
+
+bool NetResource::clearRemoteSource()
+{
+    return setRemoteSource(String(), String());
 }
 
 void NetValueResource::resetRemoteState()

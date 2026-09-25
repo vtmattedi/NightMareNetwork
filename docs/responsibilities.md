@@ -45,6 +45,7 @@ Once Resources are declared and bound, NightMare owns the repetitive network beh
 - reconnect re-announcement,
 - Remote Value freshness,
 - remote-source changes,
+- persisted Remote source bindings and the canonical `SOURCE` verb,
 - basic manifest compatibility diagnostics.
 
 The application owns the meaning of those Resources.

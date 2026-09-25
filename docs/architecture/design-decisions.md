@@ -219,6 +219,19 @@ also maintain the retained JSON and MessagePack consume manifests.
 
 **Consequence:** successful raw `/invoke` publish means accepted for transport, not successful remote execution. A correlated command/MQTTP request using the `>` Resource-command form can surface the `ActionResult` of a ManagedAction executed on the receiving device. Invoking a RemoteAction still only reports whether its MQTT publication was accepted.
 
+## Remote local identity is separate from its source
+
+**Decision:** every Remote Resource has a stable local name while its remote
+`OWNER/RESOURCE` source is configurable and persisted in
+`/remoteresources.json`.
+
+**Reason:** application code and commands need a durable local handle even when
+the selected remote provider changes.
+
+**Consequence:** `setSource()` changes routing, subscriptions, freshness, and
+the persisted binding, but never renames the local Resource. The canonical
+`SOURCE` Resource verb replaces project-specific source-selection Actions.
+
 ## Identity adoption is a migration, not a live rename
 
 **Decision:** once the MQTT address is locked for a boot, adoption persists the new name but the running device continues using the current address until reboot.

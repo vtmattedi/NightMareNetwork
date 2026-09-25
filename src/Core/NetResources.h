@@ -79,8 +79,12 @@ enum class ResourceRole : uint8_t
 class NetResource
 {
 public:
+    /// @brief Stable local registry/configuration identity.
     const String &name() const { return name_; }
+    /// @brief Remote source owner (or this device for a Managed resource).
     const String &owner() const;
+    /// @brief Remote source Resource segment; empty until configured.
+    const String &sourceResource() const { return sourceResourceName_; }
     NetResourceType kind() const { return kind_; }
     bool isBound() const { return resourceManager_ != nullptr; }
     bool isRemote() const { return role_ == ResourceRole::REMOTE; }
@@ -90,26 +94,31 @@ protected:
     // the current device identity, read when a topic is resolved (see
     // resolveResourceOwner). Nothing is copied at construction or bind time, so
     // a global declaration never has to know the local name. A REMOTE one may
-    // also start empty and be pointed at a source later with setSource().
+    // also start without a source and be pointed at one later with setSource().
     NetResource(const String &resourceName, const String &identity,
                 const NetResourceType resourceType, const ResourceRole resourceRole)
         : kind_(resourceType),
           name_(resourceName),
           ownerDevice_(identity),
-          role_(resourceRole) {};
+          role_(resourceRole),
+          sourceResourceName_(resourceRole == ResourceRole::REMOTE && identity.length() != 0
+                                  ? resourceName
+                                  : String()) {};
     virtual ~NetResource() = default;
-    /// @brief Points a REMOTE resource at a different source. Updates the target
-    /// only: the role is permanent, so ownership is never recalculated here.
-    void setRemoteSource(const String &deviceName, const String &resourceName);
+    /// @brief Points a REMOTE resource at a different source. Updates and
+    /// persists the target only; the local name and role never change.
+    bool setRemoteSource(const String &deviceName, const String &resourceName);
+    bool clearRemoteSource();
 
     /// @brief Drops whatever was learned from the previous source.
     virtual void resetRemoteState() {}
 
 private:
     const NetResourceType kind_;
-    String name_;
+    const String name_;
     NetDeviceIdentity ownerDevice_;
     const ResourceRole role_;
+    String sourceResourceName_;
     ResourcesManager *resourceManager_ = nullptr; // Non-owning; set by bindResource().
 
     bool isOwned() const { return role_ == ResourceRole::MANAGED; }
@@ -466,9 +475,9 @@ template <typename T>
 class RemoteSensor : public NetValue<T>
 {
 public:
-    /// @brief Declared without a source yet; point it at one with setSource().
-    RemoteSensor() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ)
-    {}
+    /// @brief Stable local identity; point it at a source with setSource().
+    explicit RemoteSensor(const String &localName)
+        : NetValue<T>(localName, NetDeviceIdentity(String()), AccessPolicy::READ) {}
 
     RemoteSensor(const String &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ)
@@ -480,10 +489,11 @@ public:
 
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source.
-    void setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const String &deviceName, const String &resourceName)
     {
-        this->setRemoteSource(deviceName, resourceName);
+        return this->setRemoteSource(deviceName, resourceName);
     }
+    bool clearSource() { return this->clearRemoteSource(); }
 };
 
 /// @brief Owned by this device and writable by others. The handler receives the
@@ -517,8 +527,9 @@ template <typename T>
 class RemoteState : public NetValue<T>
 {
 public:
-    /// @brief Declared without a source yet; point it at one with setSource().
-    RemoteState() : NetValue<T>(String(), NetDeviceIdentity(String()), AccessPolicy::READ_WRITE)
+    /// @brief Stable local identity; point it at a source with setSource().
+    explicit RemoteState(const String &localName)
+        : NetValue<T>(localName, NetDeviceIdentity(String()), AccessPolicy::READ_WRITE)
     {
         this->useOptimisticSync();
     }
@@ -537,10 +548,11 @@ public:
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source,
     /// including any optimistic window still open against it.
-    void setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const String &deviceName, const String &resourceName)
     {
-        this->setRemoteSource(deviceName, resourceName);
+        return this->setRemoteSource(deviceName, resourceName);
     }
+    bool clearSource() { return this->clearRemoteSource(); }
 };
 
 /// @brief Describes one action argument. Actions carry a runtime schema rather
@@ -659,9 +671,13 @@ private:
 class RemoteAction : public NetActionResource
 {
 public:
-    /// @brief Declared without a source yet; point it at one with setSource().
-    RemoteAction()
-        : NetActionResource(String(), String(), nullptr, 0, ResourceRole::REMOTE) {}
+    /// @brief Stable local identity; point it at a source with setSource().
+    explicit RemoteAction(const String &localName)
+        : NetActionResource(localName, String(), nullptr, 0, ResourceRole::REMOTE) {}
+
+    template <size_t N>
+    RemoteAction(const String &localName, const ActionArgMetadata (&args)[N])
+        : NetActionResource(localName, String(), args, N, ResourceRole::REMOTE) {}
 
     RemoteAction(const String &resourceName, const NetDeviceIdentity &owner)
         : NetActionResource(resourceName, owner.deviceName, nullptr, 0, ResourceRole::REMOTE) {}
@@ -682,10 +698,11 @@ public:
     /// @brief Points this at a different remote action. Stays REMOTE whatever
     /// device is named. The argument schema is a property of this declaration,
     /// so it is left alone.
-    void setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const String &deviceName, const String &resourceName)
     {
-        this->setRemoteSource(deviceName, resourceName);
+        return this->setRemoteSource(deviceName, resourceName);
     }
+    bool clearSource() { return this->clearRemoteSource(); }
 
     /// @brief Application intent. True means the invocation was accepted for
     /// transport, not that the remote action ran or succeeded; use the

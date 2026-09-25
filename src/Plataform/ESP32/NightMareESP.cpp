@@ -52,8 +52,10 @@ namespace
 
     bool processSystemRequest(SystemRequest request)
     {
+#if NM_ENABLE_MQTT
         if (!MQTT_Connected() && request != SystemRequest::Count)
             return false;
+#endif
 
         switch (request)
         {
@@ -220,6 +222,10 @@ void introNightMareESP()
 void startNightMareESP()
 {
     gDeviceIdentity.begin();
+#if NM_ENABLE_RESOURCES
+    if (!gResourcesManager.loadRemoteSources())
+        LOG_ERROR("NM", "Could not load Remote Resource sources");
+#endif
 #if NM_ENABLE_SCHEDULER
     if (!gScheduler.begin(NM_SCHEDULER_OWN_TASK ? SchedulerRunMode::TASK
                                                 : SchedulerRunMode::MANUAL))

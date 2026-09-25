@@ -154,9 +154,11 @@ RemoteState<bool>
 RemoteAction
 ```
 
-A Remote Resource may be created without a source and pointed at one later.
+A Remote Resource is declared with a stable local name. It may start without a
+source and be pointed at a remote `OWNER/RESOURCE` later.
 
-Changing its source changes the target device/resource. It does not change the Resource's role.
+Changing its source changes only the target device/resource. It does not change
+the local name or the Resource's role.
 
 ## READ and READ_WRITE
 

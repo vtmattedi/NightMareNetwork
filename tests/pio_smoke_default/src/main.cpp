@@ -53,12 +53,12 @@ static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
               "NetValue is an implementation base, not an application resource");
 
 ManagedSensor<int> managedSensor("managed_sensor");
-RemoteSensor<int> remoteSensor;
+RemoteSensor<int> remoteSensor("outside_temperature");
 RemoteSensor<int> otherTemperature("temperature", NetDeviceIdentity("inside-node"));
 ManagedState<int> managedState("managed_state");
-RemoteState<int> remoteState;
+RemoteState<int> remoteState("outside_target");
 ManagedAction managedAction("managed_action");
-RemoteAction remoteAction;
+RemoteAction remoteAction("outside_action");
 
 class RecordingPublisher : public ResourcePublisher
 {
@@ -151,14 +151,13 @@ void setup()
                                        consumePublisher.consumePackedPublishes >= 4;
 
     const ActionResult list = gResourcesManager.executeCommand("list");
-    const ActionResult ambiguous = gResourcesManager.executeCommand(" temperature");
+    const ActionResult local = gResourcesManager.executeCommand(" outside_temperature");
     const ActionResult qualified =
         gResourcesManager.executeCommand(" outside-node/temperature");
     const bool resourceCommandsWork = list.success && list.result.startsWith("TYPE") &&
                                       list.result.indexOf("VALUE") >= 0 &&
-                                      list.result.indexOf("@outside-node") >= 0 &&
-                                      !ambiguous.success &&
-                                      ambiguous.result.indexOf("owner/name") >= 0 &&
+                                      list.result.indexOf("outside_temperature") >= 0 &&
+                                      local.success && local.result == "18" &&
                                       qualified.success && qualified.result == "18";
     smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&

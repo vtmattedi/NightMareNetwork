@@ -169,10 +169,16 @@ The built-in optimistic window default is:
 RemoteSensor and RemoteState expose:
 
 ```cpp
-void setSource(
+bool setSource(
     const String &deviceName,
     const String &resourceName);
+
+bool clearSource();
 ```
+
+The constructor taking one `String` declares the stable local name. Sources are
+stored by that name in `/remoteresources.json` and restored by
+`startNightMareESP()` before networking starts.
 
 ## ManagedState<T>
 
@@ -283,7 +289,7 @@ ActionResult execute(const String &payload) override;
 Common constructors:
 
 ```cpp
-RemoteAction();
+RemoteAction(const String &localName);
 
 RemoteAction(
     const String &resourceName,
@@ -301,9 +307,11 @@ It also has pointer/count forms for an expected schema.
 Methods:
 
 ```cpp
-void setSource(
+bool setSource(
     const String &deviceName,
     const String &resourceName);
+
+bool clearSource();
 
 bool invoke(const String &payload = String());
 ```
@@ -354,6 +362,7 @@ Project-facing methods:
 ```cpp
 bool bindResource(NetResource *resource);
 void unbindResource(NetResource *resource);
+bool loadRemoteSources();
 
 bool announceAll();
 bool publishManifest();
@@ -405,7 +414,7 @@ ActionResult executeCommand(
 //   >manifest [publish] [json|msgpack]
 //   >drop <name|owner/name>
 //   >raw <topic> [payload]
-//   > <name|owner/name> [get|set|invoke] [payload]
+//   > <name|owner/name> [get|set|invoke|source] [payload]
 
 bool withdrawIdentity(const String &oldDeviceName);
 ```

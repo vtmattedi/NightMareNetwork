@@ -53,6 +53,7 @@ A space after `>` selects a Resource by unique short name:
 > <name> get
 > <name> set <payload>
 > <name> invoke [payload]
+> <name> source [OWNER/RESOURCE|CLEAR]
 ```
 
 A bare Value defaults to `get`.
@@ -64,6 +65,11 @@ A bare Action defaults to `invoke` with an empty payload.
 `set` requires a Value and a payload. A Managed Value goes through its normal managed write path; a Remote writable Value goes through its normal typed request path, preserving RemoteState optimism.
 
 `invoke` requires an Action. A ManagedAction returns its local `ActionResult`; a RemoteAction can only report whether publication was accepted.
+
+`source` requires a Remote Resource. With no payload it returns the current
+source. `OWNER/RESOURCE` changes and persists the source; `CLEAR` removes it.
+It also accepts `{"source":"OWNER/RESOURCE"}` or
+`{"owner":"OWNER","resource":"RESOURCE"}`.
 
 The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
 

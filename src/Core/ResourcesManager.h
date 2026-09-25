@@ -66,6 +66,10 @@ public:
     bool bindResource(NetResource *resource);
     void unbindResource(NetResource *resource);
 
+    // Restore persisted Remote bindings after the application has bound all
+    // resources and before networking starts.
+    bool loadRemoteSources();
+
     // Call after transport reconnection to republish the retained manifest and
     // every managed value that has authoritative state. Binding one also announces it.
     bool announceAll();
@@ -144,8 +148,8 @@ public:
     /// `list`, `manifest`, `drop <name|owner/name>` and `raw <topic> <payload>` are
     /// manager operations (no space after `>`). A leading space selects a
     /// resource by unique short name or exact owner/name; a bare address
-    /// performs its default operation and an optional verb selects get, set or
-    /// invoke explicitly.
+    /// performs its default operation and an optional verb selects get, set,
+    /// invoke, or the Remote-only source configuration operation explicitly.
     ActionResult executeCommand(const String &expression);
 
     /// @brief Removes the retained resource footprint of a previous identity:
@@ -156,7 +160,7 @@ public:
     bool withdrawIdentity(const String &oldDeviceName);
 
 private:
-    friend struct NetResource;
+    friend class NetResource;
     friend struct NetValueResource;
     friend struct NetActionResource;
 
@@ -164,12 +168,19 @@ private:
     // publication fails; a remote request succeeds only when it was transported.
     bool setValue(NetValueResource &resource, const String &encoded);
     bool invoke(NetActionResource &resource, const String &payload);
+    bool configureRemoteSource(NetResource &resource, const String &deviceName,
+                               const String &resourceName, bool persist = true);
 
     /// @brief A bound Remote resource was pointed at a different source. The old
     /// owner and name arrive explicitly because the resource has already been
     /// retargeted and its previous topics can no longer be reconstructed.
     void notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
                              const String &oldName);
+
+    bool persistRemoteSource(const NetResource &resource) const;
+    bool removePersistedRemoteSource(const String &localName) const;
+    bool saveRemoteSources() const;
+    static bool parseSourceAddress(const String &encoded, String &owner, String &resourceName);
 
     static bool validSegment(const String &segment);
     static bool validActionSchema(const NetActionResource &action);

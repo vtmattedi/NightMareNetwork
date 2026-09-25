@@ -448,9 +448,7 @@ The application does not need to assemble that MQTT topic.
 Declare a RemoteSensor:
 
 ```cpp
-RemoteSensor<float> outsideTemperature(
-    "temperature",
-    NetDeviceIdentity("weather-node"));
+RemoteSensor<float> outsideTemperature("outside_temperature");
 ```
 
 React to effective Value changes:
@@ -470,6 +468,7 @@ Then bind it:
 outsideTemperature.onUpdate = onOutsideTemperature;
 
 gResourcesManager.bindResource(&outsideTemperature);
+outsideTemperature.setSource("weather-node", "temperature");
 ```
 
 NightMare automatically subscribes to:
@@ -486,7 +485,7 @@ and restores those subscriptions after MQTT reconnect.
 A Remote Resource can be bound before it has a source:
 
 ```cpp
-RemoteSensor<float> selectedTemperature;
+RemoteSensor<float> selectedTemperature("selected_temperature");
 
 void setup()
 {
@@ -503,22 +502,24 @@ selectedTemperature.setSource(
     "temperature");
 ```
 
-The manager replaces the old subscriptions and resets state learned from the previous source.
+The manager replaces the old subscriptions, resets state learned from the
+previous source, saves the binding in `/remoteresources.json`, and republishes
+the consume manifest. `startNightMareESP()` restores the saved binding on the
+next boot after Resources are bound and before networking starts.
 
 ## Write another device's state
 
 Declare:
 
 ```cpp
-RemoteState<bool> bedroomPower(
-    "power",
-    NetDeviceIdentity("bedroom-ac"));
+RemoteState<bool> bedroomPower("bedroom_power");
 ```
 
 Bind it:
 
 ```cpp
 gResourcesManager.bindResource(&bedroomPower);
+bedroomPower.setSource("bedroom-ac", "power");
 ```
 
 Request a change:
@@ -551,11 +552,10 @@ bedroomPower.authoritativeValue();
 Declare and bind:
 
 ```cpp
-RemoteAction identifyRemote(
-    "identify",
-    NetDeviceIdentity("bedroom-ac"));
+RemoteAction identifyRemote("bedroom_identify");
 
 gResourcesManager.bindResource(&identifyRemote);
+identifyRemote.setSource("bedroom-ac", "identify");
 ```
 
 Invoke:
@@ -652,7 +652,9 @@ The `>` form routes command/control input to already-bound Resources. The charac
 
 No space after `>` selects a ResourceManager operation such as `list` or `raw`.
 
-A space after `>` selects a bound Resource by unique short name. A bare Value reads its effective current Value; a bare Action invokes an empty payload. Explicit Resource verbs are `get`, `set`, and `invoke`.
+A space after `>` selects a bound Resource by its unique local name. A bare
+Value reads its effective current Value; a bare Action invokes an empty
+payload. Explicit Resource verbs are `get`, `set`, `invoke`, and `source`.
 
 `>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
 

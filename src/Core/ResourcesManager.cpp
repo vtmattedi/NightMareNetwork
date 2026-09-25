@@ -3,8 +3,12 @@
 #include "ResourcesManager.h"
 #include "DeviceIdentity.h"
 #include "DocumentPayload.h"
+#if NM_ENABLE_SETTINGS
+#include "StateStore.h"
+#endif
 
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #if NM_PLATFORM_ESP32
 #include <esp_heap_caps.h>
 #endif
@@ -14,11 +18,60 @@ namespace
     constexpr size_t MaxSegmentLength = 64;
     constexpr size_t MaxValueLength = NetResourceMaxPayloadLength;
     constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
+    constexpr size_t MaxRemoteResourcesLength =
+        ResourcesManager::MaxResources * (MaxSegmentLength * 6 + 16) + 2;
     constexpr int ManifestVersion = 2;
+    constexpr const char *RemoteResourcesFile = "/remoteresources.json";
     /// Every device's manifest, for a handler that wants the whole network.
     constexpr const char *AllManifestsFilter = "+/manifest";
     /// The same, in the compact encoding. Taken only when an encoded handler is set.
     constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
+
+    bool beginRemoteResourceStorage()
+    {
+#if NM_ENABLE_SETTINGS
+        return PersistentSettings.begin();
+#else
+        static bool mounted = false;
+        if (!mounted)
+            mounted = LittleFS.begin(true);
+        return mounted;
+#endif
+    }
+
+    bool readRemoteSourceDocument(JsonDocument &doc, bool &exists)
+    {
+        exists = LittleFS.exists(RemoteResourcesFile);
+        if (!exists)
+        {
+            doc.to<JsonObject>();
+            return true;
+        }
+        File file = LittleFS.open(RemoteResourcesFile, "r");
+        if (!file)
+            return false;
+        if (file.size() > MaxRemoteResourcesLength)
+        {
+            file.close();
+            return false;
+        }
+        const DeserializationError error = deserializeJson(doc, file);
+        file.close();
+        return !error && doc.is<JsonObject>();
+    }
+
+    bool writeRemoteSourceDocument(const JsonDocument &doc)
+    {
+        const size_t expected = measureJson(doc);
+        if (expected > MaxRemoteResourcesLength)
+            return false;
+        File file = LittleFS.open(RemoteResourcesFile, "w");
+        if (!file)
+            return false;
+        const size_t written = serializeJson(doc, file);
+        file.close();
+        return written == expected;
+    }
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
 /// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
@@ -257,13 +310,14 @@ void ResourcesManager::setSubscriber(ResourceSubscriber *subscriber)
 bool ResourcesManager::sourceConfigured(const NetResource &resource)
 {
     return resource.isOwned() ||
-           (resource.ownerDevice_.deviceName.length() != 0 && resource.name_.length() != 0);
+           (resource.ownerDevice_.deviceName.length() != 0 &&
+            resource.sourceResourceName_.length() != 0);
 }
 
 bool ResourcesManager::hasResolvedSource(const NetResource &resource)
 {
     return DeviceIdentity::validDeviceName(resolveResourceOwner(resource)) &&
-           validSegment(resource.name_);
+           validSegment(resource.isOwned() ? resource.name_ : resource.sourceResourceName_);
 }
 
 bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const
@@ -305,7 +359,8 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource, const Stri
 
 String ResourcesManager::ingressTopicFor(const NetResource &resource) const
 {
-    return ingressTopicFor(resource, resolveResourceOwner(resource), resource.name_);
+    return ingressTopicFor(resource, resolveResourceOwner(resource),
+                           resource.isOwned() ? resource.name_ : resource.sourceResourceName_);
 }
 
 bool ResourcesManager::verifiesRemoteManifests()
@@ -532,7 +587,9 @@ NetResource *ResourcesManager::findResource(const String &deviceName, const Stri
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        if (resolveResourceOwner(*resource) == deviceName && resource->name_ == name)
+        const String &addressName = resource->isOwned() ? resource->name_
+                                                       : resource->sourceResourceName_;
+        if (resolveResourceOwner(*resource) == deviceName && addressName == name)
             return resource;
     }
     return nullptr;
@@ -581,11 +638,137 @@ bool ResourcesManager::addressTakenByOther(const String &deviceName, const Strin
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource *resource = resources_[i];
+        const String &addressName = resource->isOwned() ? resource->name_
+                                                       : resource->sourceResourceName_;
         if (resource != self && resolveResourceOwner(*resource) == deviceName &&
-            resource->name_ == name)
+            addressName == name)
             return true;
     }
     return false;
+}
+
+bool ResourcesManager::parseSourceAddress(const String &encoded, String &owner,
+                                          String &resourceName)
+{
+    String source = encoded;
+    source.trim();
+    const int slash = source.indexOf('/');
+    if (slash <= 0 || slash == static_cast<int>(source.length()) - 1 ||
+        source.indexOf('/', slash + 1) >= 0)
+        return false;
+    owner = source.substring(0, slash);
+    resourceName = source.substring(slash + 1);
+    owner.trim();
+    resourceName.trim();
+    return DeviceIdentity::validDeviceName(owner) && validSegment(resourceName);
+}
+
+bool ResourcesManager::persistRemoteSource(const NetResource &resource) const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+
+    JsonDocument doc;
+    bool exists = false;
+    if (!readRemoteSourceDocument(doc, exists))
+    {
+        doc.clear();
+        doc.to<JsonObject>();
+    }
+    JsonObject bindings = doc.as<JsonObject>();
+    if (sourceConfigured(resource) && hasResolvedSource(resource))
+    {
+        String source = resource.ownerDevice_.deviceName;
+        source += '/';
+        source += resource.sourceResourceName_;
+        bindings[resource.name_] = source;
+    }
+    else
+        bindings.remove(resource.name_);
+    return writeRemoteSourceDocument(doc);
+}
+
+bool ResourcesManager::removePersistedRemoteSource(const String &localName) const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+    JsonDocument doc;
+    bool exists = false;
+    if (!readRemoteSourceDocument(doc, exists))
+        return false;
+    JsonObject bindings = doc.as<JsonObject>();
+    if (!exists || !bindings.containsKey(localName))
+        return true;
+    bindings.remove(localName);
+    return writeRemoteSourceDocument(doc);
+}
+
+bool ResourcesManager::saveRemoteSources() const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+    JsonDocument doc;
+    JsonObject bindings = doc.to<JsonObject>();
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned() || !hasResolvedSource(resource))
+            continue;
+        String source = resource.ownerDevice_.deviceName;
+        source += '/';
+        source += resource.sourceResourceName_;
+        bindings[resource.name_] = source;
+    }
+    return writeRemoteSourceDocument(doc);
+}
+
+bool ResourcesManager::loadRemoteSources()
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+
+    JsonDocument stored;
+    bool exists = false;
+    bool changed = false;
+    if (!readRemoteSourceDocument(stored, exists))
+    {
+        stored.clear();
+        stored.to<JsonObject>();
+        changed = true;
+    }
+
+    JsonObjectConst bindings = stored.as<JsonObjectConst>();
+    for (JsonPairConst binding : bindings)
+    {
+        bool ambiguous = false;
+        NetResource *resource = findResourceByName(binding.key().c_str(), ambiguous);
+        String owner;
+        String resourceName;
+        if (ambiguous || resource == nullptr || resource->isOwned() ||
+            !binding.value().is<const char *>() ||
+            !parseSourceAddress(binding.value().as<String>(), owner, resourceName) ||
+            !configureRemoteSource(*resource, owner, resourceName, false))
+            changed = true;
+    }
+
+    size_t expectedCount = 0;
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        const NetResource &resource = *resources_[i];
+        if (resource.isOwned() || !hasResolvedSource(resource))
+            continue;
+        ++expectedCount;
+        String expected = resource.ownerDevice_.deviceName;
+        expected += '/';
+        expected += resource.sourceResourceName_;
+        JsonVariantConst storedValue = bindings[resource.name_];
+        if (!storedValue.is<const char *>() || storedValue.as<String>() != expected)
+            changed = true;
+    }
+    if (!exists || bindings.size() != expectedCount)
+        changed = true;
+
+    return !changed || saveRemoteSources();
 }
 
 bool ResourcesManager::bindResource(NetResource *resource)
@@ -600,10 +783,23 @@ bool ResourcesManager::bindResource(NetResource *resource)
         return false;
     }
 
+    if (!validSegment(resource->name_))
+    {
+        LOG_ERROR("RM", "Cannot bind resource: invalid local name '%s'", resource->name_.c_str());
+        return false;
+    }
+    bool ambiguous = false;
+    if (findResourceByName(resource->name_, ambiguous) != nullptr || ambiguous)
+    {
+        LOG_ERROR("RM", "Cannot bind resource '%s': local name already bound",
+                  resource->name_.c_str());
+        return false;
+    }
+
     const String &thisDevice = gDeviceIdentity.getDeviceName();
     if (resource->isOwned())
     {
-        if (!validSegment(resource->name_) || !DeviceIdentity::validDeviceName(thisDevice))
+        if (!DeviceIdentity::validDeviceName(thisDevice))
         {
             LOG_ERROR("RM", "Cannot bind managed resource '%s': invalid name or local identity",
                       resource->name_.c_str());
@@ -626,7 +822,9 @@ bool ResourcesManager::bindResource(NetResource *resource)
     // An unconfigured remote resource has no logical address yet, so it cannot
     // collide with anything.
     if (hasResolvedSource(*resource) &&
-        findResource(resolveResourceOwner(*resource), resource->name_) != nullptr)
+        findResource(resolveResourceOwner(*resource),
+                     resource->isOwned() ? resource->name_
+                                         : resource->sourceResourceName_) != nullptr)
     {
         LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': already bound",
                   resource->name_.c_str(), resolveResourceOwner(*resource).c_str());
@@ -683,9 +881,60 @@ void ResourcesManager::unbindResource(NetResource *resource)
         if (managed)
             publishManifest();
         else
+        {
+            removePersistedRemoteSource(resource->name_);
             publishConsumeManifest();
+        }
         return;
     }
+}
+
+bool ResourcesManager::configureRemoteSource(NetResource &resource, const String &deviceName,
+                                             const String &resourceName, bool persist)
+{
+    if (resource.isOwned() || !validSegment(resource.name_))
+        return false;
+
+    const bool clearing = deviceName.length() == 0 && resourceName.length() == 0;
+    if (!clearing)
+    {
+        if (!DeviceIdentity::validDeviceName(deviceName) || !validSegment(resourceName) ||
+            deviceName == gDeviceIdentity.getDeviceName() ||
+            addressTakenByOther(deviceName, resourceName, &resource))
+            return false;
+    }
+    else if (deviceName.length() != resourceName.length())
+        return false;
+
+    if (resource.ownerDevice_.deviceName == deviceName &&
+        resource.sourceResourceName_ == resourceName)
+    {
+        const bool saved = !persist || persistRemoteSource(resource);
+        if (saved)
+            publishConsumeManifest();
+        return saved;
+    }
+
+    const NetDeviceIdentity oldOwner = resource.ownerDevice_;
+    const String oldName = resource.sourceResourceName_;
+    resource.ownerDevice_ = NetDeviceIdentity(deviceName);
+    resource.sourceResourceName_ = resourceName;
+    resource.resetRemoteState();
+    notifySourceChanged(resource, oldOwner, oldName);
+
+    if (persist && !persistRemoteSource(resource))
+    {
+        const NetDeviceIdentity failedOwner = resource.ownerDevice_;
+        const String failedName = resource.sourceResourceName_;
+        resource.ownerDevice_ = oldOwner;
+        resource.sourceResourceName_ = oldName;
+        resource.resetRemoteState();
+        notifySourceChanged(resource, failedOwner, failedName);
+        return false;
+    }
+
+    publishConsumeManifest();
+    return true;
 }
 
 void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
@@ -710,32 +959,9 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     }
 
     if (!sourceConfigured(resource))
-    {
-        publishConsumeManifest();
         return; // Registered, but not pointed at anything yet.
-    }
 
-    // setSource() cannot fail, so a target that is unusable or would make
-    // routing ambiguous is refused by detaching the resource instead: with no
-    // owner it matches no topic, stays registered, and can be pointed somewhere
-    // valid later. Left addressable, it could shadow the resource that holds
-    // that address legitimately, since ingress routes to the first match.
     const String newOwner = resource.ownerDevice_.deviceName;
-    const char *refusal = nullptr;
-    if (!hasResolvedSource(resource))
-        refusal = "not a valid device/resource address";
-    else if (newOwner == gDeviceIdentity.getDeviceName())
-        refusal = "it names this device";
-    else if (addressTakenByOther(newOwner, resource.name_, &resource))
-        refusal = "another bound resource already represents it";
-    if (refusal != nullptr)
-    {
-        LOG_ERROR("RM", "Refused source '%s/%s' for remote resource: %s",
-                  newOwner.c_str(), resource.name_.c_str(), refusal);
-        resource.ownerDevice_.deviceName = String();
-        publishConsumeManifest();
-        return;
-    }
 
     if (subscriber_ != nullptr)
     {
@@ -746,7 +972,6 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
         if (ingress.length() != 0)
             subscriber_->subscribe(ingress);
     }
-    publishConsumeManifest();
 }
 
 bool ResourcesManager::publishManifest()
@@ -911,7 +1136,7 @@ void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
             continue;
         JsonObject item = consumes.add<JsonObject>();
         item["device"] = resource.ownerDevice_.deviceName;
-        item["resource"] = resource.name_;
+        item["resource"] = resource.sourceResourceName_;
         item["kind"] = kindName(resource.kind_);
         if (resource.kind_ == NetResourceType::VALUE)
         {
@@ -948,7 +1173,7 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
         JsonArray item = consumes.add<JsonArray>();
         item.add(static_cast<uint8_t>(resource.kind_));
         item.add(resource.ownerDevice_.deviceName);
-        item.add(resource.name_);
+        item.add(resource.sourceResourceName_);
         if (resource.kind_ == NetResourceType::VALUE)
         {
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
@@ -1356,7 +1581,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     }
 
     if (command.target.length() == 0)
-        return {false, String("Usage: > <name|owner/name> [get|set|invoke] [payload]")};
+        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source] [payload]")};
 
     auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult
     {
@@ -1389,6 +1614,65 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         if (!value.hasValueImpl())
             return {false, String("Value unavailable")};
         return {true, value.encodedCurrentValue()};
+    }
+
+    if (verb == "SOURCE")
+    {
+        if (resource->isOwned())
+            return {false, String("SOURCE requires a Remote resource")};
+
+        String payload = command.payload;
+        payload.trim();
+        if (payload.length() == 0)
+        {
+            if (!sourceConfigured(*resource))
+                return {true, String("CLEAR")};
+            return {true, resource->ownerDevice_.deviceName + '/' +
+                              resource->sourceResourceName_};
+        }
+
+        String owner;
+        String sourceName;
+        String upper = payload;
+        upper.toUpperCase();
+        bool clear = upper == "CLEAR";
+        bool valid = clear;
+
+        if (!clear && payload[0] == '{')
+        {
+            JsonDocument doc;
+            if (!deserializeJson(doc, payload) && doc.is<JsonObject>())
+            {
+                JsonObjectConst object = doc.as<JsonObjectConst>();
+                if (object["source"].is<const char *>())
+                {
+                    String encoded = object["source"].as<String>();
+                    encoded.trim();
+                    String encodedUpper = encoded;
+                    encodedUpper.toUpperCase();
+                    clear = encodedUpper == "CLEAR";
+                    valid = clear || parseSourceAddress(encoded, owner, sourceName);
+                }
+                else if (object["owner"].is<const char *>() &&
+                         object["resource"].is<const char *>())
+                {
+                    owner = object["owner"].as<String>();
+                    sourceName = object["resource"].as<String>();
+                    owner.trim();
+                    sourceName.trim();
+                    valid = DeviceIdentity::validDeviceName(owner) && validSegment(sourceName);
+                }
+            }
+        }
+        else if (!clear)
+            valid = parseSourceAddress(payload, owner, sourceName);
+
+        if (!valid)
+            return {false, String("SOURCE expects OWNER/RESOURCE, CLEAR, or a source object")};
+        if (!configureRemoteSource(*resource, clear ? String() : owner,
+                                   clear ? String() : sourceName))
+            return {false, String("Could not save or apply source")};
+        return {true, clear ? String("CLEAR") : owner + '/' + sourceName};
     }
 
     if (verb == "GET")
@@ -1449,7 +1733,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
     if (message.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Ignored oversized state for '%s/%s' (%u bytes)",
-                    value.ownerDevice_.deviceName.c_str(), value.name_.c_str(),
+                    value.ownerDevice_.deviceName.c_str(), value.sourceResourceName_.c_str(),
                     (unsigned)message.length());
         return false;
     }
@@ -1457,7 +1741,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
     if (!value.applyEncodedOwnerValue(message))
     {
         LOG_WARNING("RM", "Ignored undecodable state for '%s/%s'",
-                    value.ownerDevice_.deviceName.c_str(), value.name_.c_str());
+                    value.ownerDevice_.deviceName.c_str(), value.sourceResourceName_.c_str());
         return false;
     }
     return true;
@@ -1566,7 +1850,7 @@ void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArray
             if (entry.size() < 2)
                 continue;
             const char *name = entry[1].as<const char *>();
-            if (name != nullptr && resource->name_ == name)
+            if (name != nullptr && resource->sourceResourceName_ == name)
             {
                 declaration = entry;
                 break;

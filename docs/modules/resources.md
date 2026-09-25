@@ -143,9 +143,7 @@ If transport is unavailable, the local value still changes. Reconnect re-announc
 A `RemoteSensor<T>` observes a read-only Value owned by another device.
 
 ```cpp
-RemoteSensor<float> outdoorTemperature(
-    "temperature",
-    NetDeviceIdentity("weather-node"));
+RemoteSensor<float> outdoorTemperature("outdoor_temperature");
 ```
 
 RemoteSensor uses:
@@ -168,14 +166,13 @@ void temperatureChanged(NetValue<float> &resource, const float &value)
     Serial.println(value);
 }
 
-RemoteSensor<float> outdoorTemperature(
-    "temperature",
-    NetDeviceIdentity("weather-node"));
+RemoteSensor<float> outdoorTemperature("outdoor_temperature");
 
 void setup()
 {
     outdoorTemperature.onUpdate = temperatureChanged;
     gResourcesManager.bindResource(&outdoorTemperature);
+    outdoorTemperature.setSource("weather-node", "temperature");
 }
 ```
 
@@ -244,9 +241,7 @@ This does not call `onWrite`.
 A `RemoteState<T>` represents a writable Value implemented by another device.
 
 ```cpp
-RemoteState<bool> bedroomPower(
-    "power",
-    NetDeviceIdentity("bedroom-ac"));
+RemoteState<bool> bedroomPower("bedroom_power");
 ```
 
 Calling:
@@ -349,14 +344,15 @@ The last known decoded Value stays readable when state becomes STALE.
 
 Retargeting the Resource clears state learned from the old source completely.
 
-## Deferred-source Remote Resources
+## Remote Resource identity and source
 
-RemoteSensor, RemoteState, and RemoteAction can be created before their source is known.
+RemoteSensor, RemoteState, and RemoteAction have a stable local name and a separately
+configurable remote source.
 
 Example:
 
 ```cpp
-RemoteSensor<float> selectedTemperature;
+RemoteSensor<float> selectedTemperature("selected_temperature");
 
 void setup()
 {
@@ -371,6 +367,7 @@ selectedTemperature.setSource("weather-node", "temperature");
 ```
 
 A source-less Remote Resource is registered but has no network address or ingress subscription.
+The local name never changes when the source changes.
 
 This is useful when the source comes from configuration or later discovery.
 
@@ -387,12 +384,27 @@ Retargeting:
 - unsubscribes the previous source,
 - clears Value state learned from the old source,
 - updates manifest subscriptions,
-- subscribes to the new source if valid.
+- subscribes to the new source if valid,
+- saves the binding in `/remoteresources.json`,
 - republishes the retained consume manifest.
 
 The Resource remains Remote.
 
-If the requested source is invalid, points at the current device, or duplicates another locally bound Resource address, the manager refuses it and leaves the Resource detached.
+If the requested source is invalid, points at the current device, or duplicates another locally bound Resource address, the manager refuses it and keeps the previous source.
+
+At `startNightMareESP()`, persisted bindings are restored after application Resources
+have been bound and before networking starts. Unknown local names and malformed source
+entries are removed from the file. An offline remote device is not a reason to remove a
+binding.
+
+Bindings are stored by stable local name:
+
+```json
+{
+  "outdoor_temperature": "weather-node/temperature",
+  "bedroom_power": "bedroom-ac/power"
+}
+```
 
 ## ManagedAction
 
@@ -463,8 +475,9 @@ Normal form:
 
 ```cpp
 RemoteAction setTimer(
-    "set_timer",
-    NetDeviceIdentity("bedroom-ac"));
+    "bedroom_timer");
+
+setTimer.setSource("bedroom-ac", "set_timer");
 ```
 
 Invoke it:
@@ -491,9 +504,10 @@ static const ActionArgMetadata KnownTimerArgs[] = {
 };
 
 RemoteAction setTimer(
-    "set_timer",
-    NetDeviceIdentity("bedroom-ac"),
+    "bedroom_timer",
     KnownTimerArgs);
+
+setTimer.setSource("bedroom-ac", "set_timer");
 ```
 
 This is the caller's expectation, not a claim that it mirrors the complete remote contract.
@@ -643,11 +657,23 @@ The explicit verbs are:
 get
 set
 invoke
+source
 ```
 
 The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
 
-If more than one bound Resource has the same short name, the command is rejected as ambiguous.
+`source` is valid only for Remote Resources. It reads, changes, or clears the
+persisted source:
+
+```text
+> outdoor_temperature source
+> outdoor_temperature source weather-node/temperature
+> outdoor_temperature source clear
+> outdoor_temperature source {"owner":"weather-node","resource":"temperature"}
+```
+
+Local Resource names are unique within the registry, so the stable local name
+always identifies exactly one Resource.
 
 `get` is valid only for Values and accepts no payload. It returns the **effective current value**, so an optimistic RemoteState can return its active optimistic value.
 

@@ -600,6 +600,9 @@ Binding a configured Remote Resource:
 
 A Remote Resource may also be bound before a source is configured. It participates in the local registry but has no network address or subscriptions until `setSource()` supplies a valid source.
 
+Every Remote Resource has a stable, unique local name. Its source owner and
+source Resource name are separate routing fields.
+
 ## Retargeting a Remote Resource
 
 `setSource(device, resource)` keeps the Resource role Remote and replaces only its target.
@@ -610,9 +613,17 @@ NightMare:
 - drops state learned from the old source,
 - updates manifest subscription ownership,
 - validates the new address,
-- subscribes to the new ingress.
+- subscribes to the new ingress,
+- stores the binding in `/remoteresources.json`,
+- republishes the consume manifest.
 
-If the new source is invalid, names the current device, or collides with another bound Resource, the source is refused and the Remote Resource is left detached so it can be pointed somewhere valid later.
+If the new source is invalid, names the current device, or collides with another
+bound Resource, the source is refused and the previous source is retained.
+
+Startup restores persisted sources by local name after application binding and
+before networking. It removes malformed entries and entries for local Remote
+Resources that no longer exist, but never removes a binding merely because the
+remote endpoint is offline or absent from a manifest.
 
 ## Unbinding
 
