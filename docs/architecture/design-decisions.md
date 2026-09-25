@@ -148,11 +148,23 @@ separately configurable, so naming the local Resource keeps provenance
 (`<device>/manifest/consume`) and mirroring (`<device>/manifest`) as one join
 rather than two competing address systems.
 
-**Consequence:** mirroring uses the internal owner path, so `ManagedState`'s
-`onWrite` never sees it -- that handler means "someone is asking to change
-this", which a source changing underneath it is not. Propagation is one level
-and scans the registry rather than keeping a reverse index. Values only:
-Actions and Remote Values cannot declare a dependency.
+**Consequence:** mirroring uses the internal owner path, so a write handler
+never sees it -- that handler means "someone is asking to change this", which a
+source changing underneath it is not. Propagation is one level and scans the
+registry rather than keeping a reverse index.
+
+Withdrawal propagates with the value. When a source's retained state is
+tombstoned, or it is retargeted, cleared or unbound, each dependent goes stale,
+stops being authoritative and has its retained `/state` tombstoned. A mirror
+whose source has no value must not keep advertising one, because its `/state`
+is retained and a consumer that does not resolve `depends_on` cannot tell the
+difference.
+
+`ManagedSensor<T>` is the only dependent in version 1. `ManagedState<T>` is
+excluded until write-through is designed: a `/set` on a dependent should travel
+to the authoritative source and return as an ordinary mirrored update, and
+until that exists nothing writable should advertise a value it cannot change.
+Actions and Remote Values cannot declare a dependency at all.
 
 `dependsOn()` asserts semantic identity, and only the application can know
 whether two Resources mean the same thing. The firmware validates what it can

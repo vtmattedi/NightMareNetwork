@@ -310,6 +310,11 @@ protected:
     /// retargeting `door` from Mycroft to Moriarty leaves everything that
     /// mirrors `door` untouched.
     ///
+    /// When `source` loses its value -- its retained state is withdrawn, it is
+    /// retargeted, or it is unbound -- this resource goes stale and its own
+    /// retained state is tombstoned, because a mirror cannot keep asserting a
+    /// value nothing stands behind.
+    ///
     /// A value has at most one dependency and the last call wins. `source`
     /// must outlive this resource, which it does when both are the usual
     /// long-lived declarations.
@@ -512,12 +517,11 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, false); }
 
-    /* dependsOn() is on the two Managed VALUE leaves only, as the same wrapper
-     * on each rather than one method further up, because only a device that
-     * implements a value can publish a mirror of another one. A Remote value
-     * already mirrors its source, and an action has no value to mirror, so the
-     * operation is absent there rather than present and rejected -- the same
-     * reason setValue() is absent from RemoteSensor. */
+    /* dependsOn() is here and nowhere else. A Remote value already mirrors its
+     * source, an action has no value to mirror, and ManagedState is waiting on
+     * write-through semantics, so in each case the operation is absent rather
+     * than present and rejected -- the same reason setValue() is absent from
+     * RemoteSensor. */
 
     /// @brief Mirrors `source`, which becomes authoritative for this value.
     /// One dependency, last call wins; see NetValueResource::setDependency().
@@ -573,14 +577,12 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, true); }
 
-    /// @brief Mirrors `source`; see ManagedSensor<T>::dependsOn(). A mirrored
-    /// update is the source changing underneath this state, not a request to
-    /// change it, so onWrite is deliberately not called.
-    ManagedState<T> &dependsOn(NetValueResource &source)
-    {
-        this->setDependency(source);
-        return *this;
-    }
+    /* No dependsOn() here, deliberately. A mirror of another value is
+     * read-only by construction, and this one accepts writes: a /set arriving
+     * for it would have to travel to whoever is authoritative and come back as
+     * an ordinary mirrored update, which is write-through and is not designed
+     * yet. Until it is, ManagedSensor<T> is the only dependent, so there is no
+     * writable resource quietly advertising a value it cannot change. */
 
 private:
     bool acceptManagedWrite(const T &requested) override

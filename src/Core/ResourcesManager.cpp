@@ -914,6 +914,10 @@ void ResourcesManager::unbindResource(NetResource *resource)
             continue;
 
         const bool managed = resource->isOwned();
+        // Unbinding a source stops it ever updating again, which leaves any
+        // mirror of it retained and wrong, exactly as a withdrawal would.
+        if (resource->kind_ == NetResourceType::VALUE)
+            withdrawFromDependents(*static_cast<const NetValueResource *>(resource));
         // Drop the retained state this device put on the broker.
         if (managed && resource->kind_ == NetResourceType::VALUE && publisher_ != nullptr &&
             static_cast<NetValueResource *>(resource)->hasAuthoritativeValue_ &&
@@ -994,6 +998,12 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 {
     if (resource.resourceManager_ != this || resource.isOwned())
         return;
+
+    // The caller has already dropped what this resource learned from the old
+    // source, so anything mirroring it is holding a value that no longer has
+    // an owner behind it. True for a retarget and for a clear alike.
+    if (resource.kind_ == NetResourceType::VALUE)
+        withdrawFromDependents(static_cast<const NetValueResource &>(resource));
 
     const bool ownerChanged = oldOwner.deviceName != resource.ownerDevice_.deviceName;
 
@@ -1618,6 +1628,35 @@ void ResourcesManager::propagateToDependents(const NetValueResource &source)
     }
 }
 
+// The other half of mirroring: a dependent that claims to be the same value as
+// its source cannot go on advertising one after the source stops having one.
+//
+// Without this, a withdrawn source leaves the dependent's retained /state on
+// the broker looking perfectly valid, and every consumer that does not resolve
+// depends_on for itself reads a value nothing stands behind any more.
+//
+// The decoded value stays readable locally. What is withdrawn is the claim
+// that it is current: the resource goes stale, stops being authoritative -- so
+// a reconnect does not re-announce it -- and its retained state is tombstoned.
+void ResourcesManager::withdrawFromDependents(const NetValueResource &source)
+{
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        NetResource *candidate = resources_[i];
+        if (candidate->kind_ != NetResourceType::VALUE || !candidate->isOwned())
+            continue;
+        NetValueResource &dependent = *static_cast<NetValueResource *>(candidate);
+        if (dependent.dependency_ != &source)
+            continue;
+
+        dependent.freshness_ = ResourceFreshness::STALE;
+        dependent.hasAuthoritativeValue_ = false;
+        if (publisher_ != nullptr && hasResolvedSource(dependent))
+            publisher_->publish(resolveResourceTopic(dependent, ResourceTopicOperation::STATE),
+                                String(), true);
+    }
+}
+
 bool ResourcesManager::invoke(NetActionResource &resource, const String &payload)
 {
     if (resource.resourceManager_ != this || payload.length() > MaxValueLength)
@@ -1899,6 +1938,8 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
         // only setSource() discards it, because only that changes what the
         // resource represents.
         value.freshness_ = ResourceFreshness::STALE;
+        // Anything mirroring this value has just lost its authority too.
+        withdrawFromDependents(value);
         return true;
     }
     if (message.length() > MaxValueLength)

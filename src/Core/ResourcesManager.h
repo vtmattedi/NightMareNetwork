@@ -225,6 +225,9 @@ private:
     /// declared it with dependsOn(), and publishes each one. One level only;
     /// see the definition.
     void propagateToDependents(const NetValueResource &source);
+    /// @brief The reverse: the source lost its value, so each dependent goes
+    /// stale and its retained state is tombstoned.
+    void withdrawFromDependents(const NetValueResource &source);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION

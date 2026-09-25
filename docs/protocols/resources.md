@@ -241,6 +241,36 @@ source is in that device's manifest, a Remote one in its consume manifest under
 `remotes`. A name that appears in neither was declared against a Resource that
 was never bound.
 
+### Withdrawal propagates
+
+A mirror cannot keep asserting a value once the source stops having one. When
+the source loses its value, each dependent goes stale, stops being
+authoritative, and its retained `/state` is tombstoned:
+
+```text
+Mycroft/door/state tombstoned
+    -> Adler/door      STALE
+    -> Adler/ac_door   STALE, retained /state tombstoned
+```
+
+The decoded value stays readable locally. What is withdrawn is the claim that
+it is current, so a reconnect does not re-announce it either.
+
+Without this, a consumer that does not resolve `depends_on` for itself would
+read `Adler/ac_door/state` as a perfectly valid retained value that nothing
+stands behind any more.
+
+Three events withdraw:
+
+```text
+the source's retained state is tombstoned
+the source is retargeted or cleared with SOURCE
+the source is unbound
+```
+
+The last two also discard what the source learned, so the dependent has nothing
+left to mirror.
+
 ### Semantic identity is the application's claim
 
 `dependsOn()` asserts semantic identity, not merely causal dependency. The
@@ -280,8 +310,23 @@ a.dependsOn(c);
 a -> c
 ```
 
-Values only. Actions have no dependencies, and a Remote Value cannot declare
-one: it already mirrors its own source.
+`ManagedSensor<T>` only. Actions have no dependencies, and a Remote Value
+cannot declare one: it already mirrors its own source.
+
+`ManagedState<T>` is deliberately excluded until write-through is designed. A
+mirror is read-only by construction, while a `ManagedState` accepts `/set`, and
+the consistent answer is for the write to travel to whoever is authoritative
+and return as an ordinary mirrored update:
+
+```text
+SET dependent
+    -> forward the request to the authoritative source
+    -> source changes
+    -> the normal mirror comes back
+```
+
+That does not exist yet, so nothing writable can declare a dependency and
+advertise a value it cannot change.
 
 Propagation is one level. A dependent is not treated as a source in turn, so a
 chain `a -> b -> c` stops at `b`. The manifest publishes only the direct local

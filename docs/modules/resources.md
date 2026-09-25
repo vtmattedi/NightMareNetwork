@@ -445,25 +445,59 @@ source receives an authoritative update
 The sources of an authoritative update are a local `setValue()`, an accepted
 `/set` from another device, and `/state` arriving for a Remote Value.
 
-Mirroring uses the internal owner path, so for a `ManagedState` it does **not**
-call `onWrite`:
+Mirroring uses the internal owner path, not the write path. A dependent is a
+`ManagedSensor<T>`, which has no `onWrite` to begin with, and the distinction
+is the reason: a mirrored update is the source changing underneath the
+dependent, never a request to change it. `onWrite` means "someone is asking to
+change this", which is a different event and the one write-through will have to
+carry when `ManagedState<T>` is allowed to depend on something.
+
+`onUpdate` does fire on a dependent whose effective value changed.
+
+### When the source loses its value
+
+Mirroring runs both ways. If the source stops having a value, the dependent
+stops claiming one:
 
 ```text
-external SET ac_door    -> ac_door.onWrite runs
-door changes            -> ac_door mirrors it, onWrite does not run
+source withdrawn
+    -> dependent goes stale
+    -> dependent stops being authoritative
+    -> dependent's retained /state is tombstoned
 ```
 
-`onWrite` stays reserved for a request to change the state. A mirrored update
-is the source changing underneath it, which is not a request.
+The last decoded value stays readable through `getValue()`. What is withdrawn
+is the assertion that it is current, which also means a reconnect will not
+re-announce it.
 
-`onUpdate` still fires on a dependent whose effective value changed.
+This happens when the source's retained state is tombstoned, when a Remote
+source is retargeted or cleared with `setSource()`/`clearSource()`, and when
+the source is unbound.
+
+It matters because the dependent's `/state` is retained. Without withdrawal, a
+consumer reading `ac_door/state` directly would see a stale value that looks
+entirely valid.
 
 ### Rules
 
-`dependsOn()` exists on `ManagedSensor<T>` and `ManagedState<T>` only. It is
-absent from `RemoteSensor`, `RemoteState`, `ManagedAction` and `RemoteAction`:
-a Remote Value already mirrors its source, and an Action has no value to
-mirror.
+`dependsOn()` exists on `ManagedSensor<T>` only. It is absent from
+`RemoteSensor`, `RemoteState`, `ManagedAction` and `RemoteAction`: a Remote
+Value already mirrors its source, and an Action has no value to mirror.
+
+`ManagedState<T>` is excluded on purpose. A mirror is read-only by
+construction, but a `ManagedState` accepts `/set`, so a write to a dependent
+would have to be forwarded to whoever is authoritative and come back as an
+ordinary mirrored update:
+
+```text
+SET dependent
+    -> forward the request to the authoritative source
+    -> source changes
+    -> the normal mirror comes back
+```
+
+Write-through is not designed yet, so until it is, nothing writable can declare
+a dependency and then advertise a value it has no way to change.
 
 A Value has at most one dependency, and the last call wins:
 
@@ -855,7 +889,7 @@ bound Resources:          100
 Resource-name length:     64 characters
 Value/Action payload:     2048 bytes
 manifest payload limit:   16384 bytes
-dependencies per Value:   1
+dependencies per Sensor:  1
 ```
 
 For wire details, see [Resource protocol](../protocols/resources.md).

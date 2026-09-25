@@ -132,12 +132,10 @@ enum class NetSyncStrategy
 };
 ```
 
-Authoritative value mirroring (Managed Values only, one per Value, last call
-wins):
+Authoritative value mirroring (one per Sensor, last call wins):
 
 ```cpp
 ManagedSensor<T> &dependsOn(NetValueResource &source);
-ManagedState<T>  &dependsOn(NetValueResource &source);
 ```
 
 Read back from any Value:
