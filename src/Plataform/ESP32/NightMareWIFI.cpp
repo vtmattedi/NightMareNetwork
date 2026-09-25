@@ -12,8 +12,27 @@ static TaskHandle_t WiFiTaskHandle = nullptr;
 static bool firstConnection = true;
 static int gTxPower = NightMare::NM_TX_POWER_AUTO;
 
+
+// typedef enum {
+//   WIFI_POWER_21dBm = 84,      // 21dBm
+//   WIFI_POWER_20_5dBm = 82,    // 20.5dBm
+//   WIFI_POWER_20dBm = 80,      // 20dBm
+//   WIFI_POWER_19_5dBm = 78,    // 19.5dBm
+//   WIFI_POWER_19dBm = 76,      // 19dBm
+//   WIFI_POWER_18_5dBm = 74,    // 18.5dBm
+//   WIFI_POWER_17dBm = 68,      // 17dBm
+//   WIFI_POWER_15dBm = 60,      // 15dBm
+//   WIFI_POWER_13dBm = 52,      // 13dBm
+//   WIFI_POWER_11dBm = 44,      // 11dBm
+//   WIFI_POWER_8_5dBm = 34,     // 8.5dBm
+//   WIFI_POWER_7dBm = 28,       // 7dBm
+//   WIFI_POWER_5dBm = 20,       // 5dBm
+//   WIFI_POWER_2dBm = 8,        // 2dBm
+//   WIFI_POWER_MINUS_1dBm = -4  // -1dBm
+// } wifi_power_t;
+
 // Every level wifi_power_t defines, in quarter-dBm.
-static const int8_t kTxPowerLevels[] = {78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
+static const int8_t kTxPowerLevels[] = {84, 82, 80, 78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
 
 bool WiFi_isValidTxPower(int quarterDbm)
 {
@@ -246,6 +265,7 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
         return false;
     NightMare::WiFiProfile old = WiFi_getProfile();
     WiFi_Disconnect();
+    wifi_set_tx_power(static_cast<wifi_power_t>(profile.txPower));
     gTxPower = profile.txPower;
     if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), 15000))
     {

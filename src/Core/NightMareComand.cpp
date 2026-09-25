@@ -1048,7 +1048,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 int quarter = 0;
                 if (!parseTxPowerArg(parsedMsg.args[1], quarter))
                 {
-                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5 dBm.";
+                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5, 20, 20.5, 21 dBm.";
                     result.result = false;
                 }
                 else if (WiFi_setTxPower(quarter))
