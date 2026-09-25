@@ -254,6 +254,7 @@ void validateMemberShape(const AssemblyMembers &members, const String &path,
 bool definitionCycleFrom(const Profile &config, const HardwareDefinition &start,
                          const AssemblyMembers &members, size_t depth)
 {
+    if (!present(start.id)) return false;
     if (depth > MaxGraphEndpoints) return true;
     if (members.assemblies == nullptr) return false;
     for (size_t i = 0; i < members.assemblyCount; ++i)
@@ -318,7 +319,28 @@ void validateInstanceDefinitions(const Profile &config, const Assembly &assembly
                                             depth + 1, result);
 }
 
-int findNode(const TopologyGraph &graph, const String &assembly, EndpointKind kind,
+int findAssemblyIndex(const TopologyGraph &graph, const String &path)
+{
+    for (size_t i = 0; i < graph.assemblyCount; ++i)
+        if (graph.assemblies[i].path == path) return static_cast<int>(i);
+    return -1;
+}
+
+int addAssembly(TopologyGraph &graph, const String &path, ValidationResult *result)
+{
+    const int existing = findAssemblyIndex(graph, path);
+    if (existing >= 0) return existing;
+    if (graph.assemblyCount >= MaxGraphAssemblies)
+    {
+        if (result) addDiagnostic(*result, DiagnosticCode::CapacityExceeded, path,
+                                  "Topology assembly capacity exceeded.");
+        return -1;
+    }
+    graph.assemblies[graph.assemblyCount].path = path;
+    return static_cast<int>(graph.assemblyCount++);
+}
+
+int findNode(const TopologyGraph &graph, uint16_t assembly, EndpointKind kind,
              const char *owner, const char *endpoint)
 {
     if (!present(owner) || !present(endpoint)) return -1;
@@ -330,19 +352,20 @@ int findNode(const TopologyGraph &graph, const String &assembly, EndpointKind ki
     return -1;
 }
 
-bool addNode(TopologyGraph &graph, const String &assembly, EndpointKind kind,
+bool addNode(TopologyGraph &graph, uint16_t assembly, const String &assemblyPath,
+             EndpointKind kind,
              const char *owner, const char *endpoint, CanonicalNet canonical,
              ValidationResult *result)
 {
     if (findNode(graph, assembly, kind, owner, endpoint) >= 0)
     {
-        if (result) addDiagnostic(*result, DiagnosticCode::DuplicateMember, assembly,
+        if (result) addDiagnostic(*result, DiagnosticCode::DuplicateMember, assemblyPath,
                                   "Effective endpoint is duplicated by an instance and definition.");
         return false;
     }
     if (graph.nodeCount >= MaxGraphEndpoints)
     {
-        if (result) addDiagnostic(*result, DiagnosticCode::CapacityExceeded, assembly,
+        if (result) addDiagnostic(*result, DiagnosticCode::CapacityExceeded, assemblyPath,
                                   "Topology endpoint capacity exceeded.");
         return false;
     }
@@ -368,6 +391,8 @@ bool collectNodes(const Profile &config, const AssemblyView &view,
         return false;
     }
     bool ok = true;
+    const int assemblyIndex = addAssembly(graph, path, result);
+    if (assemblyIndex < 0) return false;
     const AssemblyMembers *sets[2] = {
         view.definition != nullptr ? &view.definition->members : nullptr,
         &view.instance->members};
@@ -378,7 +403,8 @@ bool collectNodes(const Profile &config, const AssemblyView &view,
             for (size_t endpoint = 0; endpoint < members->devices[i].terminalCount; ++endpoint)
             {
                 const Terminal &terminal = members->devices[i].terminals[endpoint];
-                ok = addNode(graph, path, EndpointKind::DeviceTerminal,
+                ok = addNode(graph, static_cast<uint16_t>(assemblyIndex), path,
+                             EndpointKind::DeviceTerminal,
                              members->devices[i].id, terminal.id,
                              terminal.canonicalNet, result) && ok;
             }
@@ -386,7 +412,8 @@ bool collectNodes(const Profile &config, const AssemblyView &view,
             for (size_t endpoint = 0; endpoint < members->connectors[i].contactCount; ++endpoint)
             {
                 const ConnectorContact &contact = members->connectors[i].contacts[endpoint];
-                ok = addNode(graph, path, EndpointKind::ConnectorContact,
+                ok = addNode(graph, static_cast<uint16_t>(assemblyIndex), path,
+                             EndpointKind::ConnectorContact,
                              members->connectors[i].id, contact.id,
                              contact.canonicalNet, result) && ok;
             }
@@ -421,10 +448,14 @@ bool addConnections(const Profile &config, const Connection *connections, size_t
     {
         const String aPath = joinedPath(base, connections[i].a.assembly);
         const String bPath = joinedPath(base, connections[i].b.assembly);
-        const int aIndex = findNode(graph, aPath, connections[i].a.kind,
-                                    connections[i].a.owner, connections[i].a.endpoint);
-        const int bIndex = findNode(graph, bPath, connections[i].b.kind,
-                                    connections[i].b.owner, connections[i].b.endpoint);
+        const int aAssembly = findAssemblyIndex(graph, aPath);
+        const int bAssembly = findAssemblyIndex(graph, bPath);
+        const int aIndex = aAssembly < 0 ? -1 :
+            findNode(graph, static_cast<uint16_t>(aAssembly), connections[i].a.kind,
+                     connections[i].a.owner, connections[i].a.endpoint);
+        const int bIndex = bAssembly < 0 ? -1 :
+            findNode(graph, static_cast<uint16_t>(bAssembly), connections[i].b.kind,
+                     connections[i].b.owner, connections[i].b.endpoint);
         const String path = sourcePath + "[" + String(i) + "]";
         if (aIndex < 0 || bIndex < 0)
         {
@@ -439,13 +470,21 @@ bool addConnections(const Profile &config, const Connection *connections, size_t
             ok = false;
             continue;
         }
-        if (aPath != bPath &&
+        if (aIndex == bIndex)
+        {
+            if (result) addDiagnostic(*result, DiagnosticCode::SelfConnection, path,
+                                      "A connection must join two distinct endpoints.");
+            ok = false;
+            continue;
+        }
+        if (aAssembly != bAssembly &&
             (connections[i].a.kind != EndpointKind::ConnectorContact ||
              connections[i].b.kind != EndpointKind::ConnectorContact))
         {
             if (result) addDiagnostic(*result, DiagnosticCode::CrossAssemblyDeviceConnection,
                                       path, "Assembly crossings must connect two connector contacts.");
             ok = false;
+            continue;
         }
         bool duplicate = false;
         for (size_t edge = 0; edge < graph.edgeCount; ++edge)
@@ -534,7 +573,7 @@ const char *canonicalNetName(CanonicalNet net)
 
 const char *diagnosticCodeName(DiagnosticCode code)
 {
-    static const char *names[] = {"INVALID_PROFILE", "INVALID_ID", "DUPLICATE_ID", "UNKNOWN_DEFINITION", "DEFINITION_CYCLE", "DUPLICATE_MEMBER", "ASSEMBLY_NOT_FOUND", "DEVICE_NOT_FOUND", "CONNECTOR_NOT_FOUND", "TERMINAL_NOT_FOUND", "CONTACT_NOT_FOUND", "CROSS_ASSEMBLY_DEVICE_CONNECTION", "DUPLICATE_CONNECTION", "CANONICAL_NET_CONFLICT", "CAPACITY_EXCEEDED", "INVALID_VALUE"};
+    static const char *names[] = {"INVALID_PROFILE", "INVALID_ID", "DUPLICATE_ID", "UNKNOWN_DEFINITION", "DEFINITION_CYCLE", "DUPLICATE_MEMBER", "ASSEMBLY_NOT_FOUND", "DEVICE_NOT_FOUND", "CONNECTOR_NOT_FOUND", "TERMINAL_NOT_FOUND", "CONTACT_NOT_FOUND", "CROSS_ASSEMBLY_DEVICE_CONNECTION", "DUPLICATE_CONNECTION", "CANONICAL_NET_CONFLICT", "CAPACITY_EXCEEDED", "INVALID_VALUE", "SELF_CONNECTION"};
     const size_t index = static_cast<size_t>(code);
     return index < sizeof(names) / sizeof(names[0]) ? names[index] : "UNKNOWN";
 }
@@ -542,6 +581,7 @@ const char *diagnosticCodeName(DiagnosticCode code)
 bool buildTopologyGraph(const Profile &config, TopologyGraph &graph,
                         ValidationResult *diagnostics)
 {
+    graph.assemblyCount = 0;
     graph.nodeCount = 0;
     graph.edgeCount = 0;
     if ((config.definitionCount != 0 && config.definitions == nullptr) ||
@@ -615,11 +655,6 @@ ValidationResult validateHwConfig(const Profile &config)
                           "Assembly kind enum is invalid.");
         validateMemberShape(config.definitions[i].members,
                             String("definitions[") + i + "]", result);
-        if (definitionCycleFrom(config, config.definitions[i],
-                                config.definitions[i].members, 0))
-            addDiagnostic(result, DiagnosticCode::DefinitionCycle,
-                          String("definitions[") + i + "]",
-                          "Definition references form a cycle.");
     }
     for (size_t i = 0; i < config.rootCount && config.roots != nullptr; ++i)
     {
@@ -644,6 +679,15 @@ ValidationResult validateHwConfig(const Profile &config)
                               String("connections[") + i + "]",
                               "Connection endpoint is malformed.");
     }
+
+    if (!result.valid()) return result;
+
+    for (size_t i = 0; i < config.definitionCount; ++i)
+        if (definitionCycleFrom(config, config.definitions[i],
+                                config.definitions[i].members, 0))
+            addDiagnostic(result, DiagnosticCode::DefinitionCycle,
+                          String("definitions[") + i + "]",
+                          "Definition references form a cycle.");
 
     if (!result.valid()) return result;
 

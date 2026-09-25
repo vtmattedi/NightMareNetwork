@@ -239,7 +239,8 @@ The host assembly model feeds INFO/HARDWARE. The complete source configuration
 is retained at `<device>/hardware` and is available through `HW`.
 
 `validateHwConfig()` checks references, IDs, definition cycles, connector-only
-assembly crossings, duplicates, capacity, and canonical-net contradictions.
+assembly crossings, self-connections, duplicates, capacity, and canonical-net
+contradictions.
 `buildTopologyGraph()` creates endpoint nodes and physical edges;
 `inferNets()` computes connected components. See
 [Hardware configuration v2](../hwconfig-v2-model.md) for the normative schema.

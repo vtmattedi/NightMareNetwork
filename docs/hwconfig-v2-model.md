@@ -38,7 +38,8 @@ by `direct_wire` or `direct_pin`, so it remains visible as a maintenance point.
 
 A **connection** is an undirected physical conductor between exactly two
 endpoint references. A connection may carry optional wire metadata, but it does
-not name an electrical net.
+not name an electrical net. Its two endpoint references must be different;
+self-connections are invalid.
 
 An **endpoint reference** is a structured stable identity:
 
@@ -124,6 +125,11 @@ identities in one component are conservatively diagnosed as a conflict. A
 defined conversion or isolation device must be represented by distinct
 terminals; device behavior does not implicitly connect terminals.
 
+Canonical identities are exact electrical identities, not classifications or
+wildcards. In particular, `VCC` means a rail literally identified as `VCC` and
+is distinct from both `+3V3` and `+5V`. When the positive rail is not known,
+omit `canonical_net`; do not use `VCC` as “some positive supply.”
+
 ## Validation contract
 
 `validateHwConfig()` returns a fixed-capacity `ValidationResult` containing
@@ -131,6 +137,10 @@ structured diagnostics with `code`, `path`, and `message`. It checks IDs and uni
 references and cycles, endpoint existence, connector contacts, and the physical
 boundary rule. It also builds the endpoint graph and reports canonical-net
 contradictions when structural checks permit it.
+
+Invalid connections, including cross-assembly device-terminal connections and
+self-connections, are diagnosed and are never inserted into a graph returned by
+`buildTopologyGraph()`.
 
 Incomplete knowledge is valid: an assembly or definition may omit internal
 details. References that are present must still resolve exactly.
@@ -238,8 +248,11 @@ A minimal reusable definition and deployment instance serialize as:
 
 Optional metadata fields are omitted rather than serialized as `null`.
 
-The firmware uses bounded graph/diagnostic storage (`MaxGraphEndpoints`,
-`MaxGraphEdges`, and `MaxDiagnostics`). Capacity exhaustion is a validation
+The firmware uses bounded graph/diagnostic storage (`MaxGraphAssemblies`,
+`MaxGraphEndpoints`, `MaxGraphEdges`, and `MaxDiagnostics`). Each effective
+assembly has one graph index and one stored diagnostic/lookup path;
+`GraphNode::assembly` is that index, so endpoint nodes do not allocate duplicate
+path Strings. Capacity exhaustion is a validation
 error, never silent truncation. `TopologyGraph` and `InferredNets` are caller-
 owned workspaces; firmware code should give long-lived analyses static storage
 instead of placing both large fixed arrays on a small task stack.

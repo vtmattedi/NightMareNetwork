@@ -1288,6 +1288,9 @@ const HardwareDefinition *standardDefinitions(size_t &count);
 The complete declarations, constructors, diagnostic codes, and fixed graph
 capacities are in `NightMare/HardwareProfile.h`. The normative semantics and
 JSON field contract are in [Hardware configuration v2](hwconfig-v2-model.md).
+Canonical identities are exact; `VCC` is not a wildcard for an unknown positive
+rail. Effective assemblies receive graph indices, and `GraphNode::assembly`
+stores that index rather than a copied path.
 
 A consuming project may provide `NightMareHardware.h` with:
 

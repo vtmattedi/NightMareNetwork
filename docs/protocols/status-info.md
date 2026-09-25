@@ -235,6 +235,10 @@ components and are not stored. Endpoint canonical identities may be `GND`,
 `VCC`, `+3V3`, `+5V`, `AC_PHASE`, `AC_NEUTRAL`, or `PE`. Conflicting identities
 make the document invalid.
 
+These identities are exact. `VCC` is a specifically named `VCC` rail, not an
+unknown-voltage positive-supply wildcard; omit `canonical_net` when the rail is
+not known.
+
 The exact field contract, containment rules, relative/absolute path behavior,
 and definition semantics are normative in
 [Hardware configuration v2](../hwconfig-v2-model.md).

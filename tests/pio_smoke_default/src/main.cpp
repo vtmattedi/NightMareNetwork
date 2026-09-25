@@ -1,6 +1,7 @@
 #include <NightMareNetwork.h>
 
 #include <type_traits>
+#include <new>
 #include <utility>
 
 namespace
@@ -87,6 +88,26 @@ bool acceptStateWrite(ManagedState<int> &, const int &)
 {
     ++writeCalls;
     return true;
+}
+
+bool hasHardwareDiagnostic(const NMHardware::Profile &profile,
+                           NMHardware::DiagnosticCode code)
+{
+    const NMHardware::ValidationResult validation =
+        NMHardware::validateHwConfig(profile);
+    for (size_t i = 0; i < validation.diagnosticCount; ++i)
+        if (validation.diagnostics[i].code == code) return true;
+    return false;
+}
+
+bool graphNodeMatches(const NMHardware::TopologyGraph &graph, size_t nodeIndex,
+                      const char *assembly, const char *owner, const char *endpoint)
+{
+    if (nodeIndex >= graph.nodeCount) return false;
+    const NMHardware::GraphNode &node = graph.nodes[nodeIndex];
+    return node.assembly < graph.assemblyCount &&
+           graph.assemblies[node.assembly].path == assembly &&
+           !strcmp(node.owner, owner) && !strcmp(node.endpoint, endpoint);
 }
 }
 
@@ -200,13 +221,9 @@ void setup()
     const NMHardware::Profile illegalBoundaryProfile{
         profile.hostAssembly, profile.definitions, profile.definitionCount,
         profile.roots, profile.rootCount, illegalBoundary, 1};
-    static const NMHardware::ValidationResult boundaryValidation =
-        NMHardware::validateHwConfig(illegalBoundaryProfile);
-    bool boundaryRejected = false;
-    for (size_t i = 0; i < boundaryValidation.diagnosticCount; ++i)
-        boundaryRejected = boundaryRejected ||
-            boundaryValidation.diagnostics[i].code ==
-                NMHardware::DiagnosticCode::CrossAssemblyDeviceConnection;
+    const bool boundaryRejected = hasHardwareDiagnostic(
+        illegalBoundaryProfile,
+        NMHardware::DiagnosticCode::CrossAssemblyDeviceConnection);
     static const NMHardware::Connection canonicalConflict[] = {
         {{"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "VDD"},
          {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "GND"}},
@@ -214,13 +231,118 @@ void setup()
     const NMHardware::Profile canonicalConflictProfile{
         profile.hostAssembly, profile.definitions, profile.definitionCount,
         profile.roots, profile.rootCount, canonicalConflict, 1};
-    static const NMHardware::ValidationResult canonicalValidation =
-        NMHardware::validateHwConfig(canonicalConflictProfile);
-    bool canonicalConflictRejected = false;
-    for (size_t i = 0; i < canonicalValidation.diagnosticCount; ++i)
-        canonicalConflictRejected = canonicalConflictRejected ||
-            canonicalValidation.diagnostics[i].code ==
-                NMHardware::DiagnosticCode::CanonicalNetConflict;
+    const bool canonicalConflictRejected = hasHardwareDiagnostic(
+        canonicalConflictProfile, NMHardware::DiagnosticCode::CanonicalNetConflict);
+
+    static const NMHardware::Assembly validRoot[] = {{"root"}};
+    static const NMHardware::Assembly nullIdChildren[] = {
+        {"child", "referenced-definition"}};
+    static const NMHardware::HardwareDefinition nullIdDefinitions[] = {
+        {nullptr, NMHardware::AssemblyKind::Generic, nullptr, nullptr, nullptr,
+         {nullIdChildren, 1}}};
+    const NMHardware::Profile nullIdProfile{
+        "root", nullIdDefinitions, 1, validRoot, 1, nullptr, 0};
+    const bool nullIdRejected = hasHardwareDiagnostic(
+        nullIdProfile, NMHardware::DiagnosticCode::InvalidId);
+
+    static const NMHardware::Assembly invalidIdRoot[] = {{"bad/root"}};
+    const NMHardware::Profile invalidIdProfile{
+        "bad/root", nullptr, 0, invalidIdRoot, 1, nullptr, 0};
+    const bool invalidIdRejected = hasHardwareDiagnostic(
+        invalidIdProfile, NMHardware::DiagnosticCode::InvalidId);
+
+    static const NMHardware::Assembly unknownDefinitionRoot[] = {
+        {"root", "does-not-exist"}};
+    const NMHardware::Profile unknownDefinitionProfile{
+        "root", nullptr, 0, unknownDefinitionRoot, 1, nullptr, 0};
+    const bool unknownDefinitionRejected = hasHardwareDiagnostic(
+        unknownDefinitionProfile, NMHardware::DiagnosticCode::UnknownDefinition);
+
+    static const NMHardware::Assembly cycleAChildren[] = {{"b", "cycle-b"}};
+    static const NMHardware::Assembly cycleBChildren[] = {{"a", "cycle-a"}};
+    static const NMHardware::HardwareDefinition cycleDefinitions[] = {
+        {"cycle-a", NMHardware::AssemblyKind::Generic, nullptr, nullptr, nullptr,
+         {cycleAChildren, 1}},
+        {"cycle-b", NMHardware::AssemblyKind::Generic, nullptr, nullptr, nullptr,
+         {cycleBChildren, 1}},
+    };
+    static const NMHardware::Assembly cycleRoot[] = {{"root", "cycle-a"}};
+    const NMHardware::Profile cycleProfile{
+        "root", cycleDefinitions, 2, cycleRoot, 1, nullptr, 0};
+    const bool cycleRejected = hasHardwareDiagnostic(
+        cycleProfile, NMHardware::DiagnosticCode::DefinitionCycle);
+
+    static const NMHardware::Device duplicateDefinitionDevices[] = {{"duplicate"}};
+    static const NMHardware::HardwareDefinition duplicateMemberDefinitions[] = {
+        {"duplicate-members", NMHardware::AssemblyKind::Generic,
+         nullptr, nullptr, nullptr,
+         {nullptr, 0, duplicateDefinitionDevices, 1}}};
+    static const NMHardware::Device duplicateInstanceDevices[] = {{"duplicate"}};
+    static const NMHardware::Assembly duplicateMemberRoot[] = {
+        {"root", "duplicate-members", nullptr, NMHardware::AssemblyKind::Generic,
+         nullptr, nullptr, nullptr, nullptr,
+         {nullptr, 0, duplicateInstanceDevices, 1}}};
+    const NMHardware::Profile duplicateMemberProfile{
+        "root", duplicateMemberDefinitions, 1, duplicateMemberRoot, 1, nullptr, 0};
+    const bool duplicateMemberRejected = hasHardwareDiagnostic(
+        duplicateMemberProfile, NMHardware::DiagnosticCode::DuplicateMember);
+
+    static const NMHardware::Connection unresolvedEndpoints[] = {
+        {{"controller", NMHardware::EndpointKind::DeviceTerminal, "mcu", "missing"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "DATA"}},
+        {{"controller", NMHardware::EndpointKind::DeviceTerminal, "mcu", "GPIO4"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "missing"}},
+    };
+    const NMHardware::Profile unresolvedProfile{
+        profile.hostAssembly, profile.definitions, profile.definitionCount,
+        profile.roots, profile.rootCount, unresolvedEndpoints, 2};
+    const bool unresolvedTerminalRejected = hasHardwareDiagnostic(
+        unresolvedProfile, NMHardware::DiagnosticCode::TerminalNotFound);
+    const bool unresolvedContactRejected = hasHardwareDiagnostic(
+        unresolvedProfile, NMHardware::DiagnosticCode::ContactNotFound);
+
+    static const NMHardware::Connection duplicateConnections[] = {
+        {{"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "VDD"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "DATA"}},
+        {{"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "DATA"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "VDD"}},
+    };
+    const NMHardware::Profile duplicateConnectionProfile{
+        profile.hostAssembly, profile.definitions, profile.definitionCount,
+        profile.roots, profile.rootCount, duplicateConnections, 2};
+    const bool duplicateConnectionRejected = hasHardwareDiagnostic(
+        duplicateConnectionProfile, NMHardware::DiagnosticCode::DuplicateConnection);
+
+    static const NMHardware::Connection selfConnection[] = {
+        {{"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "DATA"},
+         {"controller", NMHardware::EndpointKind::ConnectorContact, "j_temp", "DATA"}},
+    };
+    const NMHardware::Profile selfConnectionProfile{
+        profile.hostAssembly, profile.definitions, profile.definitionCount,
+        profile.roots, profile.rootCount, selfConnection, 1};
+    const bool selfConnectionRejected = hasHardwareDiagnostic(
+        selfConnectionProfile, NMHardware::DiagnosticCode::SelfConnection);
+
+    static char capacityIds[NMHardware::MaxGraphAssemblies][8];
+    alignas(NMHardware::Assembly) static unsigned char capacityStorage[
+        sizeof(NMHardware::Assembly) * NMHardware::MaxGraphAssemblies];
+    NMHardware::Assembly *capacityChildren =
+        reinterpret_cast<NMHardware::Assembly *>(capacityStorage);
+    for (size_t i = 0; i < NMHardware::MaxGraphAssemblies; ++i)
+    {
+        snprintf(capacityIds[i], sizeof(capacityIds[i]), "a%u",
+                 static_cast<unsigned>(i));
+        new (&capacityChildren[i]) NMHardware::Assembly(capacityIds[i]);
+    }
+    const NMHardware::Assembly capacityRoot(
+        "capacity", nullptr, nullptr, NMHardware::AssemblyKind::Generic,
+        nullptr, nullptr, nullptr, nullptr,
+        {capacityChildren, NMHardware::MaxGraphAssemblies});
+    const NMHardware::Profile capacityProfile{
+        "capacity", nullptr, 0, &capacityRoot, 1, nullptr, 0};
+    const bool capacityRejected = hasHardwareDiagnostic(
+        capacityProfile, NMHardware::DiagnosticCode::CapacityExceeded);
+
     static NMHardware::TopologyGraph topologyGraph;
     static NMHardware::InferredNets inferredNets;
     const bool graphBuilt = NMHardware::buildTopologyGraph(profile, topologyGraph) &&
@@ -229,16 +351,36 @@ void setup()
     int probeData = -1;
     for (size_t i = 0; i < topologyGraph.nodeCount; ++i)
     {
-        const NMHardware::GraphNode &node = topologyGraph.nodes[i];
-        if (node.assembly == "controller" && !strcmp(node.owner, "mcu") &&
-            !strcmp(node.endpoint, "GPIO4"))
+        if (graphNodeMatches(topologyGraph, i, "controller", "mcu", "GPIO4"))
             controllerData = static_cast<int>(i);
-        if (node.assembly == "probe" && !strcmp(node.owner, "sensor") &&
-            !strcmp(node.endpoint, "DATA"))
+        if (graphNodeMatches(topologyGraph, i, "probe", "sensor", "DATA"))
             probeData = static_cast<int>(i);
     }
     const bool dataNetInferred = controllerData >= 0 && probeData >= 0 &&
         inferredNets.netByNode[controllerData] == inferredNets.netByNode[probeData];
+    static NMHardware::TopologyGraph catalogGraph;
+    static NMHardware::InferredNets catalogNets;
+    const bool catalogGraphBuilt = NMHardware::buildTopologyGraph(catalogProfile, catalogGraph) &&
+                                   NMHardware::inferNets(catalogGraph, catalogNets);
+    int nestedMcu = -1;
+    int nestedDisplay = -1;
+    for (size_t i = 0; i < catalogGraph.nodeCount; ++i)
+    {
+        if (graphNodeMatches(catalogGraph, i, "mycroft/esp32", "mcu", "GPIO4"))
+            nestedMcu = static_cast<int>(i);
+        if (graphNodeMatches(catalogGraph, i, "mycroft", "display", "SCK"))
+            nestedDisplay = static_cast<int>(i);
+    }
+    const bool nestedDefinitionPathsWork = catalogGraphBuilt && nestedMcu >= 0 &&
+        nestedDisplay >= 0 &&
+        catalogNets.netByNode[nestedMcu] == catalogNets.netByNode[nestedDisplay];
+    static NMHardware::TopologyGraph illegalGraph;
+    NMHardware::ValidationResult illegalGraphDiagnostics;
+    const bool illegalGraphRejected =
+        !NMHardware::buildTopologyGraph(illegalBoundaryProfile, illegalGraph,
+                                        &illegalGraphDiagnostics) &&
+        topologyGraph.edgeCount >= profile.connectionCount &&
+        illegalGraph.edgeCount == topologyGraph.edgeCount - profile.connectionCount;
     const TelemetryResult hardware = Telemetry.getHardware();
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
@@ -246,7 +388,13 @@ void setup()
     smokeState.setFlag("hardware_topology",
                         hardwareValidation.valid() && standardDefinitionsValid &&
                             boundaryRejected && canonicalConflictRejected &&
-                            graphBuilt && dataNetInferred &&
+                            nullIdRejected && invalidIdRejected &&
+                            unknownDefinitionRejected && cycleRejected &&
+                            duplicateMemberRejected && unresolvedTerminalRejected &&
+                            unresolvedContactRejected && duplicateConnectionRejected &&
+                            selfConnectionRejected && capacityRejected &&
+                            graphBuilt && dataNetInferred && nestedDefinitionPathsWork &&
+                            illegalGraphRejected &&
                             hardware.valid &&
                             hardware.data.indexOf("esp32-devkit:test") >= 0 &&
                             hardware.data.indexOf("\"version\":2") >= 0 &&

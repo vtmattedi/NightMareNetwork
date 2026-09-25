@@ -6,6 +6,7 @@ namespace NMHardware
 {
 constexpr uint8_t HwConfigVersion = 2;
 constexpr size_t MaxDiagnostics = 24;
+constexpr size_t MaxGraphAssemblies = 96;
 constexpr size_t MaxGraphEndpoints = 192;
 constexpr size_t MaxGraphEdges = 192;
 
@@ -205,7 +206,8 @@ enum class DiagnosticCode : uint8_t
     InvalidProfile, InvalidId, DuplicateId, UnknownDefinition, DefinitionCycle,
     DuplicateMember, AssemblyNotFound, DeviceNotFound, ConnectorNotFound,
     TerminalNotFound, ContactNotFound, CrossAssemblyDeviceConnection,
-    DuplicateConnection, CanonicalNetConflict, CapacityExceeded, InvalidValue
+    DuplicateConnection, CanonicalNetConflict, CapacityExceeded, InvalidValue,
+    SelfConnection
 };
 
 struct Diagnostic
@@ -225,17 +227,21 @@ struct ValidationResult
 
 struct GraphNode
 {
-    String assembly;
+    uint16_t assembly;
     EndpointKind kind;
     const char *owner;
     const char *endpoint;
     CanonicalNet canonicalNet;
 };
 
+struct GraphAssembly { String path; };
+
 struct GraphEdge { uint16_t a; uint16_t b; };
 
 struct TopologyGraph
 {
+    GraphAssembly assemblies[MaxGraphAssemblies];
+    size_t assemblyCount = 0;
     GraphNode nodes[MaxGraphEndpoints];
     size_t nodeCount = 0;
     GraphEdge edges[MaxGraphEdges];
