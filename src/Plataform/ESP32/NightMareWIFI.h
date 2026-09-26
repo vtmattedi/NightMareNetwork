@@ -5,7 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
-
+#include <esp_wifi.h>
 #if NM_ENABLE_OTA
 #include <Util/OTA.h>
 #endif
@@ -45,7 +45,8 @@ bool WiFi_ChangeCredentials(const String &ssid, const String &password);
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
 const char *WiFi_getStatusName(wl_status_t status);
 /// Connects with the profile (15 s timeout); persists it only on success, otherwise reverts.
-bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
+/// If force is true, it will 1. try to connect even with faulty tx power, and 2. persist the profile even if the connection fails bot becuase of a power tx change or a broken credentials change.
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force = false);
 /// The stored profile (creds.h defaults / AUTO when nothing is stored).
 NightMare::WiFiProfile WiFi_getProfile();
 /// True for NM_TX_POWER_AUTO or an exact driver level (quarter-dBm).

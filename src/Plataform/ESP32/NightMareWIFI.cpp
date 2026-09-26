@@ -12,7 +12,6 @@ static TaskHandle_t WiFiTaskHandle = nullptr;
 static bool firstConnection = true;
 static int gTxPower = NightMare::NM_TX_POWER_AUTO;
 
-
 // typedef enum {
 //   WIFI_POWER_21dBm = 84,      // 21dBm
 //   WIFI_POWER_20_5dBm = 82,    // 20.5dBm
@@ -259,15 +258,33 @@ void WiFi_Scan()
     WiFi.scanDelete();
 }
 
-bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
+bool savePowerProfile(const NightMare::WiFiProfile &profile)
+{
+    const String keys[] = {NightMare::PersistentKey::WifiSsid, NightMare::PersistentKey::WifiPassword,
+                           NightMare::PersistentKey::WifiTxPower};
+    const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
+    return PersistentSettings.setMany(keys, values, 3);
+}
+
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
 {
     if (!WiFi_isValidTxPower(profile.txPower))
-        return false;
+    {
+        LOG_ERROR("WiFi", "Invalid tx power %d", profile.txPower);
+        if (!(force))
+            return false;
+    }
     NightMare::WiFiProfile old = WiFi_getProfile();
     WiFi_Disconnect();
-    wifi_set_tx_power(static_cast<wifi_power_t>(profile.txPower));
+    esp_err_t err = esp_wifi_set_max_tx_power(static_cast<wifi_power_t>(profile.txPower));
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("WiFi", "Failed to set tx power: %d", err);
+        if (!(force))
+            return false;
+    }
     gTxPower = profile.txPower;
-    if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), 15000))
+    if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), 15000) && !(force))
     {
         gTxPower = old.txPower;
         WiFi_ConnectAsync(old.ssid.c_str(), old.password.c_str(), true);
@@ -275,10 +292,7 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
     }
     // One write for the whole profile: a partial one would pair a new network
     // with the old power, or the reverse.
-    const String keys[] = {NightMare::PersistentKey::WifiSsid, NightMare::PersistentKey::WifiPassword,
-                           NightMare::PersistentKey::WifiTxPower};
-    const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
-    return PersistentSettings.setMany(keys, values, 3);
+    return savePowerProfile(profile);
 }
 
 bool WiFi_ChangeCredentials(const String &ssid, const String &password)

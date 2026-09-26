@@ -74,3 +74,13 @@ time_t timestampOfNextOccurrence(const String &timeString);
 #define DOW_DATE_STR(var) DOW_DATE(var).c_str()
 #define DATE_NO_YEAR(var) NightMare::Time::timestampToDateString((var), NightMare::Time::SmallDate)
 #define DATE_NO_YEAR_STR(var) DATE_NO_YEAR(var).c_str()
+
+
+// Usefull Definitions
+#define HOUR  60 * 60
+#define MINUTE 60
+#define SECOND 1
+#define DAY 24 * HOUR
+#define MS 1000
+#define MINUTE_MS 60 * MS
+#define HOUR_MS 60 * MINUTE_MS
