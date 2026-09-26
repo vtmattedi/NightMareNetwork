@@ -11,6 +11,28 @@ NightMare has one text command grammar that can be executed from different trans
 
 The parser and built-in command handler are shared. A command behaves as the same command whether it came from serial, MQTT console, controlled MQTT request/response, an HTTP endpoint, or a Scheduler String job.
 
+## Config commands
+
+The built-in command path routes the complete text after `CONFIG` directly to
+`gConfigManager.handle(...)`. The manager grammar is:
+
+```text
+list
+get <name>
+set <name> <payload>
+manifest
+```
+
+`set` decodes before calling the optional global change handler and commits
+only when both succeed. `manifest` returns Base64 of the canonical MessagePack
+Config declaration manifest; it does not publish it. That manifest is
+explicitly versioned: encoding version is position 0 and declaration-manifest
+version is position 1.
+
+Unlike ordinary commands, CONFIG bypasses generic argument tokenization.
+Everything after `set <name>` is one opaque payload, so its spaces and quotes
+are preserved exactly.
+
 ## Resource command expressions
 
 When Resources are enabled, any command whose first non-whitespace character is `>` is handled by `ResourcesManager` **before** the generic command parser.
@@ -135,13 +157,13 @@ Runs of whitespace outside quoted/literal regions are treated as separators.
 For example:
 
 ```text
-CONFIG    GET    myKey
+JOB    LIST
 ```
 
 parses like:
 
 ```text
-CONFIG GET myKey
+JOB LIST
 ```
 
 ## Double quotes
@@ -151,7 +173,7 @@ Double quotes group whitespace into one argument and are removed.
 Example:
 
 ```text
-CONFIG SET greeting "hello world"
+JOB AFTER once 1000 "PING"
 ```
 
 An explicitly empty argument is preserved:
@@ -169,7 +191,7 @@ Backticks create a verbatim argument region.
 Example:
 
 ```text
-JOB AFTER once 1000 `CONFIG SET message "hello world"`
+JOB AFTER once 1000 `CONFIG SET message hello world`
 ```
 
 The content inside the backtick fence is kept verbatim, including whitespace and quote characters.
@@ -641,38 +663,45 @@ Switches between local and remote broker selection.
 
 ## CONFIG
 
-`CONFIG` works with persistent settings.
+`CONFIG` addresses firmware-declared values bound to `gConfigManager`. It no
+longer exposes the generic `PersistentSettings` store.
 
-### Read all settings
+### List declarations
 
 ```text
-CONFIG GET
-CONFIG GET all
+CONFIG LIST
 ```
 
-### Read one setting
+Returns compact JSON containing each Config's name, primitive type, and
+`require_reboot` metadata.
+
+### Read one Config
 
 ```text
 CONFIG GET <name>
 ```
 
-### Set one setting
+Returns the current `NetCodec<T>` text encoding.
+
+### Set one Config
 
 ```text
-CONFIG SET <name> <value>
+CONFIG SET <name> <payload>
 ```
 
-Use quotes or a backtick literal when the value contains spaces.
+The payload is opaque command text. It is decoded according to the declared
+`Config<T>` type, offered to the optional global change handler, and committed
+only when both accept it.
 
-### Save
+### Manifest
 
 ```text
-CONFIG SAVE
+CONFIG MANIFEST
 ```
 
-For normal `StateStore` changes, persistence may already be save-on-change; this command explicitly calls `PersistentSettings.save()`.
-
-Framework-private keys are implementation details even though the generic CONFIG surface can expose stored keys.
+Returns Base64 of the canonical versioned MessagePack manifest. The decoded
+shape is `[encodingVersion, manifestVersion, configs[]]`; each declaration is
+`[name, NetValueType, requireReboot]`.
 
 ## FS
 

@@ -13,6 +13,20 @@ This page records decisions that might otherwise look arbitrary when reading the
 
 Each entry states the decision, why it exists, and what it costs.
 
+## Configs are local parameters, not Resources
+
+**Decision:** firmware parameters use the independent local `ConfigManager`;
+they do not inherit from Resource types or participate in Resource routing.
+
+**Reason:** parameters such as timeouts and calibration offsets influence
+device behavior but are not observable/controllable functional state. Giving
+them Resource topics, freshness, ownership, and publication semantics would
+misstate what they are.
+
+**Consequence:** Config v1 has typed local values, explicit registration,
+String command ingress, and a declaration manifest only. It has no MQTT,
+persistence, automatic reboot, or Resource integration.
+
 ## Runtime facts and pending framework work are separate
 
 **Decision:** `SystemState` uses typed flag and request enums backed by fixed bit

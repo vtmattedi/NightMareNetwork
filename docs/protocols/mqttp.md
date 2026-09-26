@@ -122,8 +122,11 @@ INFO SYSTEM
 JOB LIST
     JSON object
 
-CONFIG GET ...
-    JSON/string response defined by CONFIG
+CONFIG GET <name>
+    the Config's NetCodec text value
+
+CONFIG MANIFEST
+    Base64 of the versioned Config MessagePack manifest
 ```
 
 The caller must know the command's response contract.

@@ -39,6 +39,17 @@ A namespace layer is part of the broader architecture, but it has not been added
 
 Cluster and namespace should not be treated as synonyms: a cluster is the Local MQTT topology boundary; namespace is logical isolation/addressing.
 
+## Config values are runtime-only
+
+**Category:** Known limitation.
+
+`Config<T>` values currently return to their default-initialized firmware
+state after reboot. The Config Manager has no persistence layer, saved-key
+mapping, per-Config validation rules, or pending reboot-required state.
+
+`require_reboot` is declaration metadata only; an accepted command value is
+applied immediately and the manager takes no reboot action.
+
 ## No centralized Runtime execution queue
 
 **Category:** Deferred design.

@@ -1,6 +1,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_CONSOLE
 #include "NightMareCommand.h"
+#include "ConfigManager.h"
 #include "DeviceIdentity.h"
 #include "Time.h"
 #if NM_ENABLE_RESOURCES
@@ -589,6 +590,28 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         return result;
     }
 
+    // CONFIG is a raw namespace adapter into ConfigManager. It bypasses the
+    // generic tokenizer so everything after `set <name>` reaches NetCodec and
+    // the change handler as one unchanged payload.
+    size_t configCommandStart = 0;
+    while (configCommandStart < message.length() &&
+           isTokenSeparator(message[configCommandStart]))
+        ++configCommandStart;
+    size_t configCommandEnd = configCommandStart;
+    while (configCommandEnd < message.length() &&
+           !isTokenSeparator(message[configCommandEnd]))
+        ++configCommandEnd;
+    String commandName = message.substring(configCommandStart, configCommandEnd);
+    if (commandName.equalsIgnoreCase("CONFIG"))
+    {
+        size_t configStart = configCommandEnd;
+        while (configStart < message.length() && isTokenSeparator(message[configStart]))
+            ++configStart;
+        result.response = gConfigManager.handle(message.substring(configStart));
+        result.result = !result.response.startsWith("ERROR:");
+        return result;
+    }
+
     NightMareMessage parsedMsg = parseNightMareMessage2(message);
     if (!parsedMsg.valid)
     {
@@ -955,44 +978,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     }
 #endif
 
-    else if (parsedMsg.command == "CONFIG")
-    {
-        String name = parsedMsg.args[1];
-        String value = parsedMsg.args[2];
-        if (parsedMsg.subcommand == "GET")
-        {
-            if (name == "" || name == "all" || name == "ALL")
-                result.response = PersistentSettings.toJson();
-            else
-            {
-                if (PersistentSettings.exists(name))
-                {
-                    result.response = "{\"" + name + "\":\"" + PersistentSettings.get(name) + "\"}";
-                }
-                else
-                {
-                    result.response = "{\"error\":\"Configuration '" + name + "' does not exist.\"}";
-                }
-            }
-        }
-        else if (parsedMsg.subcommand == "SET" && name != "" && value != "")
-        {
-            PersistentSettings.set(name, value);
-            bool saved = PersistentSettings.get(name) == value;
-            result.response = "{\"" + name + "\":\"" + PersistentSettings.get(name) + "\", \"saved\":" + String(saved ? "true" : "false") + "}";
-        }
-        else if (parsedMsg.subcommand == "SAVE")
-        {
-            if (PersistentSettings.save())
-                result.response = "Configurations saved successfully.";
-            else
-                result.response = "Failed to save configurations.";
-        }
-        else
-        {
-            result.response = "Unknown CONFIG subcommand available: [GET <name | all>, SET <name> <value>].";
-        }
-    }
 #if NM_ENABLE_WIFI
     else if (parsedMsg.command == "WIFI")
     {

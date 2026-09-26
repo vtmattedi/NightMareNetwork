@@ -74,6 +74,16 @@ Action
 
 Resources belong to the application layer. NightMare provides their registration, addressing, discovery, state routing, subscriptions, and transport behavior.
 
+## Config
+
+A **Config** is a firmware-declared local parameter that changes how a device
+behaves, such as a retry interval, timeout, or calibration offset.
+
+Configs are not Resources. A Resource is observable or controllable functional
+state exposed to the network; a Config is a local input to application
+behavior. In version 1, Configs have typed values, command ingress, and a local
+declaration manifest, but no MQTT behavior or persistence.
+
 ## Value
 
 A **Value** is a typed piece of state.

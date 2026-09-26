@@ -90,6 +90,15 @@ USER jobs
 
 The operator-facing JOB commands cannot delete MANAGED jobs.
 
+### Local configuration registry
+
+NightMare provides a small typed Config registry for firmware parameters. It
+owns registration, typed String decoding, optional application acceptance of
+command-ingress changes, and a compact declaration manifest.
+
+The Config registry is local-only. It does not publish, subscribe, persist
+values, reboot the device, or turn Configs into Resources.
+
 ### Commands
 
 NightMare provides a common command path for framework/operator tasks.
@@ -192,6 +201,13 @@ belong in application code unless they are generic enough to become an explicit 
 The application chooses which capabilities are Resources and how they are named.
 
 That is the contract the device exposes to other devices and tooling, so names should describe application concepts rather than transport details.
+
+### Config declarations and policy
+
+The application declares long-lived `Config<T>` objects, binds them to
+`gConfigManager`, and decides whether incoming changes are acceptable through
+the optional global handler. `require_reboot` is application/tooling metadata;
+the framework applies accepted values immediately and does not reboot.
 
 ### Application-specific services
 

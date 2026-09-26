@@ -8,6 +8,7 @@
 #include <Core/RuntimeState.h>
 #include <Core/SystemState.h>
 #include <Core/Time.h>
+#include <Core/ConfigManager.h>
 #include <Core/NetResources.h>
 #include <Core/Logs.h>
 #include <Plataform/ESP32/NightMareESP.h>

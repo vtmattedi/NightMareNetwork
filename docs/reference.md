@@ -25,6 +25,64 @@ Compatibility umbrella:
 
 The latter currently includes `NightMare.h`.
 
+Config-only include:
+
+```cpp
+#include <NightMare/Config.h>
+```
+
+## Config
+
+Supported types are the primitive `NetCodec<T>` types: `bool`, integral types,
+floating-point types, and `String`.
+
+```cpp
+template <typename T>
+class Config
+{
+public:
+    explicit Config(const String &name, bool requireReboot = false);
+    const T &value() const;
+    bool set(const T &value);
+};
+```
+
+Metadata available through `ConfigBase`:
+
+```cpp
+const String &name() const;
+bool requiresReboot() const;
+NetValueType type() const;
+```
+
+Manager and handler:
+
+```cpp
+using ConfigChangeHandler =
+    bool (*)(const String &key, const String &value);
+
+extern ConfigManager gConfigManager;
+
+bool bind(ConfigBase *config);
+bool unbind(ConfigBase *config);
+String handle(const String &command);
+void setChangeHandler(ConfigChangeHandler handler);
+bool buildManifestMsgPack(uint8_t *buffer, size_t capacity, size_t &written) const;
+String buildManifestBase64() const;
+```
+
+Limits and manifest versions:
+
+```cpp
+ConfigManagerMaxConfigs = 64
+ConfigManifestEncodingVersion = 1
+ConfigManifestVersion = 1
+```
+
+The binary manifest is `[encodingVersion, manifestVersion, configs[]]`; each
+entry is `[name, NetValueType, requireReboot]`. `handle("manifest")` returns
+Base64 of those exact MessagePack bytes.
+
 ## DeviceIdentity
 
 Global:

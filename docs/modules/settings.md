@@ -326,23 +326,14 @@ WiFi helpers
 
 rather than editing private keys directly.
 
-## CONFIG command
+## Command access
 
-The generic command surface can query/update PersistentSettings:
+`PersistentSettings` is not exposed through a generic command. The `CONFIG`
+command namespace belongs to declared `Config<T>` values and `ConfigManager`.
 
-```text
-CONFIG GET ...
-CONFIG SET ...
-CONFIG SAVE
-```
-
-That does not make every stored key a stable public configuration contract.
-
-The command is a generic store interface.
-
-Module-specific invariants still belong to the module API.
-
-For example, changing `_device_name` directly would bypass adoption/cleanup semantics, while changing `_timezone` directly would not apply `TZ` or refresh identity publications. Use the identity API or commands instead.
+Module-specific settings remain behind their owning APIs and commands. For
+example, device-name adoption and timezone changes must use the identity APIs
+or their dedicated commands so their side effects cannot be bypassed.
 
 ## Current coupling
 
