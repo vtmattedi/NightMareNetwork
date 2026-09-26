@@ -56,4 +56,6 @@ bool WiFi_isValidTxPower(int quarterDbm);
 bool WiFi_setTxPower(int quarterDbm);
 /// Live driver tx power in dBm, or NM_TX_POWER_AUTO if WiFi is off.
 float WiFi_getTxPowerDbm();
+bool WiFi_cancelAsyncConnect();
+extern int gTxPower; // the current tx power, in quarter-dBm, or NM_TX_POWER_AUTO if not set
 #endif // NM_ENABLE_WIFI

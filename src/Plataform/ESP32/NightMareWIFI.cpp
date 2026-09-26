@@ -10,7 +10,7 @@
 static WiFiConnectedCallback wifiConnectedCallback = nullptr;
 static TaskHandle_t WiFiTaskHandle = nullptr;
 static bool firstConnection = true;
-static int gTxPower = NightMare::NM_TX_POWER_AUTO;
+int gTxPower = NightMare::NM_TX_POWER_AUTO;
 
 // typedef enum {
 //   WIFI_POWER_21dBm = 84,      // 21dBm
@@ -268,6 +268,10 @@ bool savePowerProfile(const NightMare::WiFiProfile &profile)
 
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
 {
+    if (force)
+    {
+        LOG_WARNING("WiFi", "Forcing WiFi profile change. Configuration will be saved even if not valid. SSID: %s, txPower: %d ", profile.ssid.c_str(), profile.txPower);
+    }
     if (!WiFi_isValidTxPower(profile.txPower))
     {
         LOG_ERROR("WiFi", "Invalid tx power %d", profile.txPower);
@@ -356,5 +360,19 @@ const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType)
     default:
         return "UNKNOWN";
     }
+}
+
+bool WiFi_cancelAsyncConnect()
+{
+    if (WiFiTaskHandle)
+    {
+        vTaskDelete(WiFiTaskHandle);
+        WiFiTaskHandle = NULL;
+        return true;
+    }
+    else {
+        LOG_WARNING("WiFi", "No async WiFi connection task to cancel.");
+    }
+    return false;
 }
 #endif // NM_ENABLE_WIFI

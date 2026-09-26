@@ -81,6 +81,7 @@ time_t timestampOfNextOccurrence(const String &timeString);
 #define MINUTE 60
 #define SECOND 1
 #define DAY 24 * HOUR
-#define MS 1000
+#define IN_MS 1000
 #define MINUTE_MS 60 * MS
 #define HOUR_MS 60 * MINUTE_MS
+#define SECOND_MS 1000
