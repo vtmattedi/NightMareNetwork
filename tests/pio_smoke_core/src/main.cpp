@@ -87,6 +87,8 @@ void setup()
                                    ColourType::fromHSV(redHsv) == red;
     const bool colourForms = decodeColour("#FF0000", decodedColour) &&
                              decodedColour == red &&
+                             decodeColour("255", decodedColour) &&
+                             decodedColour == ColourType(0, 0, 255) &&
                              decodeColour("0xFF0000", decodedColour) &&
                              decodedColour == red &&
                              decodeColour("0xFF000080", decodedColour) &&

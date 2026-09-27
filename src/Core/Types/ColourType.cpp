@@ -193,9 +193,12 @@ ColourType ColourType::fromHSV(const NightMare::HSV &hsv)
 
 String encodeColour(const ColourType &colour)
 {
+    const uint32_t raw = colour.rawValue();
     char encoded[11];
-    snprintf(encoded, sizeof(encoded), "%lu",
-             static_cast<unsigned long>(colour.rawValue()));
+    if (static_cast<uint8_t>(raw) == 0xff)
+        snprintf(encoded, sizeof(encoded), "%lu", static_cast<unsigned long>(raw >> 8));
+    else
+        snprintf(encoded, sizeof(encoded), "#%08lX", static_cast<unsigned long>(raw));
     return String(encoded);
 }
 
@@ -223,9 +226,9 @@ bool decodeColour(const String &encoded, ColourType &colour)
     else
     {
         uint32_t raw = 0;
-        if (!parseDecimal(text, UINT32_MAX, raw))
+        if (!parseDecimal(text, 0xFFFFFF, raw))
             return false;
-        decoded = ColourType(raw);
+        decoded = ColourType((raw << 8) | 0xffU);
     }
 
     colour = decoded;

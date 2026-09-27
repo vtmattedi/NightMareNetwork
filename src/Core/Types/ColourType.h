@@ -61,9 +61,10 @@ private:
     uint32_t value_ = 0;
 };
 
-/// Canonical unsigned decimal representation of the packed 0xRRGGBBAA value.
+/// Opaque colours encode as the standard unsigned decimal 0xRRGGBB value.
+/// Colours with an explicit alpha encode as #RRGGBBAA.
 String encodeColour(const ColourType &colour);
 
-/// Accepts decimal raw values, #/0x RRGGBB or RRGGBBAA, rgb(), rgba(), and hsv().
+/// Accepts decimal 0xRRGGBB values, #/0x RRGGBB or RRGGBBAA, rgb(), rgba(), and hsv().
 /// Returns false and leaves `colour` unchanged when input is malformed or out of range.
 bool decodeColour(const String &encoded, ColourType &colour);
