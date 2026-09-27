@@ -1,3 +1,3 @@
 #pragma once
 
-#include <Core/ConfigManager.h>
+#include <Core/Config.h>

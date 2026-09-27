@@ -41,11 +41,19 @@ template <typename T>
 class Config
 {
 public:
-    explicit Config(const String &name, bool requireReboot = false);
+    Config(
+        const String &name,
+        const T &defaultValue,
+        bool requireReboot = false);
     const T &value() const;
     bool set(const T &value);
 };
 ```
+
+The firmware default is required and becomes the runtime value at construction.
+Construction also registers the object with `configManager()`; destruction
+unregisters it. Reboot metadata is the third argument, which keeps
+`Config<bool>` unambiguous.
 
 Metadata available through `ConfigBase`:
 
@@ -61,7 +69,7 @@ Manager and handler:
 using ConfigChangeHandler =
     bool (*)(const String &key, const String &value);
 
-extern ConfigManager gConfigManager;
+ConfigManager &configManager();
 
 bool bind(ConfigBase *config);
 bool unbind(ConfigBase *config);
@@ -70,6 +78,9 @@ void setChangeHandler(ConfigChangeHandler handler);
 bool buildManifestMsgPack(uint8_t *buffer, size_t capacity, size_t &written) const;
 String buildManifestBase64() const;
 ```
+
+`bind()` and `unbind()` remain available for explicit runtime use and retain
+their duplicate pointer/name and capacity checks.
 
 Limits and manifest versions:
 

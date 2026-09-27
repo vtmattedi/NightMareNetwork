@@ -607,7 +607,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         size_t configStart = configCommandEnd;
         while (configStart < message.length() && isTokenSeparator(message[configStart]))
             ++configStart;
-        result.response = gConfigManager.handle(message.substring(configStart));
+        result.response = configManager().handle(message.substring(configStart));
         result.result = !result.response.startsWith("ERROR:");
         return result;
     }

@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Config.h"
-
+#include <Arduino.h>
 #include <stddef.h>
 #include <stdint.h>
+
+class ConfigBase;
 
 constexpr size_t ConfigManagerMaxConfigs = 64;
 constexpr uint8_t ConfigManifestEncodingVersion = 1;
@@ -40,4 +41,11 @@ private:
     ConfigChangeHandler changeHandler_ = nullptr;
 };
 
-extern ConfigManager gConfigManager;
+/// @brief Process-wide Config registry. Function-local construction makes this
+/// safe to use from Config<T> constructors during static initialization.
+ConfigManager &configManager();
+
+// Preserve the original public include behavior: callers including only
+// ConfigManager.h still receive Config<T>. Include guards make the reciprocal
+// include from Config.h safe after ConfigManager is fully declared.
+#include "Config.h"

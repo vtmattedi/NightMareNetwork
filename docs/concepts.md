@@ -82,7 +82,8 @@ behaves, such as a retry interval, timeout, or calibration offset.
 Configs are not Resources. A Resource is observable or controllable functional
 state exposed to the network; a Config is a local input to application
 behavior. In version 1, Configs have typed values, command ingress, and a local
-declaration manifest, but no MQTT behavior or persistence.
+declaration manifest, but no MQTT behavior or persistence. Each declaration
+provides the firmware default used when the Config object is constructed.
 
 ## Value
 

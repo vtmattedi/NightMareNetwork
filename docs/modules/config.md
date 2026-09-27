@@ -13,31 +13,37 @@ freshness semantics.
 
 ## Declaration and registration
 
-Declare Configs as long-lived objects and bind them during setup:
+Declare Configs with the lifetime their availability should have. Construction
+automatically binds each object to the global manager, and destruction unbinds
+it:
 
 ```cpp
 #include <NightMare/Config.h>
 
-Config<uint32_t> maxDoorOpen("max_door_open_time");
-Config<bool> autoOffEnabled("auto_off_enabled");
-Config<uint32_t> restartRequiredOption("some_option", true);
-
-void setup()
-{
-    gConfigManager.bind(&maxDoorOpen);
-    gConfigManager.bind(&autoOffEnabled);
-    gConfigManager.bind(&restartRequiredOption);
-}
+Config<uint32_t> maxDoorOpen("max_door_open_time", 300000);
+Config<bool> autoOffEnabled("auto_off_enabled", true);
+Config<uint32_t> restartRequiredOption("some_option", 10, true);
 ```
 
-The manager stores non-owning pointers. A Config must outlive its binding.
-Names must be non-empty and contain no command whitespace; names and pointers
-may only be bound once. Up to 64 Configs may be bound.
+The manager stores non-owning pointers. Automatic unbinding makes scoped Configs
+safe. Names must be non-empty and contain no command whitespace; names and
+pointers may only be bound once. Up to 64 Configs may be bound. Failed automatic
+binding leaves the Config usable locally but absent from command ingress and the
+manifest.
+
+`configManager().bind()` and `configManager().unbind()` remain public for
+explicit runtime registration. A Config that is already auto-bound is rejected
+by `bind()` under the same duplicate pointer/name rules as any other binding.
+
+Every Config declares its firmware default in the constructor. That value is
+installed immediately and is what the application sees until a local or
+command-ingress write changes it. `require_reboot` is the optional third
+argument; this ordering avoids ambiguity for `Config<bool>`.
 
 ## Local access
 
 ```cpp
-const uint32_t current = maxDoorOpen.value();
+const uint32_t current = maxDoorOpen.value(); // 300000 initially
 maxDoorOpen.set(300000);
 ```
 
@@ -55,7 +61,7 @@ CONFIG SET max_door_open_time 300000
 CONFIG MANIFEST
 ```
 
-It redirects everything after `CONFIG` to `gConfigManager.handle(command)`,
+It redirects everything after `CONFIG` to `configManager().handle(command)`,
 whose direct API accepts the same command without the prefix:
 
 ```text
@@ -79,7 +85,7 @@ bool onConfigChange(const String &key, const String &rawValue)
     return true;
 }
 
-gConfigManager.setChangeHandler(onConfigChange);
+configManager().setChangeHandler(onConfigChange);
 ```
 
 Ingress first decodes the payload to the Config's declared type, then calls the

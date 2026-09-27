@@ -58,7 +58,7 @@ NightMareMessage parseNightMareMessage2(const String &message);
 /// `>drop name` unbinds a resource,
 /// `>raw topic payload` enters MQTT ingress, and `> name [get|set|invoke] [payload]` addresses
 /// a resource by its unique name.
-/// `CONFIG list|get|set|manifest` is routed directly to gConfigManager and
+/// `CONFIG list|get|set|manifest` is routed directly to configManager() and
 /// preserves the Config payload as one opaque String.
 /// @param message The raw command string, e.g. `"WIFI SCAN -s"`. Callers that only have a message
 /// string can omit context entirely, e.g. `handleNightMareCommand("PING")`.

@@ -1,5 +1,6 @@
 #include "ConfigManager.h"
 
+#include "Config.h"
 #include "DocumentPayload.h"
 
 #include <ArduinoJson.h>
@@ -90,7 +91,11 @@ String encodeBase64(const String &input)
 }
 }
 
-ConfigManager gConfigManager;
+ConfigManager &configManager()
+{
+    static ConfigManager instance;
+    return instance;
+}
 
 bool ConfigManager::bind(ConfigBase *config)
 {
@@ -105,6 +110,7 @@ bool ConfigManager::bind(ConfigBase *config)
     }
 
     configs_[configCount_++] = config;
+    config->bound_ = true;
     return true;
 }
 
@@ -119,6 +125,7 @@ bool ConfigManager::unbind(ConfigBase *config)
         for (size_t move = i + 1; move < configCount_; ++move)
             configs_[move - 1] = configs_[move];
         configs_[--configCount_] = nullptr;
+        config->bound_ = false;
         return true;
     }
     return false;

@@ -14,7 +14,7 @@ The parser and built-in command handler are shared. A command behaves as the sam
 ## Config commands
 
 The built-in command path routes the complete text after `CONFIG` directly to
-`gConfigManager.handle(...)`. The manager grammar is:
+`configManager().handle(...)`. The manager grammar is:
 
 ```text
 list
@@ -663,7 +663,7 @@ Switches between local and remote broker selection.
 
 ## CONFIG
 
-`CONFIG` addresses firmware-declared values bound to `gConfigManager`. It no
+`CONFIG` addresses firmware-declared values registered with `configManager()`. It no
 longer exposes the generic `PersistentSettings` store.
 
 ### List declarations

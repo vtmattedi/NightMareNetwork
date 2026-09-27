@@ -140,13 +140,14 @@ It also does not own the Resources themselves. The application owns the Resource
 ## ConfigManager
 
 `ConfigManager` is a separate local registry for application configuration
-parameters. The application owns each `Config<T>` and binds a non-owning
-pointer. The manager provides `list`, `get`, `set`, and `manifest` String
-ingress plus a compact MessagePack declaration manifest.
+parameters. The application owns each `Config<T>`; construction registers a
+non-owning pointer with the function-local global manager and destruction
+unregisters it. The manager provides `list`, `get`, `set`, and `manifest`
+String ingress plus a compact MessagePack declaration manifest.
 
 It has no connection to `ResourcesManager`, MQTT, persistence, or the platform
 lifecycle. The command layer routes its `CONFIG ...` namespace to
-`gConfigManager.handle(...)`; ConfigManager itself remains transport-neutral.
+`configManager().handle(...)`; ConfigManager itself remains transport-neutral.
 
 ## MQTT layers
 

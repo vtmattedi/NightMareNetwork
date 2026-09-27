@@ -1,11 +1,10 @@
 #pragma once
 
+#include "ConfigManager.h"
 #include "NetCodec.h"
 
-class ConfigManager;
-
 /// @brief Non-template metadata and command-ingress boundary for a Config<T>.
-/// Config objects are application-owned and must outlive their manager binding.
+/// Config objects are application-owned and unregister when destroyed.
 class ConfigBase
 {
 public:
@@ -21,6 +20,8 @@ protected:
     {
     }
 
+    bool bound_ = false;
+
 private:
     virtual String encodedValue() const = 0;
     virtual bool canDecodeEncodedValue(const String &payload) const = 0;
@@ -29,20 +30,27 @@ private:
     String name_;
     bool requireReboot_ = false;
     NetValueType valueType_ = NetValueType::STRING;
-
     friend class ConfigManager;
 };
 
 /// @brief A firmware-declared, typed local configuration value.
+/// Construction registers with configManager(); destruction unregisters.
 /// Local set() calls are direct assignments. Only ConfigManager command ingress
 /// invokes the optional global change handler.
 template <typename T>
 class Config : public ConfigBase
 {
 public:
-    explicit Config(const String &name, bool requireReboot = false)
-        : ConfigBase(name, requireReboot, NetCodec<T>::Type)
+    Config(const String &name, const T &defaultValue, bool requireReboot = false)
+        : ConfigBase(name, requireReboot, NetCodec<T>::Type), value_(defaultValue)
     {
+        bound_ = configManager().bind(this);
+    }
+
+    ~Config() override
+    {
+        if (bound_)
+            configManager().unbind(this);
     }
 
     const T &value() const { return value_; }

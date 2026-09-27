@@ -43,8 +43,8 @@ Cluster and namespace should not be treated as synonyms: a cluster is the Local 
 
 **Category:** Known limitation.
 
-`Config<T>` values currently return to their default-initialized firmware
-state after reboot. The Config Manager has no persistence layer, saved-key
+`Config<T>` values currently return to their constructor-declared firmware
+default after reboot. The Config Manager has no persistence layer, saved-key
 mapping, per-Config validation rules, or pending reboot-required state.
 
 `require_reboot` is declaration metadata only; an accepted command value is

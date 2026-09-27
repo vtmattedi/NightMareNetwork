@@ -23,9 +23,10 @@ device behavior but are not observable/controllable functional state. Giving
 them Resource topics, freshness, ownership, and publication semantics would
 misstate what they are.
 
-**Consequence:** Config v1 has typed local values, explicit registration,
-String command ingress, and a declaration manifest only. It has no MQTT,
-persistence, automatic reboot, or Resource integration.
+**Consequence:** Config v1 has typed local values, lifetime-based automatic
+registration, optional explicit manager operations, String command ingress,
+and a declaration manifest only. It has no MQTT, persistence, automatic reboot,
+or Resource integration.
 
 ## Runtime facts and pending framework work are separate
 

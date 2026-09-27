@@ -204,10 +204,10 @@ That is the contract the device exposes to other devices and tooling, so names s
 
 ### Config declarations and policy
 
-The application declares long-lived `Config<T>` objects, binds them to
-`gConfigManager`, and decides whether incoming changes are acceptable through
-the optional global handler. `require_reboot` is application/tooling metadata;
-the framework applies accepted values immediately and does not reboot.
+The application declares `Config<T>` objects, which register for their own
+lifetime, and decides whether incoming changes are acceptable through the
+optional handler on `configManager()`. `require_reboot` is application/tooling
+metadata; the framework applies accepted values immediately and does not reboot.
 
 ### Application-specific services
 
