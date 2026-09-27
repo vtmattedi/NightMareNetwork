@@ -71,9 +71,12 @@ public:
 
     bool set(const T &value)
     {
-        if (!configManager().persist(this, NetCodec<T>::encode(value)))
+        const String canonical = NetCodec<T>::encode(value);
+        T verified{};
+        if (!NetCodec<T>::decode(canonical, verified) ||
+            !configManager().persist(this, canonical))
             return false;
-        value_ = value;
+        value_ = verified;
         return true;
     }
 

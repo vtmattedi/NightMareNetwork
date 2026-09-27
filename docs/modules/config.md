@@ -34,7 +34,8 @@ The manager stores non-owning pointers. Automatic unbinding makes scoped Configs
 safe. Names must be non-empty and contain no command whitespace; names and
 pointers may only be bound once. Up to 64 Configs may be bound. Failed automatic
 binding leaves the value readable but absent from persistence, command ingress,
-and the manifest; its `set()` therefore returns `false`.
+and the manifest; its `set()` therefore returns `false`. This includes a Config
+whose immediate post-restore initialization cannot be persisted.
 
 `configManager().bind()` and `configManager().unbind()` remain public for
 explicit runtime registration. A Config that is already auto-bound is rejected
@@ -107,8 +108,16 @@ firmware default. Invalid saved values log a warning, restore the default, and
 replace the invalid storage entry. Restore does not invoke write handlers and
 is idempotent after success.
 
-Configs bound after a successful restore are not restored automatically. Bind
-normal application Configs before framework startup.
+Configs bound after a successful manager restore are restored individually
+before `bind()` returns. A valid saved value is immediately visible; a missing
+value causes the firmware default to be persisted. If that initialization
+fails, registration is undone and `bind()` returns `false`. This preserves the
+persistent Config invariant for dynamically created Configs without accessing
+the filesystem during static construction.
+
+Local writes also verify that the codec can decode its own canonical encoding
+before anything is persisted. A value whose encoding cannot be restored is
+rejected, protecting both built-in and future custom codecs.
 
 ## String ingress
 

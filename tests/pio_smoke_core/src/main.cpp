@@ -46,10 +46,14 @@ void setup()
     const String globalRejectKey = configPrefix + "persist_global_reject";
     const String timeKey = configPrefix + "persist_time";
     const String colourKey = configPrefix + "persist_colour";
+    const String lateRestoredKey = configPrefix + "persist_late_restored";
+    const String lateDefaultKey = configPrefix + "persist_late_default";
+    const String invalidLocalKey = configPrefix + "persist_invalid_local";
     const String failureKey = configPrefix + "persist_failure";
     const String persistenceKeys[] = {
         defaultKey, restoredKey, invalidKey, localKey, commandKey,
-        onWriteRejectKey, globalRejectKey, timeKey, colourKey, failureKey};
+        onWriteRejectKey, globalRejectKey, timeKey, colourKey, lateRestoredKey,
+        lateDefaultKey, invalidLocalKey, failureKey};
     for (const String &key : persistenceKeys)
         PersistentSettings.remove(key);
     PersistentSettings.set(restoredKey, "23");
@@ -93,7 +97,18 @@ void setup()
             globalRejected.value() == 8 && PersistentSettings.get(globalRejectKey) == "8";
         configManager().setChangeHandler(nullptr);
 
-        Config<int> persistenceFailure("persist_failure", 12);
+        PersistentSettings.set(lateRestoredKey, "73");
+        Config<int> lateRestored("persist_late_restored", 14);
+        Config<int> lateDefault("persist_late_default", 15);
+        const bool lateBindingRestored = lateRestored.value() == 73 &&
+                                         lateDefault.value() == 15 &&
+                                         PersistentSettings.get(lateDefaultKey) == "15";
+
+        Config<String> invalidLocal("persist_invalid_local", "valid");
+        const bool invalidLocalRejected = !invalidLocal.set("") &&
+                                          invalidLocal.value() == "valid" &&
+                                          PersistentSettings.get(invalidLocalKey) == "valid";
+
         for (size_t i = 0;
              i < RuntimeState::MaxEntries &&
              PersistentSettings.size() < RuntimeState::MaxEntries;
@@ -101,14 +116,18 @@ void setup()
             if (!PersistentSettings.RuntimeState::set(
                     String("_config_test_fill:") + String(i), "x"))
                 break;
+        const size_t countBeforeFailedBind = configManager().count();
+        Config<int> persistenceFailure("persist_failure", 12);
         const bool failurePreservedRuntime = !persistenceFailure.set(99) &&
                                              persistenceFailure.value() == 12 &&
-                                             !PersistentSettings.exists(failureKey);
+                                             !PersistentSettings.exists(failureKey) &&
+                                             configManager().count() == countBeforeFailedBind;
         PersistentSettings.load();
 
         configPersistence = restoredAll && bootValues && localPersisted &&
                             commandPersisted && onWriteRejectedCleanly &&
-                            globalRejectedCleanly && failurePreservedRuntime;
+                            globalRejectedCleanly && lateBindingRestored &&
+                            invalidLocalRejected && failurePreservedRuntime;
     }
     smokeState.setFlag("config_persistence", configPersistence);
 

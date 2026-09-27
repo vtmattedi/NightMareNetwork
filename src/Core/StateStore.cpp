@@ -6,6 +6,11 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
+namespace
+{
+constexpr char SettingsTempFile[] = "/configs.tmp";
+}
+
 StateStore PersistentSettings(true);
 
 bool StateStore::begin()
@@ -62,12 +67,34 @@ bool StateStore::save()
     if (!persistent_)
         return false;
     const String json = RuntimeState::toJson();
-    File file = LittleFS.open(SETTINGS_FILE, "w");
+
+    // Write a complete replacement before atomically moving it over the live
+    // file. A failed or partial write therefore leaves the previous durable
+    // settings document untouched.
+    if (LittleFS.exists(SettingsTempFile) && !LittleFS.remove(SettingsTempFile))
+        return false;
+    File file = LittleFS.open(SettingsTempFile, "w");
     if (!file)
         return false;
     const size_t written = file.print(json);
+    file.flush();
     file.close();
-    return written == json.length();
+    if (written != json.length())
+    {
+        LittleFS.remove(SettingsTempFile);
+        return false;
+    }
+
+    File verification = LittleFS.open(SettingsTempFile, "r");
+    const bool complete = verification && verification.size() == json.length();
+    if (verification)
+        verification.close();
+    if (!complete || !LittleFS.rename(SettingsTempFile, SETTINGS_FILE))
+    {
+        LittleFS.remove(SettingsTempFile);
+        return false;
+    }
+    return true;
 }
 
 bool StateStore::set(const String &key, const String &value)

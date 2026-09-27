@@ -42,7 +42,9 @@ misstate what they are.
 registration, startup restoration, optional explicit manager operations,
 String command ingress, and a declaration manifest only. It has no MQTT,
 automatic reboot, or Resource integration. Runtime-only application data
-continues to belong in an application-owned `RuntimeState`.
+continues to belong in an application-owned `RuntimeState`. Configs bound after
+startup restoration are initialized from persistence as part of binding, while
+pre-startup/static binding remains filesystem-free.
 
 ## Runtime facts and pending framework work are separate
 

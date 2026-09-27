@@ -47,8 +47,13 @@ It never accesses filesystem storage.
 Current capacity:
 
 ```cpp
-RuntimeState::MaxEntries == 64
+RuntimeState::MaxEntries == 128
 ```
+
+The persistent store shares this capacity with Config values. Sixty-four slots
+match `ConfigManagerMaxConfigs`; the other sixty-four provide explicit headroom
+for framework-private and application settings. Increasing the former requires
+increasing this capacity too and carries a corresponding RAM cost.
 
 ## Set
 
@@ -60,7 +65,7 @@ A key must be non-empty.
 
 Setting an existing key replaces its value.
 
-Adding a new key fails when the store already contains 64 entries.
+Adding a new key fails when the store already contains 128 entries.
 
 ## Get
 
@@ -288,6 +293,10 @@ serializes the current RuntimeState as JSON and writes:
 /configs.json
 ```
 
+The implementation first writes and verifies `/configs.tmp`, then renames that
+complete file over `/configs.json`. A failed or partial temporary write leaves
+the previous durable settings document in place.
+
 Because normal persistent `set()` and `remove()` already save, explicit save is mainly useful after an intentional in-memory-only mutation path.
 
 ## Explicit load
@@ -301,7 +310,7 @@ replaces the current in-memory entries with the file contents.
 Settings loading uses ArduinoJson 7's dynamically sized `JsonDocument`;
 there is no fixed 4096-byte parsing buffer.
 
-The RuntimeState entry limit of 64 still applies while loading, and allocation
+The RuntimeState entry limit of 128 still applies while loading, and allocation
 failure or invalid JSON causes the load to fail.
 
 ## Framework-private settings

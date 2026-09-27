@@ -43,6 +43,7 @@ public:
 private:
     ConfigBase *find(const String &name) const;
     static String storageKey(const String &name);
+    bool restoreOne(ConfigBase &config);
     bool persist(ConfigBase *config, const String &encodedValue);
     bool serializeManifest(String &payload) const;
     String list() const;

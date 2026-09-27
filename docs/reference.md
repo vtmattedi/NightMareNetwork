@@ -97,8 +97,9 @@ String buildManifestBase64() const;
 `bind()` and `unbind()` remain available for explicit runtime use and retain
 their duplicate pointer/name and capacity checks. `restore()` initializes the
 settings backend, restores all currently bound Configs, and is idempotent after
-success. Bind normal Configs before restore; later binds are not loaded
-automatically.
+success. A Config bound after successful restoration is restored individually
+before `bind()` returns; registration is rolled back if that initialization
+cannot complete.
 
 `handle("list")` returns JSON objects with `name`, `type`, `require_reboot`,
 and `value`. `value` is the Config's current canonical `NetCodec<T>` String
@@ -120,7 +121,8 @@ Config persistence uses reserved `_config:<name>` keys in
 `PersistentSettings` and canonical `NetCodec<T>` text. This storage mapping is
 an implementation detail and does not add a manifest field or version change.
 `NM_ENABLE_SETTINGS=0` is rejected at compile time because `Config<T>` is
-always persistent.
+always persistent. Local `set()` rejects values whose encoded representation
+cannot be decoded again.
 
 ## DeviceIdentity
 
@@ -841,8 +843,11 @@ void NightMareCommand_SerialResolver(
 Capacity:
 
 ```cpp
-RuntimeState::MaxEntries == 64
+RuntimeState::MaxEntries == 128
 ```
+
+The 128-entry store reserves capacity for all 64 Config slots plus 64 entries
+of framework/application settings headroom.
 
 Methods:
 
@@ -975,6 +980,10 @@ Current persistent file:
 ```text
 /configs.json
 ```
+
+`save()` writes and verifies `/configs.tmp` before atomically renaming it over
+the live file, preserving the previous durable document when the temporary
+write fails.
 
 Settings loading uses a dynamically sized ArduinoJson 7 `JsonDocument`;
 there is no fixed JSON load capacity.

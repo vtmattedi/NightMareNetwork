@@ -9,6 +9,9 @@
 #include <ArduinoJson.h>
 #include <string.h>
 
+static_assert(RuntimeState::MaxEntries >= ConfigManagerMaxConfigs * 2,
+              "PersistentSettings must reserve framework headroom beyond Config capacity");
+
 namespace
 {
 bool commandSpace(char value)
@@ -118,6 +121,12 @@ bool ConfigManager::bind(ConfigBase *config)
 
     configs_[configCount_++] = config;
     config->bound_ = true;
+    if (restored_ && !restoreOne(*config))
+    {
+        configs_[--configCount_] = nullptr;
+        config->bound_ = false;
+        return false;
+    }
     return true;
 }
 
@@ -160,6 +169,36 @@ bool ConfigManager::persist(ConfigBase *config, const String &encodedValue)
     return PersistentSettings.set(storageKey(config->name_), encodedValue);
 }
 
+bool ConfigManager::restoreOne(ConfigBase &config)
+{
+    const String key = storageKey(config.name_);
+    if (PersistentSettings.exists(key))
+    {
+        const String saved = PersistentSettings.get(key);
+        if (config.restoreEncodedValue(saved))
+            return true;
+
+        LOG_WARNING("CONFIG", "Invalid persisted value for %s; restoring firmware default",
+                    config.name_.c_str());
+    }
+
+    const String canonicalDefault = config.encodedDefaultValue();
+    if (!config.restoreEncodedValue(canonicalDefault))
+    {
+        config.restoreDefaultValue();
+        LOG_ERROR("CONFIG", "Firmware default for %s does not round-trip through its codec",
+                  config.name_.c_str());
+        return false;
+    }
+    if (!PersistentSettings.set(key, canonicalDefault))
+    {
+        LOG_ERROR("CONFIG", "Could not persist firmware default for %s",
+                  config.name_.c_str());
+        return false;
+    }
+    return true;
+}
+
 bool ConfigManager::restore()
 {
     if (restored_)
@@ -169,27 +208,8 @@ bool ConfigManager::restore()
 
     bool complete = true;
     for (size_t i = 0; i < configCount_; ++i)
-    {
-        ConfigBase &config = *configs_[i];
-        const String key = storageKey(config.name_);
-        if (PersistentSettings.exists(key))
-        {
-            const String saved = PersistentSettings.get(key);
-            if (config.restoreEncodedValue(saved))
-                continue;
-
-            LOG_WARNING("CONFIG", "Invalid persisted value for %s; restoring firmware default",
-                        config.name_.c_str());
-            config.restoreDefaultValue();
-        }
-
-        if (!PersistentSettings.set(key, config.encodedDefaultValue()))
-        {
-            LOG_ERROR("CONFIG", "Could not persist firmware default for %s",
-                      config.name_.c_str());
+        if (!restoreOne(*configs_[i]))
             complete = false;
-        }
-    }
 
     restored_ = complete;
     return complete;

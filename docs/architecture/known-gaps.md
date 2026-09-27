@@ -48,6 +48,11 @@ Every accepted `Config<T>` mutation is written synchronously through
 multi-Config transactions, delayed writes, per-Config persistence flags, or
 alternate persistence backends.
 
+The shared store currently reserves 128 entries: 64 for the maximum Config
+registry and 64 as deliberate framework/application headroom. This fixed
+capacity trades RAM for a clear minimum persistence guarantee; it is not an
+unbounded settings database.
+
 `require_reboot` remains declaration metadata only; an accepted command value
 is applied immediately and the manager takes no reboot action.
 

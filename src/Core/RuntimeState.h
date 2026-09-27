@@ -6,7 +6,9 @@
 class RuntimeState
 {
 public:
-    static constexpr size_t MaxEntries = 64;
+    // PersistentSettings shares this store with up to 64 Config declarations.
+    // Keep equal additional headroom for framework and application settings.
+    static constexpr size_t MaxEntries = 128;
     virtual ~RuntimeState() = default;
 
     virtual bool set(const String &key, const String &value);
