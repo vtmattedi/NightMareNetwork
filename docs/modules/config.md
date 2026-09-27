@@ -55,6 +55,26 @@ maxDoorOpen.set(300000);
 Local `set()` assigns the typed value directly. It does not call the ingress
 handler, persist, publish, or reboot.
 
+Each Config may also install a typed handler for ConfigManager writes:
+
+```cpp
+bool acceptPeriod(Config<int> &config, const int &requested)
+{
+    return requested >= 15 && requested <= 86400;
+}
+
+Config<int> heartbeatPeriod("heartbeat:period", 15);
+
+void setup()
+{
+    heartbeatPeriod.onWrite = acceptPeriod;
+}
+```
+
+Returning `false` rejects the write and leaves the current value unchanged.
+Like the global handler, `onWrite` is an ingress policy: a local `set()` does
+not invoke it.
+
 ## String ingress
 
 The common command path accepts:
@@ -76,9 +96,22 @@ set max_door_open_time 300000
 manifest
 ```
 
-`list` returns compact JSON declaration metadata. `get` returns the value in
-its `NetCodec<T>` text form. `set` treats everything after the name separator
-as the payload. `manifest` returns Base64 of the binary manifest.
+`list` returns compact JSON containing declaration metadata and each Config's
+current value in its canonical `NetCodec<T>` String form. `get` returns that
+same encoded value for one Config. `set` treats everything after the name
+separator as the payload. `manifest` returns Base64 of the declaration-only
+binary manifest.
+
+Example list item:
+
+```json
+{
+  "name": "heartbeat:period",
+  "type": "integer",
+  "require_reboot": false,
+  "value": "15"
+}
+```
 
 The application may install one global ingress handler:
 
@@ -93,9 +126,10 @@ bool onConfigChange(const String &key, const String &rawValue)
 configManager().setChangeHandler(onConfigChange);
 ```
 
-Ingress first decodes the payload to the Config's declared type, then calls the
-handler with the original payload, then commits the decoded value. Decode or
-handler failure leaves the current value unchanged.
+Ingress first decodes the payload to the Config's declared type, calls the
+global handler with the original payload, then calls that Config's typed
+`onWrite` handler when present. The decoded value is committed only after all
+steps accept it. Decode or handler failure leaves the current value unchanged.
 
 ## Manifest
 

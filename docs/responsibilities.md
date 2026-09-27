@@ -117,9 +117,11 @@ NightMare owns the standard device-level information surfaces:
 <device>/hardware
 <device>/telemetry/system
 <device>/telemetry/network
+<device>/telemetry/heartbeat
 ```
 
-These cover identity/presence, hardware/build information, runtime health, and network bookkeeping.
+These cover identity/presence, hardware/build information, runtime health,
+network bookkeeping, and an optional transient heartbeat.
 
 They intentionally do not duplicate application Resource state.
 
@@ -206,8 +208,9 @@ That is the contract the device exposes to other devices and tooling, so names s
 
 The application declares `Config<T>` objects, which register for their own
 lifetime, and decides whether incoming changes are acceptable through the
-optional handler on `configManager()`. `require_reboot` is application/tooling
-metadata; the framework applies accepted values immediately and does not reboot.
+optional global handler on `configManager()` and each Config's typed `onWrite`
+handler. `require_reboot` is application/tooling metadata; the framework
+applies accepted values immediately and does not reboot.
 
 ### Application-specific services
 

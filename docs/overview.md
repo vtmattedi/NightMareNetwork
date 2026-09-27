@@ -154,6 +154,9 @@ NightMare separates information by lifecycle.
 
 <device>/telemetry/network
     network bookkeeping
+
+<device>/telemetry/heartbeat
+    configurable, non-retained heartbeat
 ```
 
 Application sensor/state data does not belong in telemetry. It belongs in Resources, where it already has ownership and freshness semantics.

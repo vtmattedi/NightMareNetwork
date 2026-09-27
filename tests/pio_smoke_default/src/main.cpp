@@ -118,6 +118,24 @@ void setup()
     PersistentSettings.begin();
     PersistentSettings.setFlag("smoke", true);
     smokeState.setFlag("smoke", PersistentSettings.getFlag("smoke"));
+    const bool heartbeatDefaults =
+        configManager().handle("get heartbeat:enable") == "true" &&
+        configManager().handle("get heartbeat:period") == "15";
+    const bool heartbeatBounds =
+        configManager().handle("set heartbeat:period 14") == "ERROR: change rejected" &&
+        HeartbeatPeriod.value() == 15 &&
+        configManager().handle("set heartbeat:period 86400") == "OK" &&
+        HeartbeatPeriod.value() == 86400 &&
+        configManager().handle("set heartbeat:period 86401") == "ERROR: change rejected" &&
+        HeartbeatPeriod.value() == 86400 &&
+        configManager().handle("set heartbeat:period 15") == "OK";
+    const bool heartbeatToggle =
+        configManager().handle("set heartbeat:enable false") == "OK" &&
+        !HeartbeatEnabled.value() &&
+        configManager().handle("set heartbeat:enable true") == "OK" &&
+        HeartbeatEnabled.value();
+    smokeState.setFlag("heartbeat_config", heartbeatDefaults && heartbeatBounds &&
+                                                heartbeatToggle);
     managedState.onWrite = acceptStateWrite;
     const bool localStateUsesWritePolicy = managedState.setValue(7) && writeCalls == 1 &&
                                            managedState.getValue() == 7;

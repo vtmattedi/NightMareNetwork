@@ -37,8 +37,14 @@ namespace NightMare
 typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0, void *waitCallback(unsigned int) = nullptr);
+/// Connects without blocking. A failed attempt is retried after 15 seconds at
+/// the next supported transmit-power level until a connection succeeds or the
+/// task is cancelled. Keeping the task after connection also enables the same
+/// recovery behavior after a later disconnect.
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect = true);
 void WiFi_Disconnect();
+/// Connects asynchronously with the stored profile, keeps recovery monitoring
+/// active, and persists a transmit power discovered by the retry sequence.
 bool WiFi_Auto();
 void WiFi_Scan();
 bool WiFi_ChangeCredentials(const String &ssid, const String &password);
@@ -58,4 +64,5 @@ bool WiFi_setTxPower(int quarterDbm);
 float WiFi_getTxPowerDbm();
 bool WiFi_cancelAsyncConnect();
 extern int gTxPower; // the current tx power, in quarter-dBm, or NM_TX_POWER_AUTO if not set
+
 #endif // NM_ENABLE_WIFI

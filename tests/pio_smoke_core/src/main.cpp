@@ -5,6 +5,17 @@
 RuntimeState smokeState;
 Config<uint32_t> smokeConfig("smoke_config", 7);
 
+namespace
+{
+int configCallbackValue = 0;
+
+bool acceptPositiveConfig(Config<int> &, const int &requested)
+{
+    configCallbackValue = requested;
+    return requested > 0;
+}
+}
+
 static_assert(NetCodec<TimeType>::Type == NetValueType::TIME,
               "TimeType must have a first-class wire type");
 static_assert(NetCodec<ColourType>::Type == NetValueType::COLOUR,
@@ -44,6 +55,32 @@ void setup()
                                          configManager().count() == staticCount;
     smokeState.setFlag("config_lifecycle", staticAutoBound && scopedLifecycle &&
                                                scopedAutoUnbound && failedAutoBindStaysLocal);
+
+    Config<int> callbackConfig("callback_config", 5);
+    callbackConfig.onWrite = acceptPositiveConfig;
+    const bool managerCallbackAccepted =
+        configManager().handle("set callback_config 9") == "OK" &&
+        callbackConfig.value() == 9 && configCallbackValue == 9;
+    const bool managerCallbackRejected =
+        configManager().handle("set callback_config -2") == "ERROR: change rejected" &&
+        callbackConfig.value() == 9 && configCallbackValue == -2;
+    configCallbackValue = 0;
+    callbackConfig.set(12);
+    const bool localSetBypassesCallback = callbackConfig.value() == 12 &&
+                                          configCallbackValue == 0;
+    JsonDocument configList;
+    const bool configListDecoded =
+        !deserializeJson(configList, configManager().handle("list"));
+    bool currentStateListed = false;
+    for (JsonObjectConst item : configList.as<JsonArrayConst>())
+        if (item["name"].as<String>() == "callback_config")
+            currentStateListed = item["type"].as<String>() == "integer" &&
+                                 item["value"].as<String>() == "12" &&
+                                 !item["require_reboot"].as<bool>();
+    smokeState.setFlag("config_on_write", managerCallbackAccepted &&
+                                              managerCallbackRejected &&
+                                              localSetBypassesCallback &&
+                                              configListDecoded && currentStateListed);
 
     TimeType decodedTime(1, 2, 3);
     const bool timeDefaults = TimeType() == TimeType(0, 0, 0) &&

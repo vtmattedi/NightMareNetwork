@@ -18,9 +18,58 @@ namespace
 {
     constexpr char SystemJob[] = "nm.telemetry.system";
     constexpr char NetworkJob[] = "nm.telemetry.network";
+    constexpr char HeartbeatJob[] = "nm.telemetry.heartbeat";
+    bool telemetrySchedulingStarted = false;
+
+    bool validHeartbeatPeriod(int seconds)
+    {
+        return seconds >= HeartbeatMinPeriodSeconds &&
+               seconds <= HeartbeatMaxPeriodSeconds;
+    }
+
+    void publishHeartbeat()
+    {
+        if (HeartbeatEnabled.value())
+            Telemetry.publishInfo(InfoType::HEARTBEAT);
+    }
+
+    bool installHeartbeatJob(int seconds)
+    {
+        return validHeartbeatPeriod(seconds) &&
+               gScheduler.everyMonotonic(HeartbeatJob, publishHeartbeat,
+                                         static_cast<uint32_t>(seconds) * 1000UL) >= 0;
+    }
+
+    bool changeHeartbeatEnabled(Config<bool> &config, const bool &requested)
+    {
+        if (!telemetrySchedulingStarted || requested == config.value())
+            return true;
+        if (requested)
+            return installHeartbeatJob(HeartbeatPeriod.value());
+        return gScheduler.remove(HeartbeatJob);
+    }
+
+    bool changeHeartbeatPeriod(Config<int> &config, const int &requested)
+    {
+        if (!validHeartbeatPeriod(requested))
+            return false;
+        if (!telemetrySchedulingStarted || !HeartbeatEnabled.value() ||
+            requested == config.value())
+            return true;
+
+        if (!gScheduler.remove(HeartbeatJob))
+            return false;
+        if (installHeartbeatJob(requested))
+            return true;
+
+        installHeartbeatJob(config.value());
+        return false;
+    }
+
     void optional(JsonObject object, const char *key, const char *value)
     {
-        if (value != nullptr && value[0] != '\0') object[key] = value;
+        if (value != nullptr && value[0] != '\0')
+            object[key] = value;
     }
 
     void appendEndpoint(JsonObject dst, const NMHardware::EndpointRef &endpoint)
@@ -44,7 +93,8 @@ namespace
             optional(item, "color", wire.color);
             optional(item, "gauge", wire.gauge);
             optional(item, "label", wire.label);
-            if (wire.lengthMm != 0) item["length_mm"] = wire.lengthMm;
+            if (wire.lengthMm != 0)
+                item["length_mm"] = wire.lengthMm;
         }
     }
 
@@ -115,7 +165,7 @@ namespace
             appendConnection(connections.add<JsonObject>(), members.connections[i]);
     }
 
-    // The retained topic of each document; null for sections that have none.
+    // The MQTT topic of each publishable document; null for query-only sections.
     const char *documentTopic(InfoType type)
     {
         switch (type)
@@ -124,6 +174,8 @@ namespace
             return "info";
         case InfoType::SYSTEM:
             return "telemetry/system";
+        case InfoType::HEARTBEAT:
+            return "telemetry/heartbeat";
         case InfoType::NETWORK:
             return "telemetry/network";
         default:
@@ -133,6 +185,22 @@ namespace
 }
 
 TelemetryService Telemetry;
+Config<bool> HeartbeatEnabled("heartbeat:enable", true);
+Config<int> HeartbeatPeriod("heartbeat:period", HeartbeatMinPeriodSeconds);
+
+namespace
+{
+struct HeartbeatConfigHandlerInstaller
+{
+    HeartbeatConfigHandlerInstaller()
+    {
+        HeartbeatEnabled.onWrite = changeHeartbeatEnabled;
+        HeartbeatPeriod.onWrite = changeHeartbeatPeriod;
+    }
+};
+
+HeartbeatConfigHandlerInstaller heartbeatConfigHandlerInstaller;
+}
 
 InfoType getInfoType(const String &type)
 {
@@ -150,6 +218,7 @@ InfoType getInfoType(const String &type)
         {"BUILD", InfoType::BUILD},
         {"BOOT", InfoType::BOOT},
         {"SYSTEM", InfoType::SYSTEM},
+        {"HEARTBEAT", InfoType::HEARTBEAT},
         {"NETWORK", InfoType::NETWORK},
     };
     for (const Entry &entry : entries)
@@ -162,16 +231,23 @@ bool TelemetryService::start()
 {
     if (started_)
         return true;
-    if (gScheduler.everyMonotonic(SystemJob, []() { Telemetry.publishInfo(InfoType::SYSTEM); },
-                                  NM_TELEMETRY_INTERVAL_MS) < 0)
+    if (gScheduler.everyMonotonic(SystemJob, []()
+                                  { Telemetry.publishInfo(InfoType::SYSTEM); }, NM_TELEMETRY_INTERVAL_MS) < 0)
         return false;
-    if (gScheduler.everyMonotonic(NetworkJob, []() { Telemetry.publishInfo(InfoType::NETWORK); },
-                                  NM_NETWORK_TELEMETRY_INTERVAL_MS) < 0)
+    if (gScheduler.everyMonotonic(NetworkJob, []()
+                                  { Telemetry.publishInfo(InfoType::NETWORK); }, NM_NETWORK_TELEMETRY_INTERVAL_MS) < 0)
     {
         // Leave nothing half-installed, or a retry would trip over its own label.
         gScheduler.remove(SystemJob);
         return false;
     }
+    if (HeartbeatEnabled.value() && !installHeartbeatJob(HeartbeatPeriod.value()))
+    {
+        gScheduler.remove(NetworkJob);
+        gScheduler.remove(SystemJob);
+        return false;
+    }
+    telemetrySchedulingStarted = true;
     started_ = true;
     return true;
 }
@@ -315,13 +391,16 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     case InfoType::NETWORK:
         appendNetwork(doc.to<JsonObject>());
         break;
+    case InfoType::HEARTBEAT:
+        doc["uptime_ms"] = millis();
+        doc["heartbeat"] = heartbeatCounter_ + 1;
+        break;
     case InfoType::INVALID:
         return result;
     }
     // An ArduinoJson 7 document has no fixed capacity, but it can still lose a
     // value to a failed allocation, and a non-empty payload is no evidence that
-    // it did not. These documents are retained, so a half-built one would be
-    // read as this device's description until something replaced it.
+    // it did not. A partial document must never be published, retained or not.
     const PayloadResult outcome = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
     result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
@@ -339,11 +418,18 @@ TelemetryResult TelemetryService::getInfo(const String &type) const
 
 bool TelemetryService::publishInfo(InfoType type)
 {
+    if (type == InfoType::HEARTBEAT && !HeartbeatEnabled.value())
+        return false;
     const char *topic = documentTopic(type);
     if (topic == nullptr)
         return false;
     const TelemetryResult info = getInfo(type);
-    return info.valid && MQTT_Publish(topic, info.data, true, true);
+    const bool published = info.valid &&
+                           MQTT_Publish(topic, info.data, true,
+                                        type != InfoType::HEARTBEAT);
+    if (published && type == InfoType::HEARTBEAT)
+        ++heartbeatCounter_;
+    return published;
 }
 
 bool TelemetryService::publishInfo(const String &type)
@@ -373,7 +459,7 @@ TelemetryResult TelemetryService::getHardware() const
     result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
         LOG_WARNING("TEL", "Not publishing the hardware document (%u bytes): %s "
-                          "(8bit heap free=%u largest=%u)",
+                           "(8bit heap free=%u largest=%u)",
                     (unsigned)measured,
                     describePayloadResult(outcome),
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
@@ -394,7 +480,8 @@ bool TelemetryService::publishAll()
     const bool hardware = publishHardware();
     const bool system = publishInfo(InfoType::SYSTEM);
     const bool network = publishInfo(InfoType::NETWORK);
-    return info && hardware && system && network;
+    const bool heartbeat = !HeartbeatEnabled.value() || publishInfo(InfoType::HEARTBEAT);
+    return info && hardware && system && network && heartbeat;
 }
 
 #endif // NM_ENABLE_TELEMETRY

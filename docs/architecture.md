@@ -208,6 +208,7 @@ Current retained families include:
 <device>/hardware
 <device>/telemetry/system
 <device>/telemetry/network
+<device>/telemetry/heartbeat
 <device>/manifest
 <device>/manifest/msgpack
 <device>/manifest/consume
@@ -338,6 +339,9 @@ Telemetry is separated by lifecycle rather than by every possible category.
 
 /telemetry/network
     slower network bookkeeping
+
+/telemetry/heartbeat
+    configurable transient heartbeat
 ```
 
 The individual static info sections remain queryable through the INFO API without multiplying retained MQTT topics.

@@ -386,6 +386,10 @@ Current retained documents are:
 
 System telemetry covers runtime health such as uptime and heap information.
 
+The separate `<device>/telemetry/heartbeat` stream is non-retained and has a
+runtime-configurable enabled state and period. It is advisory; retained status
+plus Last Will remains the authoritative device-presence mechanism.
+
 Network telemetry covers slower-changing network state such as WiFi connectivity, IP, RSSI, MQTT connectivity, and which broker is active.
 
 Application sensor state belongs to Resources instead.

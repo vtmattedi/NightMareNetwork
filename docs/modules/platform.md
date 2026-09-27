@@ -384,7 +384,12 @@ DEFAULT_SSID
 DEFAULT_PASSWORD
 ```
 
-Then it starts an asynchronous connection using the stored values.
+Then it starts an asynchronous connection using the stored values. If an
+attempt remains disconnected for 15 seconds, the asynchronous task retries at
+the next transmit-power level supported by the ESP32 driver. When one of those
+fallback levels connects, `WiFi_Auto()` persists it with the rest of the WiFi
+profile. Its recovery task remains active after connection so a later loss uses
+the same retry sequence.
 
 ## WiFi hostname and identity
 
@@ -415,6 +420,13 @@ core:      tskNO_AFFINITY
 ```
 
 Using no fixed core allows the same code to run on single-core ESP variants such as C3/C6/H2/S2.
+
+The task owns copies of the supplied SSID and password. A disconnected attempt
+is retried every 15 seconds while cycling through the driver's supported
+transmit-power levels. With `deleteAfterConnect == true`, the task exits after
+the first connection. With `false`, it remains active and applies the same
+recovery sequence after a later disconnect. Direct `WiFi_ConnectAsync()` calls
+do not persist a fallback power; that persistence is specific to `WiFi_Auto()`.
 
 ## First WiFi connection
 

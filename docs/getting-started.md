@@ -668,6 +668,7 @@ living-room/status
 living-room/info
 living-room/telemetry/system
 living-room/telemetry/network
+living-room/telemetry/heartbeat
 living-room/manifest
 living-room/resource/temperature/state
 living-room/resource/power/state
