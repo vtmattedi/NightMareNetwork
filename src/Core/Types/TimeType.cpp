@@ -97,13 +97,13 @@ bool decodeTime(const String &encoded, TimeType &time)
     return true;
 }
 
-bool TimeType::matches(const time_t &epoch, bool include_seconds)
+bool TimeType::matches(const time_t &epoch, bool include_seconds) const
 {
     struct tm tm;
     localtime_r(&epoch, &tm);
-    if (tm.tm_hour != time.hour() || tm.tm_min != time.minute())
+    if (tm.tm_hour != hours_ || tm.tm_min != minutes_)
         return false;
-    if (include_seconds && tm.tm_sec != time.second())
+    if (include_seconds && tm.tm_sec != seconds_)
         return false;
     return true;
 }
