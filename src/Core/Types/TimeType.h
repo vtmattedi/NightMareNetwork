@@ -1,21 +1,34 @@
-class TimeType {
-private:
-    int hours_;
-    int minutes_;
-    int seconds_;
+#pragma once
+
+#include <Arduino.h>
+
+/// @brief A valid local time of day. It has no date, timezone, epoch, or
+/// duration semantics.
+class TimeType
+{
 public:
-    TimeType(int h, int m, int s);
-    TimeType(const String &timeStr);
-    TimeType(const time_t &epochTime = now());
+    TimeType() = default;
+    /// Out-of-range components produce the deterministic default 00:00:00.
+    TimeType(uint8_t hour, uint8_t minute, uint8_t second = 0);
+
+    uint8_t hour() const { return hours_; }
+    uint8_t minute() const { return minutes_; }
+    uint8_t second() const { return seconds_; }
+
     String toString() const;
-    TimeType &operator=(const TimeType &other);
+
     bool operator==(const TimeType &other) const;
-    bool operator==(const time_t &other) const;
+    bool operator!=(const TimeType &other) const { return !(*this == other); }
+
+private:
+    uint8_t hours_ = 0;
+    uint8_t minutes_ = 0;
+    uint8_t seconds_ = 0;
 };
-// Codec
-// Converts a TimeType to a string representation in the format: HH:MM:SS
-// Same as TimeType::toString(), but static and can be used without an instance of TimeType.
+
+/// Canonical `HH:MM:SS` representation.
 String encodeTime(const TimeType &time);
-// Converts a string representation of a time into a TimeType object.
-// Supported formats: HH:MM:SS, HH:MM, HHMMSS, HHMM, H:M:S, H:M
-bool decodeTime(const String &timeStr, TimeType &time);
+
+/// Accepts HH:MM:SS, HH:MM, HHMMSS, HHMM, H:M:S, and H:M.
+/// Returns false and leaves `time` unchanged when input is malformed or out of range.
+bool decodeTime(const String &encoded, TimeType &time);

@@ -395,6 +395,8 @@ boolean
 integer
 float
 struct
+time
+colour
 ```
 
 The built-in `NetCodec<T>` implementations currently cover:
@@ -404,6 +406,8 @@ String
 bool
 integral C++ types
 floating-point C++ types
+TimeType
+ColourType
 ```
 
 `struct` exists in the wire taxonomy and Action argument metadata, but there is no generic built-in `NetCodec<T>` that silently serializes arbitrary C++ structs.
@@ -483,6 +487,30 @@ cool
 There is no JSON quoting added by the Resource protocol.
 
 An empty String is not a valid Resource String value because the empty MQTT payload is reserved as the retained deletion marker.
+
+### Time
+
+`TimeType` represents local time of day only. Canonical encoding is:
+
+```text
+HH:MM:SS
+```
+
+Decoding additionally accepts `HH:MM`, `HHMMSS`, `HHMM`, `H:M:S`, and `H:M`.
+Hours must be 0–23 and minutes/seconds 0–59. It carries no date, epoch,
+duration, timezone, or UTC meaning.
+
+### Colour
+
+`ColourType` packs RGBA as `0xRRGGBBAA`; an RGB form implies alpha 255. The
+canonical wire encoding is the raw unsigned 32-bit value in decimal.
+
+Decoding also accepts `0xRRGGBB`, `#RRGGBB`, `0xRRGGBBAA`, `#RRGGBBAA`,
+`rgb(r,g,b)`, `rgba(r,g,b,a)`, and `hsv(h,s,v)`. Function components use the
+byte range 0–255; HSV hue wraps across the same byte range.
+
+Appending `time` and `colour` to `NetValueType` preserves all earlier numeric
+enum values, so the compact manifest encoding version remains unchanged.
 
 ## State freshness
 
@@ -738,6 +766,12 @@ float
 
 string
     JSON string
+
+time
+    JSON string
+
+colour
+    JSON unsigned integer or string
 
 struct
     JSON object or array

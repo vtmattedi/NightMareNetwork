@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <type_traits>
 
+#include "Types/ColourType.h"
+#include "Types/TimeType.h"
+
 // Wire taxonomy for values. It lives here, next to the T -> NetValueType
 // mapping, so NetResources.h can include this header without a cycle. Actions
 // reuse it to describe their argument types at runtime.
@@ -17,7 +20,9 @@ enum class NetValueType : uint8_t
     BOOLEAN,
     INTEGER,
     FLOAT,
-    STRUCT
+    STRUCT,
+    TIME,
+    COLOUR
 };
 
 /// @brief Translates a value between its C++ type and the String used on the
@@ -198,5 +203,29 @@ struct NetCodec<String>
             return false;
         out = encoded;
         return true;
+    }
+};
+
+template <>
+struct NetCodec<TimeType>
+{
+    static constexpr NetValueType Type = NetValueType::TIME;
+
+    static String encode(const TimeType &value) { return encodeTime(value); }
+    static bool decode(const String &encoded, TimeType &out)
+    {
+        return decodeTime(encoded, out);
+    }
+};
+
+template <>
+struct NetCodec<ColourType>
+{
+    static constexpr NetValueType Type = NetValueType::COLOUR;
+
+    static String encode(const ColourType &value) { return encodeColour(value); }
+    static bool decode(const String &encoded, ColourType &out)
+    {
+        return decodeColour(encoded, out);
     }
 };

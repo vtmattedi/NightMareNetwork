@@ -672,6 +672,8 @@ bool
 integral types
 floating-point types
 String
+TimeType
+ColourType
 ```
 
 Manifest wire types are:
@@ -682,7 +684,14 @@ integer
 float
 string
 struct
+time
+colour
 ```
+
+`TimeType` canonically encodes local time of day as `HH:MM:SS`.
+`ColourType` canonically encodes its packed `0xRRGGBBAA` value as unsigned
+decimal text. These are ordinary typed Values and use the same state, write,
+freshness, and manifest paths as every other `NetValue<T>`.
 
 Unsupported C++ Value types fail to compile unless the project provides an appropriate codec specialization.
 

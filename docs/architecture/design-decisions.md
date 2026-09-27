@@ -13,6 +13,21 @@ This page records decisions that might otherwise look arbitrary when reading the
 
 Each entry states the decision, why it exists, and what it costs.
 
+## NetCodec remains the single typed Value boundary
+
+**Decision:** semantic value types such as `TimeType` and `ColourType` integrate
+as ordinary `NetCodec<T>` specializations and append their identifiers to
+`NetValueType`.
+
+**Reason:** Config and Resources already share one typed-to-String boundary.
+A second semantic codec registry would duplicate dispatch and let the two
+surfaces disagree about the same C++ value.
+
+**Consequence:** both types work through existing Config and Resource paths.
+Their canonical wire forms are fixed by their codecs, existing enum numbers
+remain stable, and no manifest encoding-version bump or transport-specific
+handling is required.
+
 ## Configs are local parameters, not Resources
 
 **Decision:** firmware parameters use the independent local `ConfigManager`;

@@ -23,6 +23,8 @@ it:
 Config<uint32_t> maxDoorOpen("max_door_open_time", 300000);
 Config<bool> autoOffEnabled("auto_off_enabled", true);
 Config<uint32_t> restartRequiredOption("some_option", 10, true);
+Config<TimeType> quietStart("quiet_start", TimeType(22, 30));
+Config<ColourType> statusColour("status_colour", ColourType(255, 0, 0));
 ```
 
 The manager stores non-owning pointers. Automatic unbinding makes scoped Configs
@@ -39,6 +41,9 @@ Every Config declares its firmware default in the constructor. That value is
 installed immediately and is what the application sees until a local or
 command-ingress write changes it. `require_reboot` is the optional third
 argument; this ordering avoids ambiguity for `Config<bool>`.
+
+The built-in typed surface includes `TimeType` and `ColourType` through the
+same `NetCodec<T>` path as primitive types. No Config-specific encoding exists.
 
 ## Local access
 

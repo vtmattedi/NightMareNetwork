@@ -54,6 +54,8 @@ static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
               "NetValue is an implementation base, not an application resource");
 
 ManagedSensor<int> managedSensor("managed_sensor");
+ManagedSensor<TimeType> managedTime("managed_time");
+ManagedSensor<ColourType> managedColour("managed_colour");
 RemoteSensor<int> remoteSensor("outside_temperature");
 RemoteSensor<int> otherTemperature("temperature", NetDeviceIdentity("inside-node"));
 ManagedState<int> managedState("managed_state");
@@ -120,10 +122,14 @@ void setup()
     const bool localStateUsesWritePolicy = managedState.setValue(7) && writeCalls == 1 &&
                                            managedState.getValue() == 7;
     managedSensor.setValue(3);
+    managedTime.setValue(TimeType(8, 30, 15));
+    managedColour.setValue(ColourType(255, 0, 0));
     remoteSensor.setSource("outside-node", "temperature");
     remoteState.setSource("outside-node", "target");
     remoteAction.setSource("outside-node", "remote_action");
     gResourcesManager.bindResource(&managedSensor);
+    gResourcesManager.bindResource(&managedTime);
+    gResourcesManager.bindResource(&managedColour);
     gResourcesManager.bindResource(&remoteSensor);
     gResourcesManager.bindResource(&otherTemperature);
     gResourcesManager.bindResource(&managedState);
@@ -175,11 +181,21 @@ void setup()
     const ActionResult local = gResourcesManager.executeCommand(" outside_temperature");
     const ActionResult qualified =
         gResourcesManager.executeCommand(" outside-node/temperature");
+    const ActionResult timeValue = gResourcesManager.executeCommand(" managed_time");
+    const ActionResult colourValue = gResourcesManager.executeCommand(" managed_colour");
+    const ActionResult customManifest = gResourcesManager.executeCommand("manifest json");
     const bool resourceCommandsWork = list.success && list.result.startsWith("TYPE") &&
                                       list.result.indexOf("VALUE") >= 0 &&
                                       list.result.indexOf("outside_temperature") >= 0 &&
                                       local.success && local.result == "18" &&
                                       qualified.success && qualified.result == "18";
+    const bool customResourcesWork = managedTime.type() == NetValueType::TIME &&
+                                     managedColour.type() == NetValueType::COLOUR &&
+                                     timeValue.success && timeValue.result == "08:30:15" &&
+                                     colourValue.success && colourValue.result == "4278190335" &&
+                                     customManifest.success &&
+                                     customManifest.result.indexOf("\"type\":\"time\"") >= 0 &&
+                                     customManifest.result.indexOf("\"type\":\"colour\"") >= 0;
     smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&
                                             managedSensor.owner().length() != 0 &&
@@ -188,7 +204,7 @@ void setup()
                                             !managedSensor.isRemote() && remoteSensor.isRemote() &&
                                             remoteSensor.hasValue() && !remoteSensor.isStale() &&
                                             resourceCommandsWork && consumeCodecWorks &&
-                                            consumeLifecycleWorks);
+                                            consumeLifecycleWorks && customResourcesWork);
     const String timezone = gDeviceIdentity.getTimezone();
     const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");
     const NightMareResults timezoneSet =

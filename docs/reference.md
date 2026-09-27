@@ -33,8 +33,8 @@ Config-only include:
 
 ## Config
 
-Supported types are the primitive `NetCodec<T>` types: `bool`, integral types,
-floating-point types, and `String`.
+Supported types are the built-in `NetCodec<T>` types: `bool`, integral types,
+floating-point types, `String`, `TimeType`, and `ColourType`.
 
 ```cpp
 template <typename T>
@@ -289,7 +289,9 @@ enum class NetValueType : uint8_t
     BOOLEAN,
     INTEGER,
     FLOAT,
-    STRUCT
+    STRUCT,
+    TIME,
+    COLOUR
 };
 ```
 
@@ -300,6 +302,35 @@ String
 bool
 integral types except bool
 floating-point types
+TimeType
+ColourType
+```
+
+`TimeType` API:
+
+```cpp
+TimeType();
+TimeType(uint8_t hour, uint8_t minute, uint8_t second = 0);
+uint8_t hour() const;
+uint8_t minute() const;
+uint8_t second() const;
+String toString() const;
+```
+
+Out-of-range constructor components produce `00:00:00`; `decodeTime()` instead
+reports failure and leaves its output unchanged.
+
+`ColourType` stores `0xRRGGBBAA` and exposes:
+
+```cpp
+ColourType();
+explicit ColourType(uint32_t value);
+ColourType(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+uint32_t rawValue() const;
+RGB toRGB() const;
+RGBA toRGBA() const;
+HSV toHSV() const;
+static ColourType fromHSV(const HSV &hsv);
 ```
 
 ## Action metadata

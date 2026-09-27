@@ -57,6 +57,10 @@ const char *valueTypeName(NetValueType type)
         return "integer";
     case NetValueType::FLOAT:
         return "float";
+    case NetValueType::TIME:
+        return "time";
+    case NetValueType::COLOUR:
+        return "colour";
     case NetValueType::STRING:
         return "string";
     case NetValueType::STRUCT:

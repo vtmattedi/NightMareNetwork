@@ -672,7 +672,7 @@ longer exposes the generic `PersistentSettings` store.
 CONFIG LIST
 ```
 
-Returns compact JSON containing each Config's name, primitive type, and
+Returns compact JSON containing each Config's name, wire type, and
 `require_reboot` metadata.
 
 ### Read one Config

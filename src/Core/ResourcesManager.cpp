@@ -144,6 +144,10 @@ namespace
             return "integer";
         case NetValueType::FLOAT:
             return "float";
+        case NetValueType::TIME:
+            return "time";
+        case NetValueType::COLOUR:
+            return "colour";
         case NetValueType::STRUCT:
             return "struct";
         case NetValueType::STRING:
@@ -165,6 +169,10 @@ namespace
             return value.is<double>() || value.is<long long>();
         case NetValueType::STRING:
             return value.is<const char *>();
+        case NetValueType::TIME:
+            return value.is<const char *>();
+        case NetValueType::COLOUR:
+            return value.is<unsigned long long>() || value.is<const char *>();
         case NetValueType::STRUCT:
             return value.is<JsonObjectConst>() || value.is<JsonArrayConst>();
         }

@@ -111,6 +111,18 @@ and is retained.
 
 An empty retained payload is a tombstone: it deletes the retained Value state. Empty String is therefore not a valid Resource String value.
 
+### TimeType
+
+`TimeType` is a local time of day containing hour, minute, and second. It has
+no date, epoch, duration, UTC, or timezone semantics. Its canonical wire form
+is `HH:MM:SS`.
+
+### ColourType
+
+`ColourType` is an RGBA colour packed as `0xRRGGBBAA`. Its canonical wire form
+is the packed unsigned 32-bit value in decimal. RGB inputs use alpha 255; HSV
+components use the byte range 0 through 255.
+
 ## Action
 
 An **Action** represents an operation rather than stored state.
