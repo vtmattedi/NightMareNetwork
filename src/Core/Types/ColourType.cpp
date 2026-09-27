@@ -104,26 +104,26 @@ ColourType::ColourType(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
 }
 
-RGB ColourType::toRGB() const
+NightMare::RGB ColourType::toRGB() const
 {
     return {static_cast<uint8_t>(value_ >> 24), static_cast<uint8_t>(value_ >> 16),
             static_cast<uint8_t>(value_ >> 8)};
 }
 
-RGBA ColourType::toRGBA() const
+NightMare::RGBA ColourType::toRGBA() const
 {
     return {static_cast<uint8_t>(value_ >> 24), static_cast<uint8_t>(value_ >> 16),
             static_cast<uint8_t>(value_ >> 8), static_cast<uint8_t>(value_)};
 }
 
-HSV ColourType::toHSV() const
+NightMare::HSV ColourType::toHSV() const
 {
-    const RGB rgb = toRGB();
+    const NightMare::RGB rgb = toRGB();
     const uint8_t maximum = max(rgb.r, max(rgb.g, rgb.b));
     const uint8_t minimum = min(rgb.r, min(rgb.g, rgb.b));
     const uint8_t delta = maximum - minimum;
 
-    HSV hsv{};
+    NightMare::HSV hsv{};
     hsv.v = maximum;
     hsv.s = maximum == 0 ? 0 : static_cast<uint8_t>(lroundf(delta * 255.0f / maximum));
     if (delta == 0)
@@ -142,7 +142,7 @@ HSV ColourType::toHSV() const
     return hsv;
 }
 
-ColourType ColourType::fromHSV(const HSV &hsv)
+ColourType ColourType::fromHSV(const NightMare::HSV &hsv)
 {
     const float hue = fmodf(hsv.h * 360.0f / 255.0f, 360.0f);
     const float saturation = hsv.s / 255.0f;
@@ -219,7 +219,7 @@ bool decodeColour(const String &encoded, ColourType &colour)
     else if (parseComponents(text, "rgba", 4, values))
         decoded = ColourType(values[0], values[1], values[2], values[3]);
     else if (parseComponents(text, "hsv", 3, values))
-        decoded = ColourType::fromHSV({values[0], values[1], values[2]});
+        decoded = ColourType::fromHSV(NightMare::HSV(values[0], values[1], values[2]));
     else
     {
         uint32_t raw = 0;

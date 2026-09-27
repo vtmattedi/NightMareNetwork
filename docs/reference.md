@@ -327,11 +327,14 @@ ColourType();
 explicit ColourType(uint32_t value);
 ColourType(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
 uint32_t rawValue() const;
-RGB toRGB() const;
-RGBA toRGBA() const;
-HSV toHSV() const;
-static ColourType fromHSV(const HSV &hsv);
+NightMare::RGB toRGB() const;
+NightMare::RGBA toRGBA() const;
+NightMare::HSV toHSV() const;
+static ColourType fromHSV(const NightMare::HSV &hsv);
 ```
+
+The `RGB`, `RGBA`, and `HSV` component structs belong to the `NightMare`
+namespace.
 
 ## Action metadata
 

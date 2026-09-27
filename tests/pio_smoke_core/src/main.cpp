@@ -74,9 +74,9 @@ void setup()
                                        timeCodec);
 
     const ColourType red(255, 0, 0);
-    const RGB redRgb = red.toRGB();
-    const RGBA redRgba = red.toRGBA();
-    const HSV redHsv = red.toHSV();
+    const NightMare::RGB redRgb = red.toRGB();
+    const NightMare::RGBA redRgba = red.toRGBA();
+    const NightMare::HSV redHsv = red.toHSV();
     ColourType decodedColour;
     const bool colourDefaults = ColourType().rawValue() == 0;
     const bool colourConversions = red.rawValue() == 0xff0000ffUL &&

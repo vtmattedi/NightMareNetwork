@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+namespace NightMare
+{
 struct RGB
 {
     RGB(uint8_t red = 0, uint8_t green = 0, uint8_t blue = 0)
@@ -34,6 +36,7 @@ struct HSV
     uint8_t s;
     uint8_t v;
 };
+}
 
 /// @brief An RGBA colour packed as 0xRRGGBBAA.
 class ColourType
@@ -45,11 +48,11 @@ public:
 
     uint32_t rawValue() const { return value_; }
 
-    RGB toRGB() const;
-    RGBA toRGBA() const;
-    HSV toHSV() const;
+    NightMare::RGB toRGB() const;
+    NightMare::RGBA toRGBA() const;
+    NightMare::HSV toHSV() const;
 
-    static ColourType fromHSV(const HSV &hsv);
+    static ColourType fromHSV(const NightMare::HSV &hsv);
 
     bool operator==(const ColourType &other) const { return value_ == other.value_; }
     bool operator!=(const ColourType &other) const { return !(*this == other); }

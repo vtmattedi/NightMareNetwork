@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
-
+#include <time.h>
 /// @brief A valid local time of day. It has no date, timezone, epoch, or
 /// duration semantics.
 class TimeType
@@ -19,6 +19,13 @@ public:
 
     bool operator==(const TimeType &other) const;
     bool operator!=(const TimeType &other) const { return !(*this == other); }
+    /// @brief Returns true if the time matches the given epoch's local time, optionally including seconds.
+    /// @example `TimeType(14, 30).matches(1680000000)` returns true if the local time of the epoch (1680000000) is 14:30.
+    /// @example `TimeType(14, 30).matches()` returns true if the local time of the epoch is 14:30.
+    /// @param epoch The epoch time to compare against. Defaults to the current time.
+    /// @param include_seconds Whether to include seconds in the comparison. Defaults to false.
+    /// @return true if the time matches the given epoch's local time, false otherwise.
+    bool matches(const time_t &epoch = time(nullptr), bool include_seconds = false) const;
 
 private:
     uint8_t hours_ = 0;
