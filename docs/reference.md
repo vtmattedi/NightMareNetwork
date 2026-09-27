@@ -41,10 +41,16 @@ template <typename T>
 class Config
 {
 public:
+    using WriteRequestHandler =
+        bool (*)(Config<T> &config, const T &requested);
+
     Config(
         const String &name,
         const T &defaultValue,
         bool requireReboot = false);
+
+    WriteRequestHandler onWrite;
+
     const T &value() const;
     bool set(const T &value);
 };
@@ -54,6 +60,10 @@ The firmware default is required and becomes the runtime value at construction.
 Construction also registers the object with `configManager()`; destruction
 unregisters it. Reboot metadata is the third argument, which keeps
 `Config<bool>` unambiguous.
+
+`ConfigManager` invokes `onWrite` with the decoded proposed value after the
+optional global change handler and before committing. Returning `false`
+rejects the write. Direct local `set()` calls bypass both ingress handlers.
 
 Metadata available through `ConfigBase`:
 
@@ -81,6 +91,10 @@ String buildManifestBase64() const;
 
 `bind()` and `unbind()` remain available for explicit runtime use and retain
 their duplicate pointer/name and capacity checks.
+
+`handle("list")` returns JSON objects with `name`, `type`, `require_reboot`,
+and `value`. `value` is the Config's current canonical `NetCodec<T>` String
+encoding. The binary manifest remains declaration-only.
 
 Limits and manifest versions:
 
@@ -1027,6 +1041,11 @@ Global:
 
 ```cpp
 extern TelemetryService Telemetry;
+extern Config<bool> HeartbeatEnabled; // heartbeat:enable, default true
+extern Config<int> HeartbeatPeriod;   // heartbeat:period, seconds, default 15
+
+constexpr int HeartbeatMinPeriodSeconds = 15;
+constexpr int HeartbeatMaxPeriodSeconds = 86400;
 ```
 
 Types:
@@ -1041,7 +1060,8 @@ enum class InfoType
     BUILD,
     BOOT,
     SYSTEM,
-    NETWORK
+    NETWORK,
+    HEARTBEAT
 };
 
 struct TelemetryResult
@@ -1219,6 +1239,12 @@ const char *WiFi_getAuthTypeName(
 const char *WiFi_getStatusName(
     wl_status_t status);
 ```
+
+An asynchronous connection retries every 15 seconds while cycling through the
+ESP32 driver's supported transmit-power levels. Passing
+`deleteAfterConnect == false` keeps that recovery task active after connecting.
+`WiFi_Auto()` additionally persists a fallback transmit-power level after it
+successfully connects and keeps the recovery task active.
 
 ## ESP lifecycle
 

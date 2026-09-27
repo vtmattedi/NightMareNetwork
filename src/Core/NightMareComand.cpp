@@ -655,18 +655,19 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     }
 
     // INFO [section]            query: the aggregate, or one section of it
-    // INFO PUBLISH [document]   publish INFO (default), SYSTEM or NETWORK
+    // INFO PUBLISH [document]   publish INFO (default), SYSTEM, NETWORK or HEARTBEAT
     if (parsedMsg.command == "INFO")
     {
         if (parsedMsg.subcommand == "PUBLISH")
         {
             const InfoType type = getInfoType(parsedMsg.args[1]);
-            if (type != InfoType::INFO && type != InfoType::SYSTEM && type != InfoType::NETWORK)
+            if (type != InfoType::INFO && type != InfoType::SYSTEM &&
+                type != InfoType::NETWORK && type != InfoType::HEARTBEAT)
             {
                 result.result = false;
                 result.response = type == InfoType::INVALID
                                       ? "Unknown INFO section."
-                                      : "Only INFO, SYSTEM and NETWORK are published documents.";
+                                      : "Only INFO, SYSTEM, NETWORK and HEARTBEAT are published documents.";
             }
             else
             {
@@ -680,8 +681,8 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             result.result = info.valid;
             result.response = info.valid
                                   ? info.data
-                                  : "Usage: INFO [IDENTITY|HARDWARE|BUILD|BOOT|SYSTEM|NETWORK]"
-                                    " | INFO PUBLISH [SYSTEM|NETWORK]";
+                                  : "Usage: INFO [IDENTITY|HARDWARE|BUILD|BOOT|SYSTEM|NETWORK|HEARTBEAT]"
+                                    " | INFO PUBLISH [SYSTEM|NETWORK|HEARTBEAT]";
         }
         return result;
     }

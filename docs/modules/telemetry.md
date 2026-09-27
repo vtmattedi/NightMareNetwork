@@ -29,9 +29,12 @@ SYSTEM
 
 NETWORK
     changing network bookkeeping
+
+HEARTBEAT
+    transient liveness cadence configured at runtime
 ```
 
-INFO, SYSTEM, NETWORK, and hardware configuration have JSON MQTT topics.
+INFO, SYSTEM, NETWORK, HEARTBEAT, and hardware configuration have JSON MQTT topics.
 
 ## InfoType
 
@@ -45,7 +48,8 @@ enum class InfoType : uint8_t
     BUILD,
     BOOT,
     SYSTEM,
-    NETWORK
+    NETWORK,
+    HEARTBEAT
 };
 ```
 
@@ -67,6 +71,7 @@ BUILD
 BOOT
 SYSTEM
 NETWORK
+HEARTBEAT
 ```
 
 An empty String means:
@@ -213,12 +218,26 @@ local
 remote
 ```
 
+## HEARTBEAT contents
+
+```json
+{
+  "uptime_ms": 123456,
+  "heartbeat": 42
+}
+```
+
+The counter advances only after MQTT accepts a heartbeat publication. The
+heartbeat is transient and does not replace retained `/status` plus Last Will
+as the authoritative presence mechanism.
+
 ## Publish one document
 
 ```cpp
 Telemetry.publishInfo(InfoType::INFO);
 Telemetry.publishInfo(InfoType::SYSTEM);
 Telemetry.publishInfo(InfoType::NETWORK);
+Telemetry.publishInfo(InfoType::HEARTBEAT);
 ```
 
 String forms are also available:
@@ -227,7 +246,8 @@ String forms are also available:
 Telemetry.publishInfo("SYSTEM");
 ```
 
-Publication is retained and device-prefixed.
+Publication is device-prefixed. INFO, SYSTEM, and NETWORK are retained;
+HEARTBEAT is not retained.
 
 The topics are:
 
@@ -235,6 +255,7 @@ The topics are:
 <device>/info
 <device>/telemetry/system
 <device>/telemetry/network
+<device>/telemetry/heartbeat
 ```
 
 ## Query-only sections cannot be published independently
@@ -264,18 +285,20 @@ returns `false`.
 Telemetry.publishAll();
 ```
 
-attempts INFO, hardware configuration, and both telemetry documents:
+attempts INFO, hardware configuration, system, network, and heartbeat when it
+is enabled:
 
 ```text
 INFO
 HARDWARE
 SYSTEM
 NETWORK
+HEARTBEAT
 ```
 
 even if an earlier publication fails.
 
-The return value is `true` only if all four publications succeed.
+The return value is `true` only if all enabled publications succeed.
 
 ## Automatic startup
 
@@ -283,16 +306,43 @@ The return value is `true` only if all four publications succeed.
 Telemetry.start();
 ```
 
-installs two Scheduler callback jobs:
+installs the system and network Scheduler callback jobs plus heartbeat when it
+is enabled:
 
 ```text
 nm.telemetry.system
 nm.telemetry.network
+nm.telemetry.heartbeat
 ```
 
-Both are MANAGED jobs.
+All installed telemetry jobs are MANAGED jobs.
 
-The startup operation is all-or-nothing: if installing the network job fails after the system job succeeded, the system job is removed so a later retry does not collide with a half-installed telemetry configuration.
+The startup operation is all-or-nothing. Any failure removes jobs installed by
+that attempt so a later retry does not collide with a half-installed telemetry
+configuration.
+
+## Heartbeat configuration
+
+Heartbeat is enabled by default with a 15-second period. It is controlled by
+two runtime Configs:
+
+```text
+heartbeat:enable    boolean, default true
+heartbeat:period    integer seconds, default 15, range 15..86400
+```
+
+For example:
+
+```text
+CONFIG SET heartbeat:enable false
+CONFIG SET heartbeat:period 60
+CONFIG SET heartbeat:enable true
+```
+
+The Configs use typed per-Config `onWrite` callbacks. Changing the period while
+enabled immediately replaces the MANAGED heartbeat job. Disabling removes the
+job; enabling installs it with the current period. An out-of-range period is
+rejected without changing the Config or current schedule.
 
 ## System interval
 
@@ -341,7 +391,8 @@ when telemetry is enabled.
 
 `tickNightMareESP()` processes one request per call, so the two
 allocation-heavy static documents are not built during the MQTT/TLS connection
-callback. SYSTEM and NETWORK continue on their periodic schedules.
+callback. SYSTEM and NETWORK continue on their periodic schedules. HEARTBEAT
+continues on its runtime-configured schedule when enabled.
 
 ## Why network telemetry can look stale after disconnect
 

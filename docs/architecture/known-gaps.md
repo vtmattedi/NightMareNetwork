@@ -144,15 +144,13 @@ When the device disappears, that retained document is the last known network sta
 
 NightMare does not currently rewrite network telemetry through MQTT Last Will.
 
-## No heartbeat protocol
+## Heartbeat is advisory
 
-**Category:** Intentional omission.
+**Category:** Intentional boundary.
 
-There is currently no separate heartbeat topic.
-
-Presence is represented by retained status plus MQTT Last Will, while application freshness belongs to Resource state.
-
-A heartbeat can be added later if a concrete requirement is not satisfied by those mechanisms.
+`<device>/telemetry/heartbeat` is a configurable, non-retained periodic signal.
+It does not replace retained status plus MQTT Last Will as authoritative device
+presence, and it does not determine application Resource freshness.
 
 ## ESP32 is the active supported platform
 

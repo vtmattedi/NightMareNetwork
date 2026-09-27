@@ -156,6 +156,7 @@ String ConfigManager::list() const
         item["name"] = config.name_;
         item["type"] = valueTypeName(config.valueType_);
         item["require_reboot"] = config.requireReboot_;
+        item["value"] = config.encodedValue();
     }
 
     String output;
@@ -211,7 +212,7 @@ String ConfigManager::handle(const String &command)
             return "ERROR: invalid value";
         if (changeHandler_ != nullptr && !changeHandler_(config->name_, payload))
             return "ERROR: change rejected";
-        return config->applyEncodedValue(payload) ? String("OK") : String("ERROR: invalid value");
+        return config->applyEncodedValue(payload) ? String("OK") : String("ERROR: change rejected");
     }
 
     return "ERROR: expected list, get, set, or manifest";

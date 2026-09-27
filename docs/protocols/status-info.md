@@ -24,6 +24,9 @@ NightMare separates device-level information according to lifecycle:
 
 /telemetry/network
     changing network bookkeeping
+
+/telemetry/heartbeat
+    transient heartbeat when enabled
 ```
 
 Application sensor and actuator state is not duplicated here. It belongs to Resources.
@@ -462,17 +465,20 @@ allocations across cooperative ticks instead of the connection callback.
 Each document is attempted even if publication of another document fails.
 
 SYSTEM and NETWORK telemetry are refreshed by their periodic Scheduler jobs.
+HEARTBEAT is published by its runtime-configured Scheduler job when enabled.
 
 ## Periodic publication
 
-`Telemetry.start()` installs two MANAGED monotonic callback jobs:
+`Telemetry.start()` installs MANAGED monotonic callback jobs:
 
 ```text
 nm.telemetry.system
 nm.telemetry.network
+nm.telemetry.heartbeat    when heartbeat:enable is true
 ```
 
-They publish at the configured system and network intervals.
+They publish at the configured system and network intervals and at the current
+`heartbeat:period` when heartbeat is enabled.
 
 These are framework jobs, not USER jobs, so operator `JOB DELETE` and `JOB CLEAR` cannot remove them.
 
@@ -490,6 +496,7 @@ BUILD
 BOOT
 SYSTEM
 NETWORK
+HEARTBEAT
 ```
 
 `INFO` means the aggregate retained `/info` shape.
@@ -514,12 +521,13 @@ HW [PUBLISH]
 
 ## Publishable documents
 
-Only three `InfoType` values map to retained MQTT documents:
+Four `InfoType` values map to MQTT topics:
 
 ```text
 INFO
 SYSTEM
 NETWORK
+HEARTBEAT
 ```
 
 Therefore:
@@ -528,18 +536,37 @@ Therefore:
 INFO PUBLISH
 INFO PUBLISH SYSTEM
 INFO PUBLISH NETWORK
+INFO PUBLISH HEARTBEAT
 ```
 
 are valid publication requests.
 
-Section-only types such as `HARDWARE` or `BOOT` are queryable but are not independent MQTT documents.
+Section-only types such as `HARDWARE` or `BOOT` are queryable but are not independent MQTT documents. INFO, SYSTEM, and NETWORK are retained; HEARTBEAT is transient.
 
-## No heartbeat
+## Heartbeat
 
-NightMare currently defines no separate heartbeat topic.
+Topic:
 
-Presence is represented by status + MQTT Last Will.
+```text
+<device>/telemetry/heartbeat
+```
 
-Application state freshness is represented by Resource `/state`.
+The heartbeat is not retained. Its payload is:
 
-A heartbeat can be added later if a concrete requirement is not met by those two mechanisms.
+```json
+{
+  "uptime_ms": 123456,
+  "heartbeat": 42
+}
+```
+
+Runtime Configs control publication:
+
+```text
+heartbeat:enable    boolean, default true
+heartbeat:period    integer seconds, default 15, accepted range 15..86400
+```
+
+Changing either through `CONFIG SET` immediately updates the MANAGED heartbeat
+job. Presence is still represented by retained status plus MQTT Last Will;
+application state freshness remains represented by Resource `/state`.

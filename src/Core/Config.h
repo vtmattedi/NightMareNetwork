@@ -35,12 +35,16 @@ private:
 
 /// @brief A firmware-declared, typed local configuration value.
 /// Construction registers with configManager(); destruction unregisters.
-/// Local set() calls are direct assignments. Only ConfigManager command ingress
-/// invokes the optional global change handler.
+/// Local set() calls are direct assignments. ConfigManager command ingress
+/// invokes the optional global and per-Config write handlers before committing.
 template <typename T>
 class Config : public ConfigBase
 {
 public:
+    /// @brief Returns true to accept an already-decoded ConfigManager write.
+    /// Returning false leaves the current value unchanged.
+    using WriteRequestHandler = bool (*)(Config<T> &config, const T &requested);
+
     Config(const String &name, const T &defaultValue, bool requireReboot = false)
         : ConfigBase(name, requireReboot, NetCodec<T>::Type), value_(defaultValue)
     {
@@ -54,6 +58,8 @@ public:
     }
 
     const T &value() const { return value_; }
+
+    WriteRequestHandler onWrite = nullptr;
 
     bool set(const T &value)
     {
@@ -74,6 +80,8 @@ private:
     {
         T decoded{};
         if (!NetCodec<T>::decode(payload, decoded))
+            return false;
+        if (onWrite != nullptr && !onWrite(*this, decoded))
             return false;
         value_ = decoded;
         return true;

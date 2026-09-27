@@ -4,6 +4,10 @@
 #if NM_ENABLE_TELEMETRY
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Core/Config.h>
+
+constexpr int HeartbeatMinPeriodSeconds = 15;
+constexpr int HeartbeatMaxPeriodSeconds = 24 * 60 * 60;
 
 // The sections that can be asked for. Hardware configuration has its own retained
 // document and HW command, so it is deliberately not an INFO section.
@@ -16,11 +20,12 @@ enum class InfoType : uint8_t
     BUILD,
     BOOT,
     SYSTEM,
-    NETWORK
+    NETWORK,
+    HEARTBEAT,
 };
 
 /// @brief Maps a section name to its type, ignoring case: INFO, IDENTITY,
-/// HARDWARE, BUILD, BOOT, SYSTEM, NETWORK. Empty means INFO;
+/// HARDWARE, BUILD, BOOT, SYSTEM, NETWORK, HEARTBEAT. Empty means INFO;
 /// anything else is INVALID.
 InfoType getInfoType(const String &type);
 
@@ -30,18 +35,20 @@ struct TelemetryResult
     String data;
 };
 
-// Device-wide information, split by how often it changes. Four retained documents:
+// Device-wide information, split by how often it changes. Four retained documents
+// and one transient heartbeat stream:
 //   <device>/info               identity, hardware, build, boot: fixed per boot
 //   <device>/hardware           hardware configuration as retained JSON
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
+//   <device>/telemetry/heartbeat non-retained, controlled by heartbeat Configs
 // Static INFO and hardware documents are requested on every MQTT connection
 // and published cooperatively. Sensors, actuators and application state belong
 // to NetResources, which carry their own freshness; nothing here duplicates them.
 class TelemetryService
 {
 public:
-    /// @brief Installs the periodic system and network publications as
+    /// @brief Installs the periodic system, network, and enabled heartbeat publications as
     /// Scheduler callbacks. All or nothing, so it can simply be retried.
     bool start();
 
@@ -49,8 +56,9 @@ public:
     TelemetryResult getInfo(InfoType type = InfoType::INFO) const;
     TelemetryResult getInfo(const String &type) const;
 
-    /// @brief Publishes one retained document: INFO, SYSTEM or NETWORK. A
-    /// subsection of INFO has no topic of its own, so it returns false.
+    /// @brief Publishes INFO, SYSTEM, NETWORK, or HEARTBEAT. The heartbeat is
+    /// non-retained; the other documents are retained. A subsection of INFO
+    /// has no topic of its own, so it returns false.
     bool publishInfo(InfoType type = InfoType::INFO);
     bool publishInfo(const String &type);
 
@@ -60,8 +68,8 @@ public:
     /// @brief Publishes the retained hardware configuration document.
     bool publishHardware();
 
-    /// @brief /info, /hardware, and both telemetry documents.
-    /// True only if all four went out.
+    /// @brief /info, /hardware, system, network, and heartbeat when enabled.
+    /// True only if every enabled publication went out.
     bool publishAll();
 
 private:
@@ -77,7 +85,10 @@ private:
     void buildNamedHardware(JsonDocument &doc) const;
 
     bool started_ = false;
+    uint32_t heartbeatCounter_ = 0;
 };
 
 extern TelemetryService Telemetry;
+extern Config<bool> HeartbeatEnabled;
+extern Config<int> HeartbeatPeriod;
 #endif // NM_ENABLE_TELEMETRY

@@ -23,8 +23,9 @@ set <name> <payload>
 manifest
 ```
 
-`set` decodes before calling the optional global change handler and commits
-only when both succeed. `manifest` returns Base64 of the canonical MessagePack
+`set` decodes before calling the optional global change handler and the typed
+per-Config `onWrite` handler, then commits only when every stage succeeds.
+`manifest` returns Base64 of the canonical MessagePack
 Config declaration manifest; it does not publish it. That manifest is
 explicitly versioned: encoding version is position 0 and declaration-manifest
 version is position 1.
@@ -672,8 +673,15 @@ longer exposes the generic `PersistentSettings` store.
 CONFIG LIST
 ```
 
-Returns compact JSON containing each Config's name, wire type, and
-`require_reboot` metadata.
+Returns compact JSON containing each Config's name, wire type,
+`require_reboot` metadata, and current canonical String value:
+
+```json
+[{"name":"heartbeat:period","type":"integer","require_reboot":false,"value":"15"}]
+```
+
+The versioned Config manifest remains declaration-only and does not contain
+current values.
 
 ### Read one Config
 
@@ -690,8 +698,9 @@ CONFIG SET <name> <payload>
 ```
 
 The payload is opaque command text. It is decoded according to the declared
-`Config<T>` type, offered to the optional global change handler, and committed
-only when both accept it.
+`Config<T>` type, offered to the optional global change handler and then the
+Config's typed `onWrite` handler, and committed only when every stage accepts
+it.
 
 ### Manifest
 

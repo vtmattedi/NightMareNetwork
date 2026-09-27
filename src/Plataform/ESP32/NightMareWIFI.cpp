@@ -9,8 +9,34 @@
 
 static WiFiConnectedCallback wifiConnectedCallback = nullptr;
 static TaskHandle_t WiFiTaskHandle = nullptr;
+static bool wifiTaskStaysActive = false;
+static bool wifiTaskPersistsPower = false;
 static bool firstConnection = true;
 int gTxPower = NightMare::NM_TX_POWER_AUTO;
+
+namespace
+{
+    constexpr uint32_t AsyncConnectionAttemptMs = 15000;
+
+    struct AsyncWiFiParameters
+    {
+        String ssid;
+        String password;
+        bool deleteAfterConnect;
+        bool persistSuccessfulPower;
+        bool notifyInitialConnection;
+        int configuredPower;
+    };
+
+    bool savePowerProfile(const NightMare::WiFiProfile &profile);
+    bool createAsyncTask(const char *ssid, const char *password,
+                         bool deleteAfterConnect, bool persistSuccessfulPower,
+                         bool notifyInitialConnection);
+    bool startAsyncConnection(const char *ssid, const char *password,
+                              bool deleteAfterConnect, bool persistSuccessfulPower);
+    bool startAsyncMonitor(const char *ssid, const char *password,
+                           bool persistSuccessfulPower);
+}
 
 // typedef enum {
 //   WIFI_POWER_21dBm = 84,      // 21dBm
@@ -32,6 +58,15 @@ int gTxPower = NightMare::NM_TX_POWER_AUTO;
 
 // Every level wifi_power_t defines, in quarter-dBm.
 static const int8_t kTxPowerLevels[] = {84, 82, 80, 78, 76, 74, 68, 60, 52, 44, 34, 28, 20, 8, -4};
+static constexpr size_t kTxPowerLevelCount = sizeof(kTxPowerLevels) / sizeof(kTxPowerLevels[0]);
+
+static size_t nextTxPowerIndex(int currentPower)
+{
+    for (size_t i = 0; i < kTxPowerLevelCount; ++i)
+        if (kTxPowerLevels[i] == currentPower)
+            return (i + 1) % kTxPowerLevelCount;
+    return 0;
+}
 
 bool WiFi_isValidTxPower(int quarterDbm)
 {
@@ -88,31 +123,75 @@ void wifiConnectedInternal()
     }
 }
 
-/// @brief Task to monitor WiFi connection status changes
-/// @param pvParameters Pointer to parameters (expected to be a bool indicating if the task should delete itself after connecting)
+/// @brief Monitors an asynchronous connection and retries timed-out attempts at
+/// each supported transmit-power level.
+/// @param pvParameters Owned AsyncWiFiParameters instance.
 void WiFi_Task(void *pvParameters)
 {
-    wl_status_t old_state = WL_DISCONNECTED;
-    bool deleteAfterConnect = *(bool *)pvParameters;
-    delete (bool *)pvParameters;
+    AsyncWiFiParameters parameters = *static_cast<AsyncWiFiParameters *>(pvParameters);
+    delete static_cast<AsyncWiFiParameters *>(pvParameters);
+
+    wl_status_t old_state = parameters.notifyInitialConnection
+                                ? WL_DISCONNECTED
+                                : WiFi.status();
+    uint32_t attemptStartedAt = millis();
+    size_t nextPower = nextTxPowerIndex(gTxPower);
+
     while (true)
     {
-        if (WiFi.status() != old_state)
+        const wl_status_t state = WiFi.status();
+        if (state != old_state)
         {
-            if (WiFi.status() == WL_CONNECTED)
+            if (state == WL_CONNECTED)
             {
                 wifiConnectedInternal();
-                if (deleteAfterConnect)
+                if (parameters.persistSuccessfulPower && gTxPower != parameters.configuredPower)
                 {
-                    LOG("WiFi", "WiFi connected to SSID: %s, IP: %s", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+                    const NightMare::WiFiProfile successful = {
+                        parameters.ssid, parameters.password, gTxPower};
+                    if (!savePowerProfile(successful))
+                        LOG_ERROR("WiFi", "Could not persist successful tx power %d", gTxPower);
+                    else
+                        parameters.configuredPower = gTxPower;
+                }
+                if (parameters.deleteAfterConnect)
+                {
                     WiFiTaskHandle = NULL;
+                    wifiTaskStaysActive = false;
+                    wifiTaskPersistsPower = false;
                     vTaskDelete(NULL);
                     return;
                 }
             }
-            old_state = WiFi.status();
+            else if (old_state == WL_CONNECTED)
+            {
+                attemptStartedAt = millis();
+                nextPower = nextTxPowerIndex(gTxPower);
+                WiFi.reconnect();
+            }
+            old_state = state;
         }
-        int delayTime = old_state == WL_CONNECTED ? 5000 : 100;
+
+        if (state != WL_CONNECTED && millis() - attemptStartedAt >= AsyncConnectionAttemptMs)
+        {
+            const int retryPower = kTxPowerLevels[nextPower];
+            nextPower = (nextPower + 1) % kTxPowerLevelCount;
+            LOG_WARNING("WiFi", "Connection timed out; retrying with tx power %d quarter-dBm",
+                        retryPower);
+
+            WiFi.disconnect(false, false);
+            gTxPower = retryPower;
+            if (!applyTxPower(gTxPower))
+            {
+                LOG_ERROR("WiFi", "Could not apply retry tx power %d", gTxPower, "reverting to previous power %d", parameters.configuredPower);
+
+            }
+            else
+                WiFi.begin(parameters.ssid.c_str(), parameters.password.c_str());
+            attemptStartedAt = millis();
+        }
+
+        const int delayTime = state == WL_CONNECTED ? 5000 : 100;
         // LOG("WiFi", "WiFi status: %s", WiFi_getStatusName(old_state));
         vTaskDelay(delayTime / portTICK_PERIOD_MS);
     }
@@ -172,39 +251,80 @@ bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs, void *w
 
 bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect)
 {
-    WiFi.disconnect(true, true); // disconnect and erase old credentials
-    WiFi.mode(WIFI_STA);
-    if (!applyTxPower(gTxPower))
-    {
-        LOG_ERROR("WiFi", "Could not apply tx power %d", gTxPower);
-        return false;
-    }
-    WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
-    // See WiFi_Connect: clears any stale status left by a prior scan/connect
-    WiFi.begin(ssid, password);
+    return startAsyncConnection(ssid, password, deleteAfterConnect, false);
+}
 
-    if (WiFiTaskHandle)
+namespace
+{
+    bool createAsyncTask(const char *ssid, const char *password,
+                         bool deleteAfterConnect, bool persistSuccessfulPower,
+                         bool notifyInitialConnection)
     {
-        return false;
-    }
-    bool *deleteParam = new bool(deleteAfterConnect);
-    // tskNO_AFFINITY instead of core 1: the ESP32-C6 (and C3/H2/S2) is
-    // single-core, so pinning to core 1 fails configASSERT and panics.
-    bool res = xTaskCreatePinnedToCore(WiFi_Task,
-                                       "WiFi_Task",
-                                       4096,
-                                       deleteParam,
-                                       1,
-                                       &WiFiTaskHandle,
-                                       tskNO_AFFINITY);
-    LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s", OK_LOG(res), ssid);
+        if (WiFiTaskHandle)
+            return false;
 
-    return res;
+        AsyncWiFiParameters *parameters = new AsyncWiFiParameters{
+            String(ssid), String(password), deleteAfterConnect, persistSuccessfulPower,
+            notifyInitialConnection, gTxPower};
+        wifiTaskStaysActive = !deleteAfterConnect;
+        wifiTaskPersistsPower = persistSuccessfulPower;
+        // tskNO_AFFINITY instead of core 1: the ESP32-C6 (and C3/H2/S2) is
+        // single-core, so pinning to core 1 fails configASSERT and panics.
+        const BaseType_t result = xTaskCreatePinnedToCore(WiFi_Task,
+                                                          "WiFi_Task",
+                                                          4096,
+                                                          parameters,
+                                                          1,
+                                                          &WiFiTaskHandle,
+                                                          tskNO_AFFINITY);
+        if (result != pdPASS)
+        {
+            delete parameters;
+            WiFiTaskHandle = nullptr;
+            wifiTaskStaysActive = false;
+            wifiTaskPersistsPower = false;
+        }
+        LOG("WiFi", "%s TASK: Created WiFi task for SSID: %s", OK_LOG(result == pdPASS), ssid);
+
+        return result == pdPASS;
+    }
+
+    bool startAsyncConnection(const char *ssid, const char *password,
+                              bool deleteAfterConnect, bool persistSuccessfulPower)
+    {
+        if (WiFiTaskHandle)
+            return false;
+
+        WiFi.disconnect(true, true); // disconnect and erase old credentials
+        WiFi.mode(WIFI_STA);
+        if (!applyTxPower(gTxPower))
+        {
+            LOG_ERROR("WiFi", "Could not apply tx power %d", gTxPower);
+            return false;
+        }
+        WiFi.setHostname(gDeviceIdentity.getDeviceName().c_str());
+        WiFi.setAutoReconnect(true);
+        gDeviceIdentity.lockAddress();
+        // See WiFi_Connect: clears any stale status left by a prior scan/connect
+        WiFi.begin(ssid, password);
+
+        return createAsyncTask(ssid, password, deleteAfterConnect,
+                               persistSuccessfulPower, true);
+    }
+
+    bool startAsyncMonitor(const char *ssid, const char *password,
+                           bool persistSuccessfulPower)
+    {
+        WiFi.setAutoReconnect(true);
+        return createAsyncTask(ssid, password, false, persistSuccessfulPower, false);
+    }
 }
 
 /// @brief Disconnects from the WiFi network
 void WiFi_Disconnect()
 {
+    if (WiFiTaskHandle)
+        WiFi_cancelAsyncConnect();
     WiFi.disconnect();
 }
 
@@ -223,7 +343,7 @@ bool WiFi_Auto()
 {
     NightMare::WiFiProfile profile = WiFi_getProfile();
     gTxPower = profile.txPower;
-    return WiFi_ConnectAsync(profile.ssid.c_str(), profile.password.c_str(), true);
+    return startAsyncConnection(profile.ssid.c_str(), profile.password.c_str(), false, true);
 }
 
 bool WiFi_setTxPower(int quarterDbm)
@@ -258,12 +378,15 @@ void WiFi_Scan()
     WiFi.scanDelete();
 }
 
-bool savePowerProfile(const NightMare::WiFiProfile &profile)
+namespace
 {
-    const String keys[] = {NightMare::PersistentKey::WifiSsid, NightMare::PersistentKey::WifiPassword,
-                           NightMare::PersistentKey::WifiTxPower};
-    const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
-    return PersistentSettings.setMany(keys, values, 3);
+    bool savePowerProfile(const NightMare::WiFiProfile &profile)
+    {
+        const String keys[] = {NightMare::PersistentKey::WifiSsid, NightMare::PersistentKey::WifiPassword,
+                               NightMare::PersistentKey::WifiTxPower};
+        const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
+        return PersistentSettings.setMany(keys, values, 3);
+    }
 }
 
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
@@ -279,24 +402,33 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
             return false;
     }
     NightMare::WiFiProfile old = WiFi_getProfile();
-    WiFi_Disconnect();
-    esp_err_t err = esp_wifi_set_max_tx_power(static_cast<wifi_power_t>(profile.txPower));
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("WiFi", "Failed to set tx power: %d", err);
-        if (!(force))
-            return false;
-    }
+    const bool resumeMonitoring = WiFiTaskHandle && wifiTaskStaysActive;
+    const bool persistFallbackPower = wifiTaskPersistsPower;
+    if (WiFiTaskHandle)
+        WiFi_cancelAsyncConnect();
+    WiFi.disconnect();
     gTxPower = profile.txPower;
     if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), 15000) && !(force))
     {
         gTxPower = old.txPower;
-        WiFi_ConnectAsync(old.ssid.c_str(), old.password.c_str(), true);
+        startAsyncConnection(old.ssid.c_str(), old.password.c_str(),
+                             !resumeMonitoring, persistFallbackPower);
         return false;
     }
     // One write for the whole profile: a partial one would pair a new network
     // with the old power, or the reverse.
-    return savePowerProfile(profile);
+    const bool saved = savePowerProfile(profile);
+    if (resumeMonitoring)
+    {
+        const bool monitoring = WiFi.status() == WL_CONNECTED
+                                    ? startAsyncMonitor(profile.ssid.c_str(), profile.password.c_str(),
+                                                        persistFallbackPower)
+                                    : startAsyncConnection(profile.ssid.c_str(), profile.password.c_str(),
+                                                           false, persistFallbackPower);
+        if (!monitoring)
+            LOG_ERROR("WiFi", "Could not resume asynchronous connection recovery");
+    }
+    return saved;
 }
 
 bool WiFi_ChangeCredentials(const String &ssid, const String &password)
@@ -368,9 +500,12 @@ bool WiFi_cancelAsyncConnect()
     {
         vTaskDelete(WiFiTaskHandle);
         WiFiTaskHandle = NULL;
+        wifiTaskStaysActive = false;
+        wifiTaskPersistsPower = false;
         return true;
     }
-    else {
+    else
+    {
         LOG_WARNING("WiFi", "No async WiFi connection task to cancel.");
     }
     return false;

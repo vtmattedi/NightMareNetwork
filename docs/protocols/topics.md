@@ -41,6 +41,7 @@ The current standard topic families are:
 <device>/hardware
 <device>/telemetry/system
 <device>/telemetry/network
+<device>/telemetry/heartbeat
 
 <device>/manifest
 <device>/manifest/msgpack
@@ -93,6 +94,7 @@ Requests, commands, and command responses are not retained.
 | `<device>/resource/<name>/set` | no | request a writable Value change |
 | `<device>/resource/<name>/invoke` | no | invoke an Action |
 | `<device>/console/in` | no | ordinary command request |
+| `<device>/telemetry/heartbeat` | no | runtime-configurable device heartbeat |
 | `<device>/console/out` | no | ordinary command response/status |
 | `<device>/console/controlled/<id>/in` | no | correlated command request |
 | `<device>/console/controlled/<id>/out` | no | correlated command response |
