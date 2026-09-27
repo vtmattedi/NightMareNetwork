@@ -9,6 +9,9 @@
 #ifndef NM_ENABLE_SETTINGS
 #define NM_ENABLE_SETTINGS 1
 #endif
+#if !NM_ENABLE_SETTINGS
+#error "Config<T> requires NM_ENABLE_SETTINGS because Config values are persistent"
+#endif
 #ifndef NM_ENABLE_RESOURCES
 #define NM_ENABLE_RESOURCES 1
 #endif

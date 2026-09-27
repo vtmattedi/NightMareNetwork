@@ -7,9 +7,12 @@ order: 25
 
 # Config
 
-Config values are local parameters that change application behavior. They are
-not Resources and have no MQTT, publication, subscription, persistence, or
-freshness semantics.
+`Config<T>` represents durable application configuration. Declaring a Config
+means the application intentionally exposes that value to the Config command
+surface and expects accepted changes to survive reboot.
+
+Configs are not Resources. They have no MQTT, publication, subscription, or
+freshness semantics; persistence is local through `PersistentSettings`.
 
 ## Declaration and registration
 
@@ -20,26 +23,26 @@ it:
 ```cpp
 #include <NightMare/Config.h>
 
-Config<uint32_t> maxDoorOpen("max_door_open_time", 300000);
-Config<bool> autoOffEnabled("auto_off_enabled", true);
-Config<uint32_t> restartRequiredOption("some_option", 10, true);
-Config<TimeType> quietStart("quiet_start", TimeType(22, 30));
-Config<ColourType> statusColour("status_colour", ColourType(255, 0, 0));
+Config<uint32_t> maxDoorOpen("door:max_open_time", 300000);
+Config<bool> autoOffEnabled("door:auto_off", true);
+Config<uint32_t> restartRequiredOption("system:some_option", 10, true);
+Config<TimeType> quietStart("schedule:quiet_start", TimeType(22, 30));
+Config<ColourType> statusColour("status:colour", ColourType(255, 0, 0));
 ```
 
 The manager stores non-owning pointers. Automatic unbinding makes scoped Configs
 safe. Names must be non-empty and contain no command whitespace; names and
 pointers may only be bound once. Up to 64 Configs may be bound. Failed automatic
-binding leaves the Config usable locally but absent from command ingress and the
-manifest.
+binding leaves the value readable but absent from persistence, command ingress,
+and the manifest; its `set()` therefore returns `false`.
 
 `configManager().bind()` and `configManager().unbind()` remain public for
 explicit runtime registration. A Config that is already auto-bound is rejected
 by `bind()` under the same duplicate pointer/name rules as any other binding.
 
 Every Config declares its firmware default in the constructor. That value is
-installed immediately and is what the application sees until a local or
-command-ingress write changes it. `require_reboot` is the optional third
+installed immediately. During startup, a valid persisted value overwrites the
+default before normal framework use. `require_reboot` is the optional third
 argument; this ordering avoids ambiguity for `Config<bool>`.
 
 The built-in typed surface includes `TimeType` and `ColourType` through the
@@ -52,8 +55,10 @@ const uint32_t current = maxDoorOpen.value(); // 300000 initially
 maxDoorOpen.set(300000);
 ```
 
-Local `set()` assigns the typed value directly. It does not call the ingress
-handler, persist, publish, or reboot.
+Local `set()` first persists the canonical `NetCodec<T>` encoding and then
+updates the typed runtime value. It does not call either ingress handler,
+publish, or reboot. If persistence fails, `set()` returns `false` and leaves
+the runtime value unchanged.
 
 Each Config may also install a typed handler for ConfigManager writes:
 
@@ -74,6 +79,36 @@ void setup()
 Returning `false` rejects the write and leaves the current value unchanged.
 Like the global handler, `onWrite` is an ingress policy: a local `set()` does
 not invoke it.
+
+## Restore and storage lifecycle
+
+Global/static Config construction never mounts the filesystem. The lifecycle
+is deliberately split:
+
+```text
+Config construction
+    -> install firmware default
+    -> bind to ConfigManager
+
+NightMare startup
+    -> initialize PersistentSettings
+    -> ConfigManager.restore()
+    -> replace defaults with valid saved values
+```
+
+Before restore, Config values contain firmware defaults. After
+`startNightMareESP()` (or an explicit successful `configManager().restore()`),
+they contain persisted values when available. Applications should not treat
+them as fully initialized before that phase completes.
+
+Storage keys use the reserved `_config:` prefix. Values use the same canonical
+`NetCodec<T>` encoding as command ingress. Missing values keep and persist the
+firmware default. Invalid saved values log a warning, restore the default, and
+replace the invalid storage entry. Restore does not invoke write handlers and
+is idempotent after success.
+
+Configs bound after a successful restore are not restored automatically. Bind
+normal application Configs before framework startup.
 
 ## String ingress
 
@@ -128,8 +163,25 @@ configManager().setChangeHandler(onConfigChange);
 
 Ingress first decodes the payload to the Config's declared type, calls the
 global handler with the original payload, then calls that Config's typed
-`onWrite` handler when present. The decoded value is committed only after all
-steps accept it. Decode or handler failure leaves the current value unchanged.
+`onWrite` handler when present. It then persists the canonical value and only
+afterward commits the runtime value. Decode, handler, or persistence failure
+leaves the current runtime value unchanged and reports an error.
+
+## Naming related declarations
+
+When related values naturally belong to one subsystem, prefer names such as
+`<group>:<value>` or `<group>:<subgroup>:<value>`:
+
+```text
+led_strip:colour
+led_strip:brightness
+climate:bedroom:target_temperature
+climate:bedroom:fan_speed
+```
+
+This is only a convention. NightMare does not enforce it or interpret `:` as a
+protocol delimiter. It gives backend tools a stable hint for future visual
+grouping and relationship inference; existing flat names remain valid.
 
 ## Manifest
 

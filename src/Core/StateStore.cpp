@@ -72,9 +72,21 @@ bool StateStore::save()
 
 bool StateStore::set(const String &key, const String &value)
 {
-    if (!begin() || !RuntimeState::set(key, value))
+    if (!begin())
         return false;
-    return !persistent_ || save();
+
+    const bool existed = RuntimeState::exists(key);
+    const String previous = existed ? RuntimeState::get(key) : String();
+    if (!RuntimeState::set(key, value))
+        return false;
+    if (!persistent_ || save())
+        return true;
+
+    if (existed)
+        RuntimeState::set(key, previous);
+    else
+        RuntimeState::remove(key);
+    return false;
 }
 
 bool StateStore::setMany(const String *keys, const String *values, size_t count)

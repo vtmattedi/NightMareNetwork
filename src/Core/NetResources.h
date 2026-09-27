@@ -80,6 +80,9 @@ enum class ResourceRole : uint8_t
 class NetResource
 {
 public:
+    // Naming convention: prefer "<group>:<value>" or deeper colon-separated
+    // groups when related declarations naturally belong together. Colons are
+    // ordinary name characters; this tooling hint is not enforced.
     /// @brief Stable local registry/configuration identity.
     const String &name() const { return name_; }
     /// @brief Remote source owner (or this device for a Managed resource).

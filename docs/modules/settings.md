@@ -30,6 +30,10 @@ PersistentSettings
 `SystemState` is not a key/value store. `PersistentSettings` remains a
 `StateStore` backed by the existing String model.
 
+Runtime state still exists through `RuntimeState`, but there is intentionally
+no global runtime configuration controller. Applications own their runtime
+state; `SystemState` is reserved for framework runtime facts and requests.
+
 ## RuntimeState
 
 `RuntimeState` is a small in-memory String key/value store.
@@ -218,7 +222,9 @@ PersistentSettings.set("name", "value");
 
 performs the RuntimeState update and immediately calls `save()`.
 
-The returned `bool` reflects both the in-memory operation and the save.
+The returned `bool` reflects both the in-memory operation and the save. If the
+save fails, `set()` restores the previous in-memory entry (or removes a newly
+added one), so callers do not observe a successful RAM-only mutation.
 
 For a nonpersistent StateStore, `set()` only changes RAM.
 
@@ -310,6 +316,7 @@ _timezone
 _pending_identity_cleanup
 _ssid
 _password
+_config:<Config name>
 ```
 
 These names are implementation details.
@@ -325,6 +332,11 @@ WiFi helpers
 ```
 
 rather than editing private keys directly.
+
+`ConfigManager` owns `_config:` keys. It stores canonical `NetCodec<T>` text,
+restores bound Configs during framework startup, creates missing entries from
+firmware defaults, and replaces invalid entries with those defaults. Application
+code should use `Config<T>` rather than reading or writing these keys directly.
 
 ## Command access
 

@@ -59,11 +59,14 @@ public:
 The firmware default is required and becomes the runtime value at construction.
 Construction also registers the object with `configManager()`; destruction
 unregisters it. Reboot metadata is the third argument, which keeps
-`Config<bool>` unambiguous.
+`Config<bool>` unambiguous. A successful startup restore replaces the default
+with a valid saved value.
 
 `ConfigManager` invokes `onWrite` with the decoded proposed value after the
 optional global change handler and before committing. Returning `false`
 rejects the write. Direct local `set()` calls bypass both ingress handlers.
+Both paths persist before changing the runtime value and fail without changing
+that value if storage cannot be updated.
 
 Metadata available through `ConfigBase`:
 
@@ -83,6 +86,8 @@ ConfigManager &configManager();
 
 bool bind(ConfigBase *config);
 bool unbind(ConfigBase *config);
+bool restore();
+bool restored() const;
 String handle(const String &command);
 void setChangeHandler(ConfigChangeHandler handler);
 bool buildManifestMsgPack(uint8_t *buffer, size_t capacity, size_t &written) const;
@@ -90,7 +95,10 @@ String buildManifestBase64() const;
 ```
 
 `bind()` and `unbind()` remain available for explicit runtime use and retain
-their duplicate pointer/name and capacity checks.
+their duplicate pointer/name and capacity checks. `restore()` initializes the
+settings backend, restores all currently bound Configs, and is idempotent after
+success. Bind normal Configs before restore; later binds are not loaded
+automatically.
 
 `handle("list")` returns JSON objects with `name`, `type`, `require_reboot`,
 and `value`. `value` is the Config's current canonical `NetCodec<T>` String
@@ -107,6 +115,12 @@ ConfigManifestVersion = 1
 The binary manifest is `[encodingVersion, manifestVersion, configs[]]`; each
 entry is `[name, NetValueType, requireReboot]`. `handle("manifest")` returns
 Base64 of those exact MessagePack bytes.
+
+Config persistence uses reserved `_config:<name>` keys in
+`PersistentSettings` and canonical `NetCodec<T>` text. This storage mapping is
+an implementation detail and does not add a manifest field or version change.
+`NM_ENABLE_SETTINGS=0` is rejected at compile time because `Config<T>` is
+always persistent.
 
 ## DeviceIdentity
 
@@ -965,6 +979,9 @@ Current persistent file:
 Settings loading uses a dynamically sized ArduinoJson 7 `JsonDocument`;
 there is no fixed JSON load capacity.
 
+Persistent `set()` rolls back its in-memory mutation when saving fails.
+`ConfigManager` uses this store for reserved `_config:<name>` entries.
+
 ## Time
 
 Namespace:
@@ -1258,7 +1275,7 @@ Normal application structure:
 ```cpp
 void setup()
 {
-    // Bind Resources and handlers first.
+    // Declare/bind Configs, Resources, and handlers first.
     startNightMareESP();
 
     // Application hardware/services.
@@ -1413,6 +1430,11 @@ const HardwareDefinition &genericRelayModule1Ch();
 const HardwareDefinition *standardDefinitions(size_t &count);
 }
 ```
+
+`startNightMareESP()` initializes persistent settings through DeviceIdentity
+and immediately restores all currently bound Configs before Scheduler,
+telemetry, WiFi, or MQTT startup. Before this restore, Configs contain their
+firmware defaults.
 
 The complete declarations, constructors, diagnostic codes, and fixed graph
 capacities are in `NightMare/HardwareProfile.h`. The normative semantics and

@@ -94,10 +94,11 @@ The operator-facing JOB commands cannot delete MANAGED jobs.
 
 NightMare provides a small typed Config registry for firmware parameters. It
 owns registration, typed String decoding, optional application acceptance of
-command-ingress changes, and a compact declaration manifest.
+command-ingress changes, durable storage through `PersistentSettings`, startup
+restoration, and a compact declaration manifest.
 
-The Config registry is local-only. It does not publish, subscribe, persist
-values, reboot the device, or turn Configs into Resources.
+The Config registry is local-only. It does not publish, subscribe, reboot the
+device, or turn Configs into Resources.
 
 ### Commands
 
@@ -129,7 +130,9 @@ They intentionally do not duplicate application Resource state.
 
 `startNightMareESP()` centralizes common framework startup.
 
-Depending on enabled features, that includes identity, Scheduler startup, pending identity-cleanup retry, telemetry scheduling, and the WiFi/MQTT path.
+Depending on enabled features, that includes identity and persistent storage,
+Config restoration, Scheduler startup, pending identity-cleanup retry,
+telemetry scheduling, and the WiFi/MQTT path.
 
 `tickNightMareESP()` is the common cooperative service point for framework pieces that require polling.
 

@@ -699,8 +699,9 @@ CONFIG SET <name> <payload>
 
 The payload is opaque command text. It is decoded according to the declared
 `Config<T>` type, offered to the optional global change handler and then the
-Config's typed `onWrite` handler, and committed only when every stage accepts
-it.
+Config's typed `onWrite` handler, persisted in canonical form, and committed
+to the runtime value only when every stage succeeds. Rejection or persistence
+failure leaves the runtime value unchanged. An accepted value survives reboot.
 
 ### Manifest
 

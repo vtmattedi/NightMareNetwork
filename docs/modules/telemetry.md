@@ -324,7 +324,7 @@ configuration.
 ## Heartbeat configuration
 
 Heartbeat is enabled by default with a 15-second period. It is controlled by
-two runtime Configs:
+two persistent Configs:
 
 ```text
 heartbeat:enable    boolean, default true

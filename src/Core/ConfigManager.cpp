@@ -2,6 +2,9 @@
 
 #include "Config.h"
 #include "DocumentPayload.h"
+#include "PersistentKeys.h"
+#include "StateStore.h"
+#include "Logs.h"
 
 #include <ArduinoJson.h>
 #include <string.h>
@@ -145,6 +148,53 @@ ConfigBase *ConfigManager::find(const String &name) const
     return nullptr;
 }
 
+String ConfigManager::storageKey(const String &name)
+{
+    return String(NightMare::PersistentKey::ConfigPrefix) + name;
+}
+
+bool ConfigManager::persist(ConfigBase *config, const String &encodedValue)
+{
+    if (config == nullptr || !config->bound_)
+        return false;
+    return PersistentSettings.set(storageKey(config->name_), encodedValue);
+}
+
+bool ConfigManager::restore()
+{
+    if (restored_)
+        return true;
+    if (!PersistentSettings.begin())
+        return false;
+
+    bool complete = true;
+    for (size_t i = 0; i < configCount_; ++i)
+    {
+        ConfigBase &config = *configs_[i];
+        const String key = storageKey(config.name_);
+        if (PersistentSettings.exists(key))
+        {
+            const String saved = PersistentSettings.get(key);
+            if (config.restoreEncodedValue(saved))
+                continue;
+
+            LOG_WARNING("CONFIG", "Invalid persisted value for %s; restoring firmware default",
+                        config.name_.c_str());
+            config.restoreDefaultValue();
+        }
+
+        if (!PersistentSettings.set(key, config.encodedDefaultValue()))
+        {
+            LOG_ERROR("CONFIG", "Could not persist firmware default for %s",
+                      config.name_.c_str());
+            complete = false;
+        }
+    }
+
+    restored_ = complete;
+    return complete;
+}
+
 String ConfigManager::list() const
 {
     JsonDocument doc;
@@ -212,7 +262,13 @@ String ConfigManager::handle(const String &command)
             return "ERROR: invalid value";
         if (changeHandler_ != nullptr && !changeHandler_(config->name_, payload))
             return "ERROR: change rejected";
-        return config->applyEncodedValue(payload) ? String("OK") : String("ERROR: change rejected");
+        String canonical;
+        if (!config->prepareEncodedWrite(payload, canonical))
+            return "ERROR: change rejected";
+        if (!persist(config, canonical))
+            return "ERROR: persistence failed";
+        return config->restoreEncodedValue(canonical) ? String("OK")
+                                                       : String("ERROR: invalid value");
     }
 
     return "ERROR: expected list, get, set, or manifest";

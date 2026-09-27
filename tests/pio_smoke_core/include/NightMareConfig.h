@@ -1,6 +1,6 @@
 #pragma once
 
-#define NM_ENABLE_SETTINGS 0
+#define NM_ENABLE_SETTINGS 1
 #define NM_ENABLE_RESOURCES 0
 #define NM_ENABLE_NETWORK 0
 #define NM_ENABLE_CONSOLE 0

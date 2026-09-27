@@ -145,9 +145,11 @@ non-owning pointer with the function-local global manager and destruction
 unregisters it. The manager provides `list`, `get`, `set`, and `manifest`
 String ingress plus a compact MessagePack declaration manifest.
 
-It has no connection to `ResourcesManager`, MQTT, persistence, or the platform
-lifecycle. The command layer routes its `CONFIG ...` namespace to
-`configManager().handle(...)`; ConfigManager itself remains transport-neutral.
+It has no connection to `ResourcesManager` or MQTT. The command layer routes
+its `CONFIG ...` namespace to `configManager().handle(...)`; ConfigManager
+itself remains transport-neutral. Persistence uses `PersistentSettings` under
+reserved `_config:` keys. The ESP startup lifecycle calls `restore()` after
+persistent storage initialization and before normal framework services start.
 
 ## MQTT layers
 
@@ -355,7 +357,7 @@ Normal application startup is:
 ```cpp
 void setup()
 {
-    // Declare/bind application Resources and handlers first.
+    // Declare/bind application Configs, Resources, and handlers first.
 
     startNightMareESP();
 
@@ -369,7 +371,10 @@ Binding Resources before framework startup matters because pending old-identity 
 
 ```text
 DeviceIdentity.begin()
-    loads and applies the persisted timezone
+    initializes PersistentSettings and applies the persisted timezone
+
+ConfigManager.restore()
+    restores bound Config values or persists their firmware defaults
 
 Scheduler.begin(...)
     TASK or MANUAL according to configuration

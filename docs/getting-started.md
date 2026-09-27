@@ -368,6 +368,7 @@ With the normal feature set it:
 
 ```text
 initializes DeviceIdentity
+restores bound Config values from persistent settings
 starts the Scheduler
 installs pending identity-cleanup retry
 starts periodic telemetry scheduling
@@ -375,6 +376,11 @@ starts WiFi_Auto()
 ```
 
 MQTT is started by the first successful WiFi connection rather than directly by `startNightMareESP()`.
+
+Declare Configs before this call. Their constructor values are firmware
+defaults; after startup, valid persisted values have overwritten those
+defaults. Avoid consuming Config values as initialized settings before the
+restore phase completes.
 
 ## Service the framework loop
 

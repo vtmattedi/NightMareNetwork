@@ -196,6 +196,8 @@ void introNightMareESP()
 {
     Serial.begin(115200);
     gDeviceIdentity.begin();
+    if (!configManager().restore())
+        LOG_ERROR("NM", "Could not restore persistent Config values");
     Serial.print(MattediWorksPresents);
     Serial.print(NightMareNetworkFiglet);
     Serial.println(gDeviceIdentity.getDeviceName());
@@ -215,6 +217,8 @@ void introNightMareESP()
 void startNightMareESP()
 {
     gDeviceIdentity.begin();
+    if (!configManager().restore())
+        LOG_ERROR("NM", "Could not restore persistent Config values");
 #if NM_ENABLE_RESOURCES
     if (!gResourcesManager.loadRemoteSources())
         LOG_ERROR("NM", "Could not load Remote Resource sources");

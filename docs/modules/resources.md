@@ -91,6 +91,23 @@ A project can later remove the binding:
 gResourcesManager.unbindResource(&temperature);
 ```
 
+## Naming related declarations
+
+When related Resources naturally belong to one subsystem, prefer names such as
+`<group>:<value>` or `<group>:<subgroup>:<value>`:
+
+```text
+led_strip:state
+led_strip:brightness
+led_strip:colour
+climate:bedroom:target_temperature
+```
+
+This convention is not enforced. `:` remains an ordinary valid name character
+and has no runtime or protocol meaning. The convention only gives backend and
+tooling a stable hint for future grouping and relationship inference; flat
+Resource names remain valid.
+
 ## Why bind before `startNightMareESP()`
 
 The normal order is:
