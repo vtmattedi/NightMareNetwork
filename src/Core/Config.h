@@ -44,6 +44,8 @@ private:
 /// Naming convention: prefer "<group>:<value>" or deeper colon-separated
 /// groups when related declarations naturally belong together. Colons remain
 /// ordinary name characters; the convention is not enforced.
+/// A module that primarily implements a Config should normally own its
+/// declaration, stable name and handler alongside the behavior it configures.
 template <typename T>
 class Config : public ConfigBase
 {

@@ -113,8 +113,10 @@ The network representation is intentionally small:
 ```
 
 The provider manifest describes Managed Resources. The separate consume
-manifest is derived from valid bound Remote Resources. Retained `/state` is the
-authoritative freshness signal for Values.
+manifest is derived from valid bound Remote Resources. Retained `/state`
+establishes availability and carries the owner's value. Remote freshness ages
+separately from the last valid update, using the owner's advertised refresh
+period.
 
 ## Identity and presence
 
@@ -135,7 +137,9 @@ Presence is published separately from application state:
 
 The retained status document carries the logical name, hardware signature, timezone, and presence. It has the same JSON shape for online state, graceful shutdown, and MQTT Last Will.
 
-Resource freshness does not depend on status. A device being online and a particular Resource having fresh state are different facts.
+Resource availability and freshness do not depend on status. A device being
+online, a particular Resource being available, and its last update being fresh
+are three different facts.
 
 ## Static information and telemetry
 

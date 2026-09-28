@@ -85,11 +85,31 @@ Examples include:
 
 ## A manifest describes; `/state` tells the truth
 
-**Decision:** Resource manifests are descriptive and diagnostic. Value freshness comes from `/state`.
+**Decision:** Resource manifests are descriptive and diagnostic. Valid Value
+updates come from `/state`; manifest advertisement metadata supplies only the
+expected refresh window used to age those updates.
 
 **Reason:** discovery metadata and runtime state have different lifecycles. Coupling them would make Value validity depend on an unrelated metadata document arriving first or remaining current.
 
-**Consequence:** a missing, incompatible, withdrawn, or malformed manifest does not automatically invalidate a Value state message. Consumers that need compatibility checks can use manifest information separately.
+**Consequence:** a missing, incompatible, withdrawn, or malformed manifest does
+not automatically invalidate a Value state message. Without known enabled
+advertisement metadata, time-based aging pauses rather than guessing a timeout.
+
+## Availability, freshness, and advertisement are separate
+
+**Decision:** binding is structural, availability records whether a Value can
+currently be advertised, freshness records age, and Managed advertisement
+policy controls retained publication only.
+
+**Reason:** temporary hardware loss should not rewrite declarations, and a
+network publication setting must not silently become sensor polling, power, or
+control-loop policy.
+
+**Consequence:** an unavailable Resource remains bound and manifested. An empty
+retained state marks Remote availability false rather than setting freshness to
+`STALE`. Managed policy is persisted by `ResourcesManager`; successful
+publications refresh their timer, while cooperative round-robin housekeeping
+refreshes or retries at most one Resource per framework tick.
 
 ## Resource ownership is explicit
 
@@ -181,8 +201,8 @@ source changing underneath it is not. Propagation is one level and scans the
 registry rather than keeping a reverse index.
 
 Withdrawal propagates with the value. When a source's retained state is
-tombstoned, or it is retargeted, cleared or unbound, each dependent goes stale,
-stops being authoritative and has its retained `/state` tombstoned. A mirror
+tombstoned, or it is retargeted, cleared or unbound, each dependent becomes
+unavailable and has its retained `/state` tombstoned. A mirror
 whose source has no value must not keep advertising one, because its `/state`
 is retained and a consumer that does not resolve `depends_on` cannot tell the
 difference.

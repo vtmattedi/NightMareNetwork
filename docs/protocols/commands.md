@@ -77,6 +77,8 @@ A space after `>` selects a Resource by unique short name:
 > <name> set <payload>
 > <name> invoke [payload]
 > <name> source [OWNER/RESOURCE|CLEAR]
+> <name> enable <true|false>
+> <name> period <seconds>
 ```
 
 A bare Value defaults to `get`.
@@ -93,6 +95,12 @@ A bare Action defaults to `invoke` with an empty payload.
 source. `OWNER/RESOURCE` changes and persists the source; `CLEAR` removes it.
 It also accepts `{"source":"OWNER/RESOURCE"}` or
 `{"owner":"OWNER","resource":"RESOURCE"}`.
+
+`enable` and `period` require a Managed Value. They configure network
+advertisement only, persist through `ResourcesManager`, and do not control
+hardware polling or application logic. `enable false` withdraws retained
+`/state`; `enable true` immediately advertises the current authoritative value
+when available. `period` accepts 1 through 86400 seconds.
 
 The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
 

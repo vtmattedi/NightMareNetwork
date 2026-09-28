@@ -69,6 +69,11 @@ public:
     // Restore persisted Remote bindings after the application has bound all
     // resources and before networking starts.
     bool loadRemoteSources();
+    /// Restore persistent advertisement policy for bound Managed values.
+    bool loadAdvertisementSettings();
+
+    /// Cooperative bounded housekeeping. Inspects at most one Resource.
+    void tick();
 
     // Call after transport reconnection to republish the retained manifest and
     // every managed value that has authoritative state. Binding one also announces it.
@@ -167,6 +172,9 @@ private:
     // Resource methods delegate here. A managed write keeps local truth even if
     // publication fails; a remote request succeeds only when it was transported.
     bool setValue(NetValueResource &resource, const String &encoded);
+    bool setAvailability(NetValueResource &resource, bool available);
+    bool setAdvertisementEnabled(NetValueResource &resource, bool enabled);
+    bool setAdvertisementPeriod(NetValueResource &resource, uint32_t seconds);
     bool invoke(NetActionResource &resource, const String &payload);
     bool configureRemoteSource(NetResource &resource, const String &deviceName,
                                const String &resourceName, bool persist = true);
@@ -181,6 +189,9 @@ private:
     bool removePersistedRemoteSource(const String &localName) const;
     bool saveRemoteSources() const;
     static bool parseSourceAddress(const String &encoded, String &owner, String &resourceName);
+    bool restoreAdvertisementPolicy(NetValueResource &resource);
+    bool persistAdvertisementPolicy(const NetValueResource &resource, bool enabled,
+                                    uint32_t periodMs) const;
 
     static bool validSegment(const String &segment);
     static bool validActionSchema(const NetActionResource &action);
@@ -216,17 +227,15 @@ private:
     /// values rather than their names, which is most of what it saves.
     bool serializeManifest(String &payload, ManifestFormat format) const;
     bool serializeConsumeManifest(String &payload, ManifestFormat format) const;
-    /// @brief Whether a manifest subscription is wanted for remote owners.
-    /// False when verification is compiled out: a handler subscribes to every
-    /// device instead, which is a different question.
-    static bool verifiesRemoteManifests();
-    bool publishState(const NetValueResource &resource);
+    bool publishState(NetValueResource &resource);
+    bool withdrawState(NetValueResource &resource);
+    void applyAdvertisementMetadata(const String &deviceName, JsonArrayConst items);
     /// @brief Copies an authoritative value into every Managed value that
     /// declared it with dependsOn(), and publishes each one. One level only;
     /// see the definition.
     void propagateToDependents(const NetValueResource &source);
-    /// @brief The reverse: the source lost its value, so each dependent goes
-    /// stale and its retained state is tombstoned.
+    /// @brief The reverse: the source lost its value, so each dependent becomes
+    /// unavailable and its retained state is tombstoned.
     void withdrawFromDependents(const NetValueResource &source);
     ActionResult listResources() const;
     void applyOtherDeviceManifest(const String &deviceName, const String &message);
@@ -255,6 +264,8 @@ private:
     ResourceSubscriber *subscriber_ = nullptr; // Non-owning.
     ManifestHandler manifestHandler_ = nullptr;
     EncodedManifestHandler encodedManifestHandler_ = nullptr;
+    bool advertisementSettingsLoaded_ = false;
+    size_t housekeepingCursor_ = 0;
 };
 
 extern ResourcesManager gResourcesManager;

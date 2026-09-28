@@ -347,6 +347,12 @@ restores bound Configs during framework startup, creates missing entries from
 firmware defaults, and replaces invalid entries with those defaults. Application
 code should use `Config<T>` rather than reading or writing these keys directly.
 
+`ResourcesManager` keeps Managed Value advertisement policy in a separate
+`/resourcesettings.json` document keyed by stable local Resource name. That file
+does not consume `RuntimeState` entries and is not part of `ConfigManager` or
+`PersistentSettings`; application code should use the Managed Value
+advertisement API or Resource commands rather than editing it directly.
+
 ## Command access
 
 `PersistentSettings` is not exposed through a generic command. The `CONFIG`

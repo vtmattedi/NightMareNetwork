@@ -135,6 +135,8 @@ bool NetValueResource::setDependency(const NetValueResource &source)
 void NetValueResource::resetRemoteState()
 {
     freshness_ = ResourceFreshness::UNKNOWN;
+    available_ = false;
+    advertisementPolicyKnown_ = false;
     hasAuthoritativeValue_ = false;
     hasOptimisticValue_ = false;
     lastUpdateMs_ = 0;
@@ -160,6 +162,43 @@ void NetValueResource::noteOwnerUpdate()
 {
     lastUpdateMs_ = (uint32_t)millis();
     freshness_ = ResourceFreshness::FRESH;
+    if (!isOwned())
+        available_ = true;
+}
+
+bool NetValueResource::setManagedAvailability(bool available)
+{
+    if (!isOwned())
+        return false;
+#if NM_ENABLE_RESOURCES
+    if (resourceManager_ != nullptr)
+        return resourceManager_->setAvailability(*this, available);
+#endif
+    available_ = available;
+    withdrawalPending_ = !available;
+    return true;
+}
+
+bool NetValueResource::setManagedAdvertisementEnabled(bool enabled)
+{
+    if (!isOwned())
+        return false;
+#if NM_ENABLE_RESOURCES
+    if (resourceManager_ != nullptr)
+        return resourceManager_->setAdvertisementEnabled(*this, enabled);
+#endif
+    return false;
+}
+
+bool NetValueResource::setManagedAdvertisementPeriod(uint32_t seconds)
+{
+    if (!isOwned())
+        return false;
+#if NM_ENABLE_RESOURCES
+    if (resourceManager_ != nullptr)
+        return resourceManager_->setAdvertisementPeriod(*this, seconds);
+#endif
+    return false;
 }
 
 bool NetValueResource::dispatchLocalWrite(const String &encoded)

@@ -220,6 +220,8 @@ void startNightMareESP()
     if (!configManager().restore())
         LOG_ERROR("NM", "Could not restore persistent Config values");
 #if NM_ENABLE_RESOURCES
+    if (!gResourcesManager.loadAdvertisementSettings())
+        LOG_ERROR("NM", "Could not load Resource advertisement settings");
     if (!gResourcesManager.loadRemoteSources())
         LOG_ERROR("NM", "Could not load Remote Resource sources");
 #endif
@@ -245,6 +247,9 @@ void startNightMareESP()
 
 void tickNightMareESP()
 {
+#if NM_ENABLE_RESOURCES
+    gResourcesManager.tick();
+#endif
 #if NM_ENABLE_TIME_SYNC
     processTimeSyncEvents();
 #endif

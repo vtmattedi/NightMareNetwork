@@ -245,34 +245,39 @@ const NetValueResource *dependency() const;
 
 ## NetValue<T>
 
-Important methods/state:
+Common Value metadata:
+
+```cpp
+NetValueType type() const;
+bool available() const;
+ResourceFreshness freshness() const;
+uint32_t lastUpdateMs() const;
+bool advertisementPolicyKnown() const;
+bool advertisementEnabled() const;
+uint32_t advertisementPeriodSeconds() const;
+const NetValueResource *dependency() const;
+```
+
+ManagedSensor and ManagedState expose:
 
 ```cpp
 const T &getValue() const;
-const T &authoritativeValue() const;
-
 bool setValue(const T &value);
-
-String encodedValue() const;
-String encodedCurrentValue() const;
-bool requestEncodedValue(const String &encoded);
-
-ResourceFreshness freshness;
-bool isStale() const;
-bool hasAuthoritativeValue() const;
-bool hasCurrentValue() const;
-
-uint32_t lastUpdateMs() const;
-uint32_t lastWriteMs() const;
-
-uint32_t optimisticWindowMs;
-UpdateHandler onUpdate;
+bool setAvailable(bool available);
+bool setAdvertisementEnabled(bool enabled);
+bool setAdvertisementPeriod(uint32_t seconds);
 ```
 
-The built-in optimistic window default is:
+RemoteSensor and RemoteState expose `getValue()`, `hasValue()`, and `isStale()`;
+RemoteState also exposes `setValue()`.
 
-```text
-5000 ms
+Advertisement defaults and limits:
+
+```cpp
+NetResourceDefaultAdvertisementPeriodSeconds = 300
+NetResourceMinAdvertisementPeriodSeconds = 1
+NetResourceMaxAdvertisementPeriodSeconds = 86400
+NetResourceAdvertisementRetryMs = 1000
 ```
 
 ## Remote Value source selection
@@ -508,6 +513,8 @@ Project-facing methods:
 bool bindResource(NetResource *resource);
 void unbindResource(NetResource *resource);
 bool loadRemoteSources();
+bool loadAdvertisementSettings();
+void tick();
 
 bool announceAll();
 bool publishManifest();
@@ -542,6 +549,8 @@ static bool decodeConsumeManifest(
 
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
 constexpr uint8_t ConsumeManifestVersion = 2;
+constexpr uint8_t ManifestEncodingVersion = 1;
+constexpr uint8_t ResourceManifestVersion = 4;
 
 String resolveResourceConsumeManifestTopic(
     const String &deviceName,
@@ -559,7 +568,7 @@ ActionResult executeCommand(
 //   >manifest [publish] [json|msgpack]
 //   >drop <name|owner/name>
 //   >raw <topic> [payload]
-//   > <name|owner/name> [get|set|invoke|source] [payload]
+//   > <name|owner/name> [get|set|invoke|source|enable|period] [payload]
 
 bool withdrawIdentity(const String &oldDeviceName);
 ```

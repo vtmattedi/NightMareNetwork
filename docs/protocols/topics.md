@@ -83,7 +83,10 @@ NightMare uses retained messages for current state and current description.
 
 An empty retained payload is used as a tombstone where NightMare needs to remove retained state.
 
-For Resource Value state specifically, an empty retained `/state` means the state has been withdrawn. A bound Remote Value becomes `STALE`, while its last known value remains readable.
+For Resource Value state specifically, an empty retained `/state` means the
+state has been withdrawn. A bound Remote Value becomes unavailable; withdrawal
+does not redefine freshness as `STALE`. Its last decoded value remains stored
+as last-known data.
 
 ## Transient topics
 

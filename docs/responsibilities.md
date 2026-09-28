@@ -207,6 +207,12 @@ The application chooses which capabilities are Resources and how they are named.
 
 That is the contract the device exposes to other devices and tooling, so names should describe application concepts rather than transport details.
 
+If a module primarily implements a Sensor, State, Action, or Config, that module
+should normally own its declaration, stable name, handlers, and binding. This
+keeps a reusable module's network interface beside its hardware/behavior rather
+than centralizing every declaration in `main.cpp`. Cross-module orchestration
+still belongs above the individual modules.
+
 ### Config declarations and policy
 
 The application declares `Config<T>` objects, which register for their own

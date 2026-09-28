@@ -376,6 +376,12 @@ DeviceIdentity.begin()
 ConfigManager.restore()
     restores bound Config values or persists their firmware defaults
 
+ResourcesManager.loadAdvertisementSettings()
+    restores persistent Managed Value advertisement policy
+
+ResourcesManager.loadRemoteSources()
+    restores Remote Resource source bindings
+
 Scheduler.begin(...)
     TASK or MANUAL according to configuration
 
@@ -409,6 +415,7 @@ void loop()
 It services components that require cooperative dispatch, currently including:
 
 ```text
+one Resource housekeeping step
 completed SNTP synchronization events when time sync is enabled
 one pending framework publication request
 Scheduler when configured MANUAL

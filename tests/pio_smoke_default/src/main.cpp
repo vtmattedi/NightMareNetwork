@@ -48,7 +48,8 @@ static_assert(HasSetValue<ManagedSensor<int>>::value, "ManagedSensor must be wri
 static_assert(!HasSetValue<RemoteSensor<int>>::value, "RemoteSensor must not expose setValue");
 static_assert(HasSetValue<ManagedState<int>>::value, "ManagedState must expose setValue");
 static_assert(HasSetValue<RemoteState<int>>::value, "RemoteState must expose setValue");
-static_assert(!HasFreshnessField<RemoteSensor<int>>::value, "freshness is framework-internal");
+static_assert(!HasFreshnessField<RemoteSensor<int>>::value,
+              "freshness must be exposed through its accessor, not a public field");
 static_assert(!HasEncodedValue<ManagedSensor<int>>::value, "wire encoding is framework-internal");
 static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
               "NetValue is an implementation base, not an application resource");
@@ -68,6 +69,16 @@ class RecordingPublisher : public ResourcePublisher
 public:
     bool publish(const String &topic, const String &payload, bool retained) override
     {
+        if (topic.endsWith("/state"))
+        {
+            ++stateAttempts;
+            lastStateTopic = topic;
+            lastStatePayload = payload;
+            stateWasRetained = retained;
+            if (failState)
+                return false;
+            ++statePublishes;
+        }
         if (topic.endsWith("/manifest/consume"))
         {
             ++consumeJsonPublishes;
@@ -83,6 +94,12 @@ public:
     int consumePackedPublishes = 0;
     bool consumeWasRetained = false;
     String lastConsumeJson;
+    int stateAttempts = 0;
+    int statePublishes = 0;
+    bool stateWasRetained = false;
+    bool failState = false;
+    String lastStateTopic;
+    String lastStatePayload;
 };
 
 int writeCalls = 0;
@@ -213,7 +230,121 @@ void setup()
                                      colourValue.success && colourValue.result == "4278190335" &&
                                      customManifest.success &&
                                      customManifest.result.indexOf("\"type\":\"time\"") >= 0 &&
-                                     customManifest.result.indexOf("\"type\":\"colour\"") >= 0;
+                                     customManifest.result.indexOf("\"type\":\"colour\"") >= 0 &&
+                                     customManifest.result.indexOf(
+                                         "\"advertisement_enabled\":true") >= 0 &&
+                                     customManifest.result.indexOf(
+                                         "\"advertisement_period\":300") >= 0;
+
+    ResourcesManager advertisementManager;
+    RecordingPublisher advertisementPublisher;
+    ManagedSensor<int> advertised("advertisement:primary");
+    ManagedSensor<int> flatAdvertisement("flat_advertisement");
+    advertisementManager.setPublisher(&advertisementPublisher);
+    const bool advertisementBound = advertisementManager.bindResource(&advertised) &&
+                                    advertisementManager.bindResource(&flatAdvertisement);
+    const int beforeInitialState = advertisementPublisher.statePublishes;
+    const bool immediateAdvertisement = advertised.setValue(10) &&
+        advertisementPublisher.statePublishes == beforeInitialState + 1 &&
+        advertisementPublisher.lastStatePayload == "10";
+    const ActionResult periodSet =
+        advertisementManager.executeCommand(" advertisement:primary period 1");
+    const ActionResult disabled =
+        advertisementManager.executeCommand(" advertisement:primary enable false");
+    const int afterWithdrawal = advertisementPublisher.statePublishes;
+    const bool disabledStillComputes = disabled.success &&
+        advertisementPublisher.lastStatePayload.length() == 0 && advertised.setValue(11) &&
+        advertised.getValue() == 11 &&
+        advertisementPublisher.statePublishes == afterWithdrawal;
+    const ActionResult enabled =
+        advertisementManager.executeCommand(" advertisement:primary enable true");
+    const bool enabledAdvertised = enabled.success &&
+        advertisementPublisher.lastStatePayload == "11";
+    const bool unavailableStillComputes = advertised.setAvailable(false) &&
+        !advertised.available() && advertisementPublisher.lastStatePayload.length() == 0 &&
+        advertised.setValue(12) && advertised.getValue() == 12;
+    const bool availabilityRecovered = advertised.setAvailable(true) &&
+        advertised.available() && advertisementPublisher.lastStatePayload == "12";
+
+    JsonDocument ownerManifest;
+    JsonArray ownerRoot = ownerManifest.to<JsonArray>();
+    ownerRoot.add(ManifestEncodingVersion);
+    ownerRoot.add(ResourceManifestVersion);
+    JsonArray ownerItems = ownerRoot.add<JsonArray>();
+    JsonArray ownerValue = ownerItems.add<JsonArray>();
+    ownerValue.add(static_cast<uint8_t>(NetResourceType::VALUE));
+    ownerValue.add("temperature");
+    ownerValue.add(static_cast<uint8_t>(AccessPolicy::READ));
+    ownerValue.add(static_cast<uint8_t>(NetValueType::INTEGER));
+    ownerValue.add(nullptr);
+    ownerValue.add(true);
+    ownerValue.add(1);
+    String encodedOwnerManifest;
+    serializeMsgPack(ownerManifest, encodedOwnerManifest);
+    ResourcesManager freshnessManager;
+    RemoteSensor<int> freshnessRemote("temperature", NetDeviceIdentity("freshness-node"));
+    const bool freshnessBound = freshnessManager.bindResource(&freshnessRemote);
+    freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
+                                          encodedOwnerManifest);
+    freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "20");
+    const bool remoteFresh = freshnessRemote.available() &&
+        freshnessRemote.freshness() == ResourceFreshness::FRESH &&
+        freshnessRemote.advertisementPolicyKnown() &&
+        freshnessRemote.advertisementPeriodSeconds() == 1;
+    freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "");
+    const bool remoteUnavailable = !freshnessRemote.available() &&
+        freshnessRemote.freshness() == ResourceFreshness::FRESH;
+    freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "21");
+
+    delay(2100);
+    freshnessManager.tick();
+    const bool remoteAged = freshnessRemote.available() &&
+        freshnessRemote.freshness() == ResourceFreshness::STALE;
+    freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "22");
+    const bool remoteRefreshed = freshnessRemote.freshness() == ResourceFreshness::FRESH;
+
+    flatAdvertisement.setAdvertisementPeriod(1);
+    flatAdvertisement.setValue(1);
+    const int beforeBoundedTick = advertisementPublisher.stateAttempts;
+    advertisementManager.tick();
+    const bool boundedTick = advertisementPublisher.stateAttempts == beforeBoundedTick + 1 &&
+        advertisementPublisher.lastStatePayload == "12";
+    const int afterRefresh = advertisementPublisher.stateAttempts;
+    advertisementManager.tick();
+    const bool normalPublicationResetTimer =
+        advertisementPublisher.stateAttempts == afterRefresh;
+    delay(1100);
+    advertisementPublisher.failState = true;
+    const int beforeFailedRefresh = advertisementPublisher.stateAttempts;
+    advertisementManager.tick();
+    advertisementManager.tick();
+    advertisementManager.tick();
+    advertisementManager.tick();
+    const bool refreshRateLimited =
+        advertisementPublisher.stateAttempts == beforeFailedRefresh + 2;
+    advertisementPublisher.failState = false;
+    const int beforeFailedRefreshRetry = advertisementPublisher.statePublishes;
+    delay(1100);
+    advertisementManager.tick();
+    const bool failedRefreshRetried =
+        advertisementPublisher.statePublishes == beforeFailedRefreshRetry + 1;
+
+    advertisementManager.unbindResource(&advertised);
+    ResourcesManager restoredAdvertisementManager;
+    ManagedSensor<int> restoredAdvertisement("advertisement:primary");
+    const bool restoredAdvertisementPolicy =
+        restoredAdvertisementManager.bindResource(&restoredAdvertisement) &&
+        restoredAdvertisementManager.loadAdvertisementSettings() &&
+        restoredAdvertisement.advertisementEnabled() &&
+        restoredAdvertisement.advertisementPeriodSeconds() == 1;
+
+    const bool advertisementLifecycle = advertisementBound && immediateAdvertisement &&
+        periodSet.success && disabledStillComputes && enabledAdvertised &&
+        unavailableStillComputes && availabilityRecovered && freshnessBound &&
+        remoteFresh && remoteUnavailable && remoteAged && remoteRefreshed &&
+        boundedTick && normalPublicationResetTimer && refreshRateLimited &&
+        failedRefreshRetried && restoredAdvertisementPolicy &&
+        advertisementPublisher.stateWasRetained;
     smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&
                                             managedSensor.owner().length() != 0 &&
@@ -222,7 +353,8 @@ void setup()
                                             !managedSensor.isRemote() && remoteSensor.isRemote() &&
                                             remoteSensor.hasValue() && !remoteSensor.isStale() &&
                                             resourceCommandsWork && consumeCodecWorks &&
-                                            consumeLifecycleWorks && customResourcesWork);
+                                            consumeLifecycleWorks && customResourcesWork &&
+                                            advertisementLifecycle);
     const String timezone = gDeviceIdentity.getTimezone();
     const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");
     const NightMareResults timezoneSet =

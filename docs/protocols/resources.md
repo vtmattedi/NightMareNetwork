@@ -30,7 +30,7 @@ The central rule is:
 The current Resource manifest version is:
 
 ```text
-3
+4
 ```
 
 The version appears in the retained manifest document.
@@ -67,26 +67,32 @@ A representative manifest is:
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "resources": [
     {
       "name": "temperature",
       "kind": "value",
       "access": "read",
-      "type": "float"
+      "type": "float",
+      "advertisement_enabled": true,
+      "advertisement_period": 300
     },
     {
       "name": "power",
       "kind": "value",
       "access": "read_write",
-      "type": "boolean"
+      "type": "boolean",
+      "advertisement_enabled": true,
+      "advertisement_period": 300
     },
     {
       "name": "ac_door",
       "kind": "value",
       "access": "read",
       "type": "boolean",
-      "depends_on": "door"
+      "depends_on": "door",
+      "advertisement_enabled": true,
+      "advertisement_period": 300
     },
     {
       "name": "set_timer",
@@ -124,16 +130,18 @@ Its positional schema is:
 ```text
 [encodingVersion, manifestVersion, resources[]]
 
-value  = [0, name, accessEnum, typeEnum, dependsOn?]
+value  = [0, name, accessEnum, typeEnum, dependsOn|null,
+          advertisementEnabled, advertisementPeriodSeconds]
 action = [1, name, arguments[]]
 arg    = [name, typeEnum, required]
 ```
 
-`dependsOn` is a single local Resource name, appended only when the Value
-declares one, so a Value without one encodes exactly as it did in manifest
-version `2`. Actions have no dependencies.
+`dependsOn` is a single local Resource name. Version 4 writes `null` when it is
+absent, then appends advertisement policy at positions 5 and 6. Older readers
+ignore the trailing policy fields. Actions have no advertisement policy.
 
-Encoding version `1` is current (`dependsOn` was appended without a bump). Array positions and numeric enums are
+Encoding version `1` remains current because fields were appended rather than
+reordered. Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
 
@@ -244,13 +252,13 @@ was never bound.
 ### Withdrawal propagates
 
 A mirror cannot keep asserting a value once the source stops having one. When
-the source loses its value, each dependent goes stale, stops being
-authoritative, and its retained `/state` is tombstoned:
+the source loses its value, each dependent becomes unavailable and its retained
+`/state` is tombstoned:
 
 ```text
 Mycroft/door/state tombstoned
-    -> Adler/door      STALE
-    -> Adler/ac_door   STALE, retained /state tombstoned
+    -> Adler/door      UNAVAILABLE
+    -> Adler/ac_door   UNAVAILABLE, retained /state tombstoned
 ```
 
 The decoded value stays readable locally. What is withdrawn is the claim that
@@ -512,23 +520,47 @@ byte range 0–255; HSV hue wraps across the same byte range.
 Appending `time` and `colour` to `NetValueType` preserves all earlier numeric
 enum values, so the compact manifest encoding version remains unchanged.
 
+## Advertisement policy and availability
+
+Every Managed Value declares `advertisement_enabled` and an
+`advertisement_period` in seconds. Enabled, available Values publish changes
+immediately and periodically reaffirm unchanged retained state by the declared
+maximum interval. Each successful publication resets the refresh timer.
+
+Disabling advertisement withdraws retained `/state` with an empty retained
+payload and suppresses later advertisements. Re-enabling immediately publishes
+the authoritative value when one exists and the Resource is available.
+
+Availability is not added to ordinary payloads. A Managed owner represents
+temporary unavailability by withdrawing retained state while leaving the
+Resource bound and declared. Advertisement enable/period do not define polling,
+power, acquisition, or control-loop behavior.
+
 ## State freshness
 
-Remote Value freshness is driven by `/state`.
+Availability and freshness are separate runtime state.
 
-A valid non-empty owner state makes the Remote Value:
+A valid non-empty owner state makes the Remote Value available and:
 
 ```text
 FRESH
 ```
 
-An empty `/state` payload means the retained state was deleted and makes the Remote Value:
+An empty `/state` payload means the retained state was deleted and makes the
+Remote Value unavailable. It does not itself set freshness to `STALE`.
+
+While a Remote Value is available and its owner's advertisement policy is
+known and enabled, housekeeping compares `lastUpdateMs` with the advertised
+period. At approximately twice that period without a valid reaffirmation it
+becomes:
 
 ```text
 STALE
 ```
 
-The last known decoded value remains readable when a tombstone is received.
+The last decoded value remains stored and readable through `getValue()`, but
+`available()` and `hasValue()` report that it is not current while unavailable.
+A later valid state immediately restores availability and `FRESH`.
 
 Changing a Remote Resource's source is different: it resets the old source state entirely, including authoritative value presence, freshness, optimistic state, and update timestamps.
 
@@ -538,11 +570,13 @@ Before the first owner state is learned, freshness is:
 UNKNOWN
 ```
 
-## Manifest does not control freshness
+## Manifest metadata and freshness
 
 The manifest has a different lifecycle from Value state.
 
-The following do **not** change Value freshness:
+The manifest supplies the period used to age valid values, but receiving a
+manifest does not itself make a Value fresh. The following do **not** directly
+change Value freshness:
 
 - a missing manifest,
 - a withdrawn manifest,

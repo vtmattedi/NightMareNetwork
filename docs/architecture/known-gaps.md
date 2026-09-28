@@ -71,6 +71,21 @@ A general execution queue is not implemented and should not be assumed by
 application code. `SystemState` requests are a fixed framework publication
 mechanism, not generic scheduling semantics.
 
+## Resource auto-binding requires lifecycle separation
+
+**Category:** Deferred design.
+
+Resources still require explicit `bindResource()`. Applying Config-style
+automatic registration safely requires splitting static-construction-safe
+registry insertion from runtime activation, because current binding also locks
+identity, validates Action schemas, restores settings/sources, subscribes, and
+publishes. Actions additionally cannot register from their base constructor
+before the leaf schema is fully constructed.
+
+Advertisement refresh does not depend on that refactor. Dynamically bound
+Managed Values restore advertisement policy immediately after the manager's
+startup settings phase.
+
 ## Projected Remote Value JSON fan-out is not implemented
 
 **Category:** Deferred design.

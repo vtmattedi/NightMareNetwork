@@ -369,6 +369,8 @@ With the normal feature set it:
 ```text
 initializes DeviceIdentity
 restores bound Config values from persistent settings
+restores Managed Value advertisement settings
+restores Remote Resource source bindings
 starts the Scheduler
 installs pending identity-cleanup retry
 starts periodic telemetry scheduling
@@ -649,7 +651,18 @@ No space after `>` selects a ResourceManager operation such as `list` or `raw`.
 
 A space after `>` selects a bound Resource by its unique local name. A bare
 Value reads its effective current Value; a bare Action invokes an empty
-payload. Explicit Resource verbs are `get`, `set`, `invoke`, and `source`.
+payload. Explicit Resource verbs are `get`, `set`, `invoke`, `source`,
+`enable`, and `period`. The last two configure persistent Managed Value
+advertisement policy:
+
+```text
+> temperature enable false
+> temperature period 300
+```
+
+The period is in seconds and accepts values from 1 through 86400. Disabling
+advertisement withdraws retained state; it does not stop local sensor polling or
+state computation.
 
 `>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
 

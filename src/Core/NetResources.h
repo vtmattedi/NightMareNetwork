@@ -11,6 +11,10 @@ class NetValue;
 constexpr size_t NetResourceMaxPayloadLength = 2048;
 constexpr size_t NetResourceMaxManifestLength = 16384;
 constexpr size_t NetResourceMaxCommandLength = NetResourceMaxManifestLength + 256;
+constexpr uint32_t NetResourceDefaultAdvertisementPeriodSeconds = 300;
+constexpr uint32_t NetResourceMinAdvertisementPeriodSeconds = 1;
+constexpr uint32_t NetResourceMaxAdvertisementPeriodSeconds = 86400;
+constexpr uint32_t NetResourceAdvertisementRetryMs = 1000;
 
 enum class NetResourceType : uint8_t
 {
@@ -183,7 +187,9 @@ enum class ManifestFormat : uint8_t
  *
  *   manifest := [ encodingVersion:uint, manifestVersion:uint, resources:array ]
  *
- *   resource := [ 0, name:str, access:uint, type:uint, dependsOn:str? ]  // VALUE
+ *   resource := [ 0, name:str, access:uint, type:uint,
+ *                 dependsOn:str|null, advertisementEnabled:bool,
+ *                 advertisementPeriodSeconds:uint ]                    // VALUE
  *             | [ 1, name:str, arguments:array ]                        // ACTION
  *
  *   argument := [ name:str, type:uint, required:bool ]
@@ -191,10 +197,10 @@ enum class ManifestFormat : uint8_t
  * `kind` leads each resource so a reader knows the shape before reading the
  * rest. The numbers are NetResourceType, AccessPolicy and NetValueType.
  *
- * `dependsOn` is the LOCAL name of the value this one mirrors, present only
- * when one was declared, so a value without one encodes exactly as it did
- * before the field existed. It is a single name, never an array and never
- * `<device>/<resource>`: see NetValueResource::setDependency().
+ * `dependsOn` is the LOCAL name of the value this one mirrors. Version 4 adds
+ * a null placeholder when there is no dependency so advertisement policy can
+ * occupy stable appended positions 5 and 6. Older readers ignore those trailing
+ * positions. It is never `<device>/<resource>`: see setDependency().
  *
  * Positions rather than keys because MessagePack has no string table: it writes
  * every key in full, every time, and on a real 20-resource manifest the repeated
@@ -227,6 +233,7 @@ enum class ManifestFormat : uint8_t
  *     JSON instead of breaking them.
  * ------------------------------------------------------------------------- */
 constexpr uint8_t ManifestEncodingVersion = 1;
+constexpr uint8_t ResourceManifestVersion = 4;
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
 /// Version 2 appends `remotes` (position 3 of the compact form): every Remote
 /// Resource this device declares, bound or not, so a controller can find and
@@ -290,6 +297,15 @@ class NetValueResource : public NetResource
 {
 public:
     NetValueType type() const { return valueType_; }
+    bool available() const { return available_; }
+    ResourceFreshness freshness() const { return freshness_; }
+    uint32_t lastUpdateMs() const { return lastUpdateMs_; }
+    bool advertisementPolicyKnown() const { return advertisementPolicyKnown_; }
+    bool advertisementEnabled() const { return advertisementEnabled_; }
+    uint32_t advertisementPeriodSeconds() const
+    {
+        return advertisementPeriodMs_ / 1000UL;
+    }
 
     /// @brief The value this one mirrors, or nullptr. See setDependency().
     const NetValueResource *dependency() const { return dependency_; }
@@ -314,7 +330,7 @@ protected:
     /// mirrors `door` untouched.
     ///
     /// When `source` loses its value -- its retained state is withdrawn, it is
-    /// retargeted, or it is unbound -- this resource goes stale and its own
+    /// retargeted, or it is unbound -- this resource becomes unavailable and its own
     /// retained state is tombstoned, because a mirror cannot keep asserting a
     /// value nothing stands behind.
     ///
@@ -329,11 +345,19 @@ protected:
                      ResourceRole resourceRole)
         : NetResource(resourceName, resourceOwner, NetResourceType::VALUE, resourceRole),
           access_(resourceAccess),
-          valueType_(resourceValueType) {}
+          valueType_(resourceValueType),
+          available_(resourceRole == ResourceRole::MANAGED),
+          advertisementPolicyKnown_(resourceRole == ResourceRole::MANAGED) {}
 
-    bool hasValueImpl() const { return hasAuthoritativeValue_ || optimisticActive(); }
+    bool hasValueImpl() const
+    {
+        return available_ && (hasAuthoritativeValue_ || optimisticActive());
+    }
     bool isStaleImpl() const { return freshness_ == ResourceFreshness::STALE; }
     void useOptimisticSync() { syncStrategy_ = NetSyncStrategy::OPTIMISTIC; }
+    bool setManagedAvailability(bool available);
+    bool setManagedAdvertisementEnabled(bool enabled);
+    bool setManagedAdvertisementPeriod(uint32_t seconds);
 
     // Type-erasure boundary. These are the only value operations the transport
     // layer needs, and all three speak the encoded wire format.
@@ -345,6 +369,15 @@ private:
     NetSyncStrategy syncStrategy_ = NetSyncStrategy::STRICT;
     uint32_t optimisticWindowMs_ = 5000;
     ResourceFreshness freshness_ = ResourceFreshness::UNKNOWN;
+    bool available_ = true;
+    bool advertisementPolicyKnown_ = true;
+    bool advertisementEnabled_ = true;
+    uint32_t advertisementPeriodMs_ =
+        NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
+    uint32_t lastAdvertisementMs_ = 0;
+    uint32_t nextAdvertisementRetryMs_ = 0;
+    bool advertisementRetryScheduled_ = false;
+    bool withdrawalPending_ = false;
 
     virtual String encodedValue() const = 0;
     virtual String encodedCurrentValue() const = 0;
@@ -507,7 +540,12 @@ private:
 
 /* These four leaf types are the application API. NetValue<T> is their
  * non-instantiable implementation base, so invalid operations are absent from
- * each leaf rather than present and rejected at runtime. */
+ * each leaf rather than present and rejected at runtime.
+ *
+ * A module that primarily implements a Resource should normally own the leaf
+ * declaration, stable name, handlers and binding alongside its hardware logic.
+ * This keeps reusable module interfaces with the module instead of collecting
+ * every Resource declaration in main.cpp. */
 
 /// @brief Owned by this device, observe-only for everyone else.
 template <typename T>
@@ -519,6 +557,15 @@ public:
 
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, false); }
+    bool setAvailable(bool available) { return this->setManagedAvailability(available); }
+    bool setAdvertisementEnabled(bool enabled)
+    {
+        return this->setManagedAdvertisementEnabled(enabled);
+    }
+    bool setAdvertisementPeriod(uint32_t seconds)
+    {
+        return this->setManagedAdvertisementPeriod(seconds);
+    }
 
     /* dependsOn() is here and nowhere else. A Remote value already mirrors its
      * source, an action has no value to mirror, and ManagedState is waiting on
@@ -579,6 +626,15 @@ public:
 
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, true); }
+    bool setAvailable(bool available) { return this->setManagedAvailability(available); }
+    bool setAdvertisementEnabled(bool enabled)
+    {
+        return this->setManagedAdvertisementEnabled(enabled);
+    }
+    bool setAdvertisementPeriod(uint32_t seconds)
+    {
+        return this->setManagedAdvertisementPeriod(seconds);
+    }
 
     /* No dependsOn() here, deliberately. A mirror of another value is
      * read-only by construction, and this one accepts writes: a /set arriving

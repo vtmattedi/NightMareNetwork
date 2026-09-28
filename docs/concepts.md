@@ -217,7 +217,14 @@ The API keeps this separate from an optimistic local value so applications can d
 
 ## Freshness
 
-A Value can be:
+A Value's availability and freshness answer different questions.
+
+Availability says whether the Resource can currently provide or advertise a
+value. An unavailable Resource remains bound and declared. For Remote Values,
+an empty retained `/state` makes the Resource unavailable and a later valid
+state makes it available again.
+
+Freshness describes the age of the last valid value:
 
 ```text
 UNKNOWN
@@ -227,7 +234,14 @@ STALE
 
 Freshness belongs to Value state.
 
-The retained Resource manifest does not make a Value fresh. Device presence does not make a Value fresh. `/state` is the signal that carries the authoritative Value.
+`UNKNOWN` means no valid value has arrived, `FRESH` means the value is inside
+the owner's expected refresh window, and `STALE` means it has aged beyond about
+twice the advertised period. A retained withdrawal changes availability; it
+does not use `STALE` as a synonym.
+
+The retained Resource manifest supplies advertisement-period metadata but does
+not itself make a Value fresh. Device presence does not make a Value fresh.
+Only valid `/state` traffic supplies and reaffirms the authoritative Value.
 
 This is one of the project's central rules:
 

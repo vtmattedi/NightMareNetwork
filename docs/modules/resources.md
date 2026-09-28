@@ -91,6 +91,15 @@ A project can later remove the binding:
 gResourcesManager.unbindResource(&temperature);
 ```
 
+### Module ownership practice
+
+If a module primarily implements a Sensor, State, Action, or Config, that
+module should normally own its declaration, stable name, handlers, and
+binding/exposure. For example, `TemperatureSensor.cpp/.h` should normally own
+the hardware driver and its `ManagedSensor<float>` rather than making
+`main.cpp` a registry of every application capability. Cross-module
+orchestration still belongs above the individual modules.
+
 ## Naming related declarations
 
 When related Resources naturally belong to one subsystem, prefer names such as
@@ -154,6 +163,33 @@ If the Resource is bound and MQTT transport is available, NightMare publishes th
 ```
 
 If transport is unavailable, the local value still changes. Reconnect re-announcement publishes the authoritative state later.
+
+## Managed advertisement policy
+
+Managed Values advertise changes immediately when enabled and available, then
+refresh an unchanged retained value no later than their configured period.
+Defaults are enabled with a 300-second period.
+
+```cpp
+temperature.setAdvertisementEnabled(true);
+temperature.setAdvertisementPeriod(300); // seconds
+temperature.setAvailable(true);
+```
+
+The advertisement policy is persistent under the stable local Resource name in
+`/resourcesettings.json`. It is owned by `ResourcesManager`, not
+`ConfigManager`, and is restored before networking starts. The accepted period
+range is 1 through 86400 seconds.
+
+Disabling advertisement withdraws retained `/state` and suppresses future
+state publications. Re-enabling immediately publishes the current
+authoritative value when available. Neither setting controls hardware polling,
+power, acquisition, computation, or a local control loop.
+
+Availability is runtime state. `setAvailable(false)` keeps the Resource bound
+and in the manifest, withdraws retained state, and still permits local
+`setValue()` calls to update last-known data. Returning to available publishes
+the current value immediately when advertisement is enabled.
 
 ## RemoteSensor
 
@@ -344,20 +380,26 @@ ResourceFreshness::STALE
 Useful helpers/state include:
 
 ```cpp
-resource.freshness
+resource.available()
+resource.freshness()
 resource.isStale()
-resource.hasAuthoritativeValue()
 resource.lastUpdateMs()
-resource.lastWriteMs()
+resource.advertisementPolicyKnown()
+resource.advertisementEnabled()
+resource.advertisementPeriodSeconds()
 ```
 
 State begins `UNKNOWN`.
 
 A valid owner `/state` update makes it `FRESH`.
 
-An empty owner `/state` tombstone makes it `STALE`.
+An empty owner `/state` tombstone makes the Resource unavailable without using
+`STALE` as a synonym for withdrawal.
 
-The last known decoded Value stays readable when state becomes STALE.
+While available, a Remote Value becomes `STALE` after approximately twice the
+enabled advertisement period learned from the owner's compact manifest. A new
+valid owner state immediately restores `FRESH`. The last decoded Value remains
+readable as last-known data while unavailable or stale.
 
 Retargeting the Resource clears state learned from the old source completely.
 
@@ -478,8 +520,7 @@ stops claiming one:
 
 ```text
 source withdrawn
-    -> dependent goes stale
-    -> dependent stops being authoritative
+    -> dependent becomes unavailable
     -> dependent's retained /state is tombstoned
 ```
 

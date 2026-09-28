@@ -146,6 +146,11 @@ tickNightMareESP();
 
 drives the Scheduler.
 
+Resource housekeeping is cooperative regardless of Scheduler mode. With
+Resources enabled, `tickNightMareESP()` calls `gResourcesManager.tick()`, which
+inspects at most one Resource for advertisement refresh/retry or Remote
+freshness aging. It creates neither a Scheduler job nor a dedicated task.
+
 ## Compile-time dependencies
 
 The current feature graph enforces:
@@ -327,6 +332,9 @@ This ensures Resource declarations exist before MQTT participation and before ol
 The framework cooperative tick currently handles:
 
 ```text
+one Resource housekeeping step
+    when NM_ENABLE_RESOURCES
+
 Time synchronization completion
     when NM_ENABLE_TIME_SYNC
 

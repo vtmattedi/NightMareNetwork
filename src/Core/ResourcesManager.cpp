@@ -20,10 +20,11 @@ namespace
     constexpr size_t MaxManifestLength = NetResourceMaxManifestLength;
     constexpr size_t MaxRemoteResourcesLength =
         ResourcesManager::MaxResources * (MaxSegmentLength * 6 + 16) + 2;
-    // 3 adds each resource's declared dependencies (`depends_on`), omitted when
-    // a resource declares none. Version 2 readers ignore it.
-    constexpr int ManifestVersion = 3;
     constexpr const char *RemoteResourcesFile = "/remoteresources.json";
+    constexpr const char *ResourceSettingsFile = "/resourcesettings.json";
+    constexpr const char *ResourceSettingsTempFile = "/resourcesettings.tmp";
+    constexpr size_t MaxResourceSettingsLength =
+        ResourcesManager::MaxResources * (MaxSegmentLength + 80) + 2;
     /// Every device's manifest, for a handler that wants the whole network.
     constexpr const char *AllManifestsFilter = "+/manifest";
     /// The same, in the compact encoding. Taken only when an encoded handler is set.
@@ -74,6 +75,64 @@ namespace
         file.close();
         return written == expected;
     }
+
+    bool readResourceSettingsDocument(JsonDocument &doc, bool &exists)
+    {
+        exists = LittleFS.exists(ResourceSettingsFile);
+        if (!exists)
+        {
+            doc.to<JsonObject>();
+            return true;
+        }
+        File file = LittleFS.open(ResourceSettingsFile, "r");
+        if (!file || file.size() > MaxResourceSettingsLength)
+        {
+            if (file)
+                file.close();
+            return false;
+        }
+        const DeserializationError error = deserializeJson(doc, file);
+        file.close();
+        return !error && doc.is<JsonObject>();
+    }
+
+    bool writeResourceSettingsDocument(const JsonDocument &doc)
+    {
+        const size_t expected = measureJson(doc);
+        if (expected > MaxResourceSettingsLength)
+            return false;
+        if (LittleFS.exists(ResourceSettingsTempFile) &&
+            !LittleFS.remove(ResourceSettingsTempFile))
+            return false;
+        File file = LittleFS.open(ResourceSettingsTempFile, "w");
+        if (!file)
+            return false;
+        const size_t written = serializeJson(doc, file);
+        file.flush();
+        file.close();
+        if (written != expected)
+        {
+            LittleFS.remove(ResourceSettingsTempFile);
+            return false;
+        }
+        File verification = LittleFS.open(ResourceSettingsTempFile, "r");
+        const bool complete = verification && verification.size() == expected;
+        if (verification)
+            verification.close();
+        if (!complete || !LittleFS.rename(ResourceSettingsTempFile, ResourceSettingsFile))
+        {
+            LittleFS.remove(ResourceSettingsTempFile);
+            return false;
+        }
+        return true;
+    }
+
+    bool validAdvertisementPeriodSeconds(uint32_t seconds)
+    {
+        return seconds >= NetResourceMinAdvertisementPeriodSeconds &&
+               seconds <= NetResourceMaxAdvertisementPeriodSeconds;
+    }
+
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
 /// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
@@ -373,11 +432,6 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource) const
                            resource.isOwned() ? resource.name_ : resource.sourceResourceName_);
 }
 
-bool ResourcesManager::verifiesRemoteManifests()
-{
-    return NM_ENABLE_REMOTE_RESOURCE_VERIFICATION != 0;
-}
-
 void ResourcesManager::setManifestHandler(ManifestHandler handler)
 {
     const bool had = manifestHandler_ != nullptr;
@@ -442,6 +496,11 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
             // nothing.
             if (entry.size() > 4 && entry[4].is<const char *>())
                 item["depends_on"] = entry[4].as<const char *>();
+            if (entry.size() > 6 && entry[5].is<bool>() && entry[6].is<uint32_t>())
+            {
+                item["advertisement_enabled"] = entry[5].as<bool>();
+                item["advertisement_period"] = entry[6].as<uint32_t>();
+            }
             continue;
         }
 
@@ -569,12 +628,10 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
 {
     if (subscriber_ == nullptr)
         return;
-    // A remote owner's manifest is only worth a subscription if something is
-    // going to read it. With verification compiled out nothing here does, and a
-    // handler -- which wants every device, not just the bound ones -- has its
-    // own subscription. The compact encoding, because that is the one the
-    // manager reads; a JSON reader is a handler and subscribes for itself.
-    if (verifiesRemoteManifests() && includeManifest && !resource.isOwned() &&
+    // The compact owner manifest supplies advertisement periods for Remote
+    // freshness aging and, optionally, compatibility diagnostics. Subscribe
+    // once per owner; a global handler has its own wildcard subscription.
+    if (includeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
                                                             ManifestFormat::MSGPACK));
@@ -590,7 +647,7 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->unsubscribe(ingress);
-    if (verifiesRemoteManifests() && removeManifest && !resource.isOwned() &&
+    if (removeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
                                                               ManifestFormat::MSGPACK));
@@ -634,7 +691,7 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
         const NetResource &resource = *resources_[i];
         if (ingressTopicFor(resource) == topicFilter)
             return true;
-        if (verifiesRemoteManifests() && !resource.isOwned() && hasResolvedSource(resource) &&
+        if (!resource.isOwned() && hasResolvedSource(resource) &&
             resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
                                          ManifestFormat::MSGPACK) == topicFilter)
             return true;
@@ -831,6 +888,111 @@ bool ResourcesManager::loadRemoteSources()
     return !changed || saveRemoteSources();
 }
 
+bool ResourcesManager::persistAdvertisementPolicy(const NetValueResource &resource,
+                                                  bool enabled,
+                                                  uint32_t periodMs) const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+    JsonDocument doc;
+    bool exists = false;
+    if (!readResourceSettingsDocument(doc, exists))
+        return false;
+    (void)exists;
+    JsonVariant slot = doc[resource.name_];
+    JsonObject record = slot.is<JsonObject>() ? slot.as<JsonObject>()
+                                               : slot.to<JsonObject>();
+    record["enabled"] = enabled;
+    record["period"] = periodMs / 1000UL;
+    return writeResourceSettingsDocument(doc);
+}
+
+bool ResourcesManager::restoreAdvertisementPolicy(NetValueResource &resource)
+{
+    if (!resource.isOwned() || !beginRemoteResourceStorage())
+        return resource.isOwned();
+    JsonDocument doc;
+    bool exists = false;
+    if (!readResourceSettingsDocument(doc, exists))
+        return false;
+    if (!exists || !doc[resource.name_].is<JsonObjectConst>())
+        return true;
+
+    JsonObjectConst record = doc[resource.name_].as<JsonObjectConst>();
+    const uint32_t seconds = record["period"].as<uint32_t>();
+    if (!record["enabled"].is<bool>() || !record["period"].is<uint32_t>() ||
+        !validAdvertisementPeriodSeconds(seconds))
+    {
+        LOG_WARNING("RM", "Invalid advertisement settings for '%s'; restoring defaults",
+                    resource.name_.c_str());
+        resource.advertisementEnabled_ = true;
+        resource.advertisementPeriodMs_ =
+            NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
+        resource.withdrawalPending_ = false;
+        return persistAdvertisementPolicy(resource, resource.advertisementEnabled_,
+                                          resource.advertisementPeriodMs_);
+    }
+    resource.advertisementEnabled_ = record["enabled"].as<bool>();
+    resource.advertisementPeriodMs_ = seconds * 1000UL;
+    resource.advertisementPolicyKnown_ = true;
+    resource.withdrawalPending_ = !resource.advertisementEnabled_;
+    return true;
+}
+
+bool ResourcesManager::loadAdvertisementSettings()
+{
+    if (advertisementSettingsLoaded_)
+        return true;
+    if (!beginRemoteResourceStorage())
+        return false;
+
+    JsonDocument doc;
+    bool exists = false;
+    if (!readResourceSettingsDocument(doc, exists))
+        return false;
+
+    bool changed = false;
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        NetResource *resource = resources_[i];
+        if (!resource->isOwned() || resource->kind_ != NetResourceType::VALUE)
+            continue;
+
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        JsonVariantConst slot = doc[value.name_];
+        if (slot.isNull())
+            continue;
+
+        JsonObjectConst record = slot.as<JsonObjectConst>();
+        const uint32_t seconds = record["period"].as<uint32_t>();
+        if (!slot.is<JsonObjectConst>() || !record["enabled"].is<bool>() ||
+            !record["period"].is<uint32_t>() || !validAdvertisementPeriodSeconds(seconds))
+        {
+            LOG_WARNING("RM", "Invalid advertisement settings for '%s'; restoring defaults",
+                        value.name_.c_str());
+            value.advertisementEnabled_ = true;
+            value.advertisementPeriodMs_ =
+                NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
+            JsonObject replacement = doc[value.name_].to<JsonObject>();
+            replacement["enabled"] = true;
+            replacement["period"] = NetResourceDefaultAdvertisementPeriodSeconds;
+            changed = true;
+        }
+        else
+        {
+            value.advertisementEnabled_ = record["enabled"].as<bool>();
+            value.advertisementPeriodMs_ = seconds * 1000UL;
+        }
+        value.advertisementPolicyKnown_ = true;
+        value.withdrawalPending_ = !value.advertisementEnabled_;
+    }
+
+    if (changed && !writeResourceSettingsDocument(doc))
+        return false;
+    advertisementSettingsLoaded_ = true;
+    return true;
+}
+
 bool ResourcesManager::bindResource(NetResource *resource)
 {
     if (resource == nullptr || resource->resourceManager_ != nullptr ||
@@ -888,6 +1050,15 @@ bool ResourcesManager::bindResource(NetResource *resource)
     {
         LOG_ERROR("RM", "Cannot bind resource '%s' for device '%s': already bound",
                   resource->name_.c_str(), resolveResourceOwner(*resource).c_str());
+        return false;
+    }
+
+    if (advertisementSettingsLoaded_ && resource->isOwned() &&
+        resource->kind_ == NetResourceType::VALUE &&
+        !restoreAdvertisementPolicy(*static_cast<NetValueResource *>(resource)))
+    {
+        LOG_ERROR("RM", "Cannot bind resource '%s': advertisement settings unavailable",
+                  resource->name_.c_str());
         return false;
     }
 
@@ -1035,7 +1206,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 
     if (subscriber_ != nullptr)
     {
-        if (verifiesRemoteManifests() && ownerChanged && !remoteOwnerInUse(newOwner, &resource))
+        if (ownerChanged && !remoteOwnerInUse(newOwner, &resource))
             subscriber_->subscribe(
                 resolveResourceManifestTopic(newOwner, ManifestFormat::MSGPACK));
         const String ingress = ingressTopicFor(resource);
@@ -1116,13 +1287,12 @@ bool ResourcesManager::publishConsumeManifest(ManifestFormat format)
                                payload, true);
 }
 
-// The JSON manifest, unchanged since the protocol first defined it: named keys,
-// enum names spelled out. That topic is read by people and by tools that have
-// never seen this header, and it is the fallback for anyone who cannot decode
-// the compact form, so it stays exactly as it is.
+// The readable JSON manifest uses named fields and spelled-out enums. It is the
+// fallback for readers that cannot decode the compact form; semantic additions
+// bump ResourceManifestVersion and add explicit keys here.
 void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
 {
-    doc["version"] = ManifestVersion;
+    doc["version"] = ResourceManifestVersion;
     JsonArray items = doc["resources"].to<JsonArray>();
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -1143,6 +1313,8 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
             // so a value that declares no dependency is unchanged on the wire.
             if (value.dependency() != nullptr)
                 item["depends_on"] = value.dependency()->name();
+            item["advertisement_enabled"] = value.advertisementEnabled_;
+            item["advertisement_period"] = value.advertisementPeriodMs_ / 1000UL;
         }
         else
         {
@@ -1168,7 +1340,7 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
 {
     JsonArray root = doc.to<JsonArray>();
     root.add(ManifestEncodingVersion); // Position 0, frozen for all time.
-    root.add(ManifestVersion);
+    root.add(ResourceManifestVersion);
     JsonArray items = root.add<JsonArray>();
 
     for (int i = 0; i < resourceCount_; ++i)
@@ -1186,10 +1358,14 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
-            // Appended (rule 2), and only when one was declared: a reader that
-            // stops at the shape it knows reads exactly what it read before.
+            // Dependency was appended in version 3. Version 4 keeps its stable
+            // position with null when absent, then appends advertisement policy.
             if (value.dependency() != nullptr)
                 item.add(value.dependency()->name());
+            else
+                item.add(nullptr);
+            item.add(value.advertisementEnabled_);
+            item.add(value.advertisementPeriodMs_ / 1000UL);
             continue;
         }
 
@@ -1408,9 +1584,10 @@ bool ResourcesManager::serializeConsumeManifest(String &payload, ManifestFormat 
     return true;
 }
 
-bool ResourcesManager::publishState(const NetValueResource &resource)
+bool ResourcesManager::publishState(NetValueResource &resource)
 {
     if (publisher_ == nullptr || !resource.isOwned() || !resource.hasAuthoritativeValue_ ||
+        !resource.available_ || !resource.advertisementEnabled_ ||
         !hasResolvedSource(resource))
         return false;
     // The wire format is the codec's own representation: "23.5", "true", raw
@@ -1423,8 +1600,37 @@ bool ResourcesManager::publishState(const NetValueResource &resource)
                     resource.name_.c_str(), (unsigned)encoded.length(), (unsigned)MaxValueLength);
         return false;
     }
-    return publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::STATE),
-                               encoded, true);
+    const bool published = publisher_->publish(
+        resolveResourceTopic(resource, ResourceTopicOperation::STATE), encoded, true);
+    const uint32_t now = static_cast<uint32_t>(millis());
+    if (published)
+    {
+        resource.lastAdvertisementMs_ = now;
+        resource.advertisementRetryScheduled_ = false;
+    }
+    else
+    {
+        resource.nextAdvertisementRetryMs_ = now + NetResourceAdvertisementRetryMs;
+        resource.advertisementRetryScheduled_ = true;
+    }
+    return published;
+}
+
+bool ResourcesManager::withdrawState(NetValueResource &resource)
+{
+    if (publisher_ == nullptr || !resource.isOwned() || !hasResolvedSource(resource))
+    {
+        resource.withdrawalPending_ = true;
+        return false;
+    }
+    const bool published = publisher_->publish(
+        resolveResourceTopic(resource, ResourceTopicOperation::STATE), String(), true);
+    const uint32_t now = static_cast<uint32_t>(millis());
+    resource.withdrawalPending_ = !published;
+    resource.advertisementRetryScheduled_ = !published;
+    if (!published)
+        resource.nextAdvertisementRetryMs_ = now + NetResourceAdvertisementRetryMs;
+    return published;
 }
 
 ActionResult ResourcesManager::listResources() const
@@ -1524,7 +1730,8 @@ bool ResourcesManager::publishResourceStates()
         if (!resource->isOwned() || resource->kind_ != NetResourceType::VALUE)
             continue;
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (value.hasAuthoritativeValue_ && !publishState(value))
+        if (value.hasAuthoritativeValue_ && value.available_ &&
+            value.advertisementEnabled_ && !publishState(value))
             published = false;
     }
     return published;
@@ -1586,13 +1793,112 @@ bool ResourcesManager::setValue(NetValueResource &resource, const String &encode
                                    encoded, false);
     }
 
-    // Local truth does not depend on the network: publish best-effort and let
-    // the caller commit regardless. announceAll() retries after a reconnect.
-    if (publisher_ != nullptr && hasResolvedSource(resource))
-        publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::STATE),
-                            encoded, true);
-    propagateToDependents(resource);
+    // Local truth does not depend on advertisement policy or the network.
+    // Publication is best-effort; a successful send resets the refresh age.
+    (void)encoded;
+    if (resource.available_)
+    {
+        publishState(resource);
+        propagateToDependents(resource);
+    }
     return true;
+}
+
+bool ResourcesManager::setAvailability(NetValueResource &resource, bool available)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned())
+        return false;
+    if (resource.available_ == available)
+        return true;
+    resource.available_ = available;
+    if (!available)
+    {
+        withdrawState(resource);
+        withdrawFromDependents(resource);
+        return true;
+    }
+    resource.withdrawalPending_ = false;
+    if (resource.hasAuthoritativeValue_)
+    {
+        publishState(resource);
+        propagateToDependents(resource);
+    }
+    return true;
+}
+
+bool ResourcesManager::setAdvertisementEnabled(NetValueResource &resource, bool enabled)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned())
+        return false;
+    if (!persistAdvertisementPolicy(resource, enabled, resource.advertisementPeriodMs_))
+        return false;
+    resource.advertisementEnabled_ = enabled;
+    resource.advertisementPolicyKnown_ = true;
+    publishManifest();
+    if (!enabled)
+        withdrawState(resource);
+    else
+    {
+        resource.withdrawalPending_ = false;
+        if (resource.available_ && resource.hasAuthoritativeValue_)
+            publishState(resource);
+    }
+    return true;
+}
+
+bool ResourcesManager::setAdvertisementPeriod(NetValueResource &resource, uint32_t seconds)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned() ||
+        !validAdvertisementPeriodSeconds(seconds))
+        return false;
+    const uint32_t periodMs = seconds * 1000UL;
+    if (!persistAdvertisementPolicy(resource, resource.advertisementEnabled_, periodMs))
+        return false;
+    resource.advertisementPeriodMs_ = periodMs;
+    resource.advertisementPolicyKnown_ = true;
+    publishManifest();
+    return true;
+}
+
+void ResourcesManager::tick()
+{
+    if (resourceCount_ == 0)
+        return;
+    if (housekeepingCursor_ >= static_cast<size_t>(resourceCount_))
+        housekeepingCursor_ = 0;
+    NetResource *resource = resources_[housekeepingCursor_++];
+    if (resource->kind_ != NetResourceType::VALUE)
+        return;
+
+    NetValueResource &value = *static_cast<NetValueResource *>(resource);
+    const uint32_t now = static_cast<uint32_t>(millis());
+    const bool retryScheduled = value.advertisementRetryScheduled_;
+    const bool retryReady = !value.advertisementRetryScheduled_ ||
+                            static_cast<int32_t>(now - value.nextAdvertisementRetryMs_) >= 0;
+
+    if (value.isOwned())
+    {
+        if (value.withdrawalPending_)
+        {
+            if (retryReady)
+                withdrawState(value);
+            return;
+        }
+        if (publisher_ == nullptr || !value.advertisementEnabled_ || !value.available_ ||
+            !value.hasAuthoritativeValue_ || !retryReady)
+            return;
+        if (retryScheduled ||
+            static_cast<uint32_t>(now - value.lastAdvertisementMs_) >=
+                value.advertisementPeriodMs_)
+            publishState(value);
+        return;
+    }
+
+    if (value.available_ && value.hasAuthoritativeValue_ &&
+        value.advertisementPolicyKnown_ && value.advertisementEnabled_ &&
+        static_cast<uint32_t>(now - value.lastUpdateMs_) >=
+            value.advertisementPeriodMs_ * 2UL)
+        value.freshness_ = ResourceFreshness::STALE;
 }
 
 // Every value that declared this one as its dependency now holds the same
@@ -1626,6 +1932,7 @@ void ResourcesManager::propagateToDependents(const NetValueResource &source)
         // ManagedState is not a request to change it, so onWrite must not see
         // it. setDependency() already checked that the two agree on the type,
         // so a failure here is a codec refusing its own encoding.
+        dependent.available_ = true;
         if (!dependent.applyEncodedOwnerValue(encoded))
         {
             LOG_WARNING("RM", "Could not mirror '%s' into '%s'", source.name_.c_str(),
@@ -1644,8 +1951,8 @@ void ResourcesManager::propagateToDependents(const NetValueResource &source)
 // depends_on for itself reads a value nothing stands behind any more.
 //
 // The decoded value stays readable locally. What is withdrawn is the claim
-// that it is current: the resource goes stale, stops being authoritative -- so
-// a reconnect does not re-announce it -- and its retained state is tombstoned.
+// that it is current: the resource becomes unavailable -- so a reconnect does
+// not re-announce it -- and its retained state is tombstoned.
 void ResourcesManager::withdrawFromDependents(const NetValueResource &source)
 {
     for (int i = 0; i < resourceCount_; ++i)
@@ -1657,11 +1964,8 @@ void ResourcesManager::withdrawFromDependents(const NetValueResource &source)
         if (dependent.dependency_ != &source)
             continue;
 
-        dependent.freshness_ = ResourceFreshness::STALE;
-        dependent.hasAuthoritativeValue_ = false;
-        if (publisher_ != nullptr && hasResolvedSource(dependent))
-            publisher_->publish(resolveResourceTopic(dependent, ResourceTopicOperation::STATE),
-                                String(), true);
+        dependent.available_ = false;
+        withdrawState(dependent);
     }
 }
 
@@ -1799,7 +2103,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     }
 
     if (command.target.length() == 0)
-        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source] [payload]")};
+        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source|enable|period] [payload]")};
 
     auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult
     {
@@ -1908,6 +2212,37 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         return {true, value.encodedCurrentValue()};
     }
 
+    if (verb == "ENABLE")
+    {
+        if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
+            return {false, String("ENABLE requires a Managed value resource")};
+        String payload = command.payload;
+        payload.trim();
+        bool enabled = false;
+        if (!NetCodec<bool>::decode(payload, enabled))
+            return {false, String("ENABLE expects true or false")};
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (!setAdvertisementEnabled(value, enabled))
+            return {false, String("Could not persist advertisement setting")};
+        return {true, enabled ? String("true") : String("false")};
+    }
+
+    if (verb == "PERIOD")
+    {
+        if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
+            return {false, String("PERIOD requires a Managed value resource")};
+        String payload = command.payload;
+        payload.trim();
+        uint32_t seconds = 0;
+        if (!NetCodec<uint32_t>::decode(payload, seconds) ||
+            !validAdvertisementPeriodSeconds(seconds))
+            return {false, String("PERIOD expects seconds from 1 to 86400")};
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (!setAdvertisementPeriod(value, seconds))
+            return {false, String("Could not persist advertisement setting")};
+        return {true, String(seconds)};
+    }
+
     if (verb == "SET")
     {
         if (resource->kind_ != NetResourceType::VALUE)
@@ -1945,7 +2280,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
         // The retained state was deleted. The last known value stays readable;
         // only setSource() discards it, because only that changes what the
         // resource represents.
-        value.freshness_ = ResourceFreshness::STALE;
+        value.available_ = false;
         // Anything mirroring this value has just lost its authority too.
         withdrawFromDependents(value);
         return true;
@@ -1988,7 +2323,8 @@ bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
         return false;
     }
     publishState(value);
-    propagateToDependents(value);
+    if (value.available_)
+        propagateToDependents(value);
     return true;
 }
 
@@ -2050,6 +2386,36 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     }
 
     manifestHandler_(deviceName, message);
+}
+
+void ResourcesManager::applyAdvertisementMetadata(const String &deviceName,
+                                                  JsonArrayConst items)
+{
+    for (int i = 0; i < resourceCount_; ++i)
+    {
+        NetResource *resource = resources_[i];
+        if (resource->isOwned() || resource->kind_ != NetResourceType::VALUE ||
+            resource->ownerDevice_.deviceName != deviceName)
+            continue;
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        value.advertisementPolicyKnown_ = false;
+        for (JsonVariantConst element : items)
+        {
+            JsonArrayConst entry = element.as<JsonArrayConst>();
+            const char *name = entry.size() >= 2 ? entry[1].as<const char *>() : nullptr;
+            if (name == nullptr || value.sourceResourceName_ != name || entry.size() < 7 ||
+                entry[0].as<uint8_t>() != static_cast<uint8_t>(NetResourceType::VALUE) ||
+                !entry[5].is<bool>() || !entry[6].is<uint32_t>())
+                continue;
+            const uint32_t seconds = entry[6].as<uint32_t>();
+            if (!validAdvertisementPeriodSeconds(seconds))
+                continue;
+            value.advertisementEnabled_ = entry[5].as<bool>();
+            value.advertisementPeriodMs_ = seconds * 1000UL;
+            value.advertisementPolicyKnown_ = true;
+            break;
+        }
+    }
 }
 
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
@@ -2162,9 +2528,10 @@ void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArray
 }
 #endif // NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
 
-// Validate, then verify, then deliver. This is the manifest the manager itself
-// reads: verification compares against the compact form because that is the
-// cheap one, and on a real 20-resource manifest it is 375 bytes against 1753.
+// Validate, apply advertisement metadata, optionally verify, then deliver. This
+// is the manifest the manager itself reads: freshness and compatibility use the
+// compact form because that is the cheap one, and on a real 20-resource
+// manifest it is 375 bytes against 1753.
 // The saving is a parse, not just a transfer -- and it lands during the connect
 // burst, when retained manifests replay while the TLS session is still holding
 // its record buffers, which is the exact moment this device has least to spare.
@@ -2185,6 +2552,7 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
     // freshness their own /state gave them, so there is nothing to verify.
     if (message.length() == 0)
     {
+        applyAdvertisementMetadata(deviceName, JsonArrayConst());
         if (encodedManifestHandler_ != nullptr)
             encodedManifestHandler_(deviceName, message);
         return;
@@ -2207,6 +2575,8 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
                     deviceName.c_str(), (unsigned)encoding, (unsigned)ManifestEncodingVersion);
         return;
     }
+
+    applyAdvertisementMetadata(deviceName, root[2].as<JsonArrayConst>());
 
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
     verifyAgainstManifest(deviceName, root[2].as<JsonArrayConst>());
@@ -2242,14 +2612,12 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     }
     if (path == "manifest/msgpack")
     {
-        // Consumed when verification wants it for a resource bound from that
-        // device, or when a handler wants every manifest; whether the payload
-        // then turns out to be valid does not change that. This device's own
-        // manifest is not other-device traffic and is left alone.
-        const bool wantedForVerification =
-            verifiesRemoteManifests() && remoteOwnerInUse(deviceName, nullptr);
+        // Consumed when a bound Remote resource needs owner advertisement
+        // metadata, optional compatibility verification wants it, or a handler
+        // wants every manifest. This device's own manifest is left alone.
+        const bool wantedByResources = remoteOwnerInUse(deviceName, nullptr);
         if (deviceName == gDeviceIdentity.getDeviceName() ||
-            (!wantedForVerification && encodedManifestHandler_ == nullptr))
+            (!wantedByResources && encodedManifestHandler_ == nullptr))
             return false;
         applyEncodedManifest(deviceName, message);
         return true;
