@@ -660,9 +660,10 @@ advertisement policy:
 > temperature period 300
 ```
 
-The period is in seconds and accepts values from 1 through 86400. Disabling
-advertisement withdraws retained state; it does not stop local sensor polling or
-state computation.
+The period is in seconds. `0` selects event-driven-only publication; periodic
+refresh accepts 5 through 86400 seconds, while 1 through 4 are invalid.
+Disabling advertisement withdraws retained state; it does not stop local sensor
+polling or state computation.
 
 `>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
 

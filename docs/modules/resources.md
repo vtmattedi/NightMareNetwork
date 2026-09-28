@@ -166,9 +166,9 @@ If transport is unavailable, the local value still changes. Reconnect re-announc
 
 ## Managed advertisement policy
 
-Managed Values advertise changes immediately when enabled and available, then
-refresh an unchanged retained value no later than their configured period.
-Defaults are enabled with a 300-second period.
+Managed Values advertise changes immediately when enabled and available.
+Non-zero periods also refresh an unchanged retained value. Defaults are enabled
+with a 300-second period.
 
 ```cpp
 temperature.setAdvertisementEnabled(true);
@@ -179,7 +179,14 @@ temperature.setAvailable(true);
 The advertisement policy is persistent under the stable local Resource name in
 `/resourcesettings.json`. It is owned by `ResourcesManager`, not
 `ConfigManager`, and is restored before networking starts. The accepted period
-range is 1 through 86400 seconds.
+is `0` for event-driven-only publication or 5 through 86400 seconds for periodic
+refresh. Values 1 through 4 are invalid.
+
+The period is the maximum intended advertisement interval under normal
+framework servicing, not a hard real-time guarantee. A successful change or
+refresh publication resets its timer. Policy changes persist before their
+runtime commit; failed manifest publication is marked dirty and retried with
+rate limiting by `ResourcesManager::tick()`.
 
 Disabling advertisement withdraws retained `/state` and suppresses future
 state publications. Re-enabling immediately publishes the current
@@ -396,10 +403,14 @@ A valid owner `/state` update makes it `FRESH`.
 An empty owner `/state` tombstone makes the Resource unavailable without using
 `STALE` as a synonym for withdrawal.
 
-While available, a Remote Value becomes `STALE` after approximately twice the
-enabled advertisement period learned from the owner's compact manifest. A new
-valid owner state immediately restores `FRESH`. The last decoded Value remains
-readable as last-known data while unavailable or stale.
+While available, a Remote Value becomes `STALE` after approximately twice a
+non-zero, enabled advertisement period learned from the owner's compact
+manifest. Period `0` is event-driven only and disables time-based aging. Owner
+metadata with advertisement disabled immediately makes the Remote Value
+unavailable; metadata becoming enabled does not make it available without a
+valid owner state. A new valid owner state immediately restores availability
+and `FRESH`. The last decoded Value remains readable as last-known data while
+unavailable or stale.
 
 Retargeting the Resource clears state learned from the old source completely.
 

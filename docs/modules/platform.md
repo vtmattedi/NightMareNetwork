@@ -148,8 +148,9 @@ drives the Scheduler.
 
 Resource housekeeping is cooperative regardless of Scheduler mode. With
 Resources enabled, `tickNightMareESP()` calls `gResourcesManager.tick()`, which
-inspects at most one Resource for advertisement refresh/retry or Remote
-freshness aging. It creates neither a Scheduler job nor a dedicated task.
+performs at most one due manifest retry or inspects at most one Resource for
+advertisement refresh/retry or Remote freshness aging. It creates neither a
+Scheduler job nor a dedicated task.
 
 ## Compile-time dependencies
 

@@ -129,8 +129,9 @@ namespace
 
     bool validAdvertisementPeriodSeconds(uint32_t seconds)
     {
-        return seconds >= NetResourceMinAdvertisementPeriodSeconds &&
-               seconds <= NetResourceMaxAdvertisementPeriodSeconds;
+        return seconds == 0 ||
+               (seconds >= NetResourceMinAdvertisementPeriodSeconds &&
+                seconds <= NetResourceMaxAdvertisementPeriodSeconds);
     }
 
 
@@ -1218,32 +1219,34 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 bool ResourcesManager::publishManifest()
 {
     const String &thisDevice = gDeviceIdentity.getDeviceName();
-    if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
-        return false;
+    bool published = publisher_ != nullptr && DeviceIdentity::validDeviceName(thisDevice);
 
     // Both encodings, both retained. A reader takes whichever it can decode and
-    // nothing has to negotiate a format. The JSON one is published first and is
-    // the one whose failure fails this call: it is the manifest the protocol
-    // has always defined, and a device that could not publish it has not
-    // announced itself. A MessagePack failure is logged and tolerated, so an
-    // older reader is never held back by the compact form.
+    // nothing has to negotiate a format. Both must succeed before policy
+    // metadata is considered announced: Remote freshness reads the compact one.
+    // A failure marks the manifest dirty for a rate-limited tick retry.
+    String json;
+    if (published)
     {
-        String json;
-        if (!serializeManifest(json, ManifestFormat::JSON))
-            return false;
-        if (!publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json,
-                                 true))
-            return false;
+        published = serializeManifest(json, ManifestFormat::JSON) &&
+                    publisher_->publish(
+                        resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json, true);
     }
+    String packed;
+    if (published)
     {
-
-        String packed;
-        if (!serializeManifest(packed, ManifestFormat::MSGPACK) ||
-            !publisher_->publish(resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
-                                 packed, true))
+        published = serializeManifest(packed, ManifestFormat::MSGPACK) &&
+                    publisher_->publish(
+                        resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
+                        packed, true);
+        if (!published)
             LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
     }
-    return true;
+
+    manifestDirty_ = !published;
+    if (!published)
+        nextManifestRetryMs_ = static_cast<uint32_t>(millis()) + NetResourceManifestRetryMs;
+    return published;
 }
 
 bool ResourcesManager::publishManifest(ManifestFormat format)
@@ -1834,7 +1837,8 @@ bool ResourcesManager::setAdvertisementEnabled(NetValueResource &resource, bool 
         return false;
     resource.advertisementEnabled_ = enabled;
     resource.advertisementPolicyKnown_ = true;
-    publishManifest();
+    if (!publishManifest())
+        LOG_WARNING("RM", "Advertisement policy manifest queued for retry");
     if (!enabled)
         withdrawState(resource);
     else
@@ -1856,12 +1860,19 @@ bool ResourcesManager::setAdvertisementPeriod(NetValueResource &resource, uint32
         return false;
     resource.advertisementPeriodMs_ = periodMs;
     resource.advertisementPolicyKnown_ = true;
-    publishManifest();
+    if (!publishManifest())
+        LOG_WARNING("RM", "Advertisement policy manifest queued for retry");
     return true;
 }
 
 void ResourcesManager::tick()
 {
+    const uint32_t now = static_cast<uint32_t>(millis());
+    if (manifestDirty_ && static_cast<int32_t>(now - nextManifestRetryMs_) >= 0)
+    {
+        publishManifest();
+        return;
+    }
     if (resourceCount_ == 0)
         return;
     if (housekeepingCursor_ >= static_cast<size_t>(resourceCount_))
@@ -1871,7 +1882,6 @@ void ResourcesManager::tick()
         return;
 
     NetValueResource &value = *static_cast<NetValueResource *>(resource);
-    const uint32_t now = static_cast<uint32_t>(millis());
     const bool retryScheduled = value.advertisementRetryScheduled_;
     const bool retryReady = !value.advertisementRetryScheduled_ ||
                             static_cast<int32_t>(now - value.nextAdvertisementRetryMs_) >= 0;
@@ -1887,15 +1897,16 @@ void ResourcesManager::tick()
         if (publisher_ == nullptr || !value.advertisementEnabled_ || !value.available_ ||
             !value.hasAuthoritativeValue_ || !retryReady)
             return;
-        if (retryScheduled ||
+        if (retryScheduled || (value.advertisementPeriodMs_ > 0 &&
             static_cast<uint32_t>(now - value.lastAdvertisementMs_) >=
-                value.advertisementPeriodMs_)
+                value.advertisementPeriodMs_))
             publishState(value);
         return;
     }
 
     if (value.available_ && value.hasAuthoritativeValue_ &&
         value.advertisementPolicyKnown_ && value.advertisementEnabled_ &&
+        value.advertisementPeriodMs_ > 0 &&
         static_cast<uint32_t>(now - value.lastUpdateMs_) >=
             value.advertisementPeriodMs_ * 2UL)
         value.freshness_ = ResourceFreshness::STALE;
@@ -2236,7 +2247,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         uint32_t seconds = 0;
         if (!NetCodec<uint32_t>::decode(payload, seconds) ||
             !validAdvertisementPeriodSeconds(seconds))
-            return {false, String("PERIOD expects seconds from 1 to 86400")};
+            return {false, String("PERIOD expects 0 or 5..86400 seconds")};
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (!setAdvertisementPeriod(value, seconds))
             return {false, String("Could not persist advertisement setting")};
@@ -2413,6 +2424,11 @@ void ResourcesManager::applyAdvertisementMetadata(const String &deviceName,
             value.advertisementEnabled_ = entry[5].as<bool>();
             value.advertisementPeriodMs_ = seconds * 1000UL;
             value.advertisementPolicyKnown_ = true;
+            if (!value.advertisementEnabled_ && value.available_)
+            {
+                value.available_ = false;
+                withdrawFromDependents(value);
+            }
             break;
         }
     }

@@ -524,12 +524,19 @@ enum values, so the compact manifest encoding version remains unchanged.
 
 Every Managed Value declares `advertisement_enabled` and an
 `advertisement_period` in seconds. Enabled, available Values publish changes
-immediately and periodically reaffirm unchanged retained state by the declared
-maximum interval. Each successful publication resets the refresh timer.
+immediately. Period `0` is event-driven only and performs no periodic
+reaffirmation. Periods from 5 through 86400 periodically reaffirm unchanged
+retained state by the declared maximum intended interval under normal framework
+servicing; it is not a hard real-time guarantee. Values 1 through 4 are invalid.
+Each successful publication resets the refresh timer.
 
 Disabling advertisement withdraws retained `/state` with an empty retained
 payload and suppresses later advertisements. Re-enabling immediately publishes
 the authoritative value when one exists and the Resource is available.
+Policy changes are persisted before their runtime commit. A failed provider
+manifest publication remains dirty and is retried with rate limiting. Both the
+JSON and compact manifests must publish successfully before that dirty state is
+cleared, because Remote freshness consumes the compact metadata.
 
 Availability is not added to ordinary payloads. A Managed owner represents
 temporary unavailability by withdrawing retained state while leaving the
@@ -550,13 +557,17 @@ An empty `/state` payload means the retained state was deleted and makes the
 Remote Value unavailable. It does not itself set freshness to `STALE`.
 
 While a Remote Value is available and its owner's advertisement policy is
-known and enabled, housekeeping compares `lastUpdateMs` with the advertised
-period. At approximately twice that period without a valid reaffirmation it
-becomes:
+known, enabled, and has a non-zero period, housekeeping compares `lastUpdateMs`
+with the advertised period. At approximately twice that period without a valid
+reaffirmation it becomes:
 
 ```text
 STALE
 ```
+
+Period `0` disables time-based aging. Owner metadata with advertisement
+disabled immediately makes the matching Remote Value unavailable. Metadata
+becoming enabled does not make it available; only a valid `/state` does.
 
 The last decoded value remains stored and readable through `getValue()`, but
 `available()` and `hasValue()` report that it is not current while unavailable.

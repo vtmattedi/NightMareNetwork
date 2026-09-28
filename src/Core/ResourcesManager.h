@@ -72,7 +72,8 @@ public:
     /// Restore persistent advertisement policy for bound Managed values.
     bool loadAdvertisementSettings();
 
-    /// Cooperative bounded housekeeping. Inspects at most one Resource.
+    /// Cooperative bounded housekeeping. Performs one due manifest retry or
+    /// inspects at most one Resource.
     void tick();
 
     // Call after transport reconnection to republish the retained manifest and
@@ -265,6 +266,8 @@ private:
     ManifestHandler manifestHandler_ = nullptr;
     EncodedManifestHandler encodedManifestHandler_ = nullptr;
     bool advertisementSettingsLoaded_ = false;
+    bool manifestDirty_ = false;
+    uint32_t nextManifestRetryMs_ = 0;
     size_t housekeepingCursor_ = 0;
 };
 

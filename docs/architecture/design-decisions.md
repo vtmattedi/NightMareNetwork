@@ -86,14 +86,17 @@ Examples include:
 ## A manifest describes; `/state` tells the truth
 
 **Decision:** Resource manifests are descriptive and diagnostic. Valid Value
-updates come from `/state`; manifest advertisement metadata supplies only the
-expected refresh window used to age those updates.
+updates come from `/state`; manifest advertisement metadata supplies the
+expected refresh window and may explicitly withdraw availability when
+advertisement is disabled. It never supplies a Value or makes one fresh.
 
 **Reason:** discovery metadata and runtime state have different lifecycles. Coupling them would make Value validity depend on an unrelated metadata document arriving first or remaining current.
 
 **Consequence:** a missing, incompatible, withdrawn, or malformed manifest does
-not automatically invalidate a Value state message. Without known enabled
-advertisement metadata, time-based aging pauses rather than guessing a timeout.
+not automatically invalidate a Value state message. Explicit disabled metadata
+makes the matching Remote Value unavailable; enabled metadata does not make it
+available again. Without known enabled non-zero advertisement metadata,
+time-based aging pauses rather than guessing a timeout.
 
 ## Availability, freshness, and advertisement are separate
 
@@ -109,7 +112,9 @@ control-loop policy.
 retained state marks Remote availability false rather than setting freshness to
 `STALE`. Managed policy is persisted by `ResourcesManager`; successful
 publications refresh their timer, while cooperative round-robin housekeeping
-refreshes or retries at most one Resource per framework tick.
+refreshes or retries at most one Resource per framework tick. Period `0` is
+event-driven only. Failed policy-manifest publication stays dirty and is
+retried with rate limiting before normal Resource housekeeping.
 
 ## Resource ownership is explicit
 

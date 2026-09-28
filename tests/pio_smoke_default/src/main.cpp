@@ -79,6 +79,13 @@ public:
                 return false;
             ++statePublishes;
         }
+        if (topic.endsWith("/manifest") || topic.endsWith("/manifest/msgpack"))
+        {
+            ++manifestAttempts;
+            if (failManifest)
+                return false;
+            ++manifestPublishes;
+        }
         if (topic.endsWith("/manifest/consume"))
         {
             ++consumeJsonPublishes;
@@ -98,6 +105,9 @@ public:
     int statePublishes = 0;
     bool stateWasRetained = false;
     bool failState = false;
+    int manifestAttempts = 0;
+    int manifestPublishes = 0;
+    bool failManifest = false;
     String lastStateTopic;
     String lastStatePayload;
 };
@@ -224,6 +234,15 @@ void setup()
                                       list.result.indexOf("outside_temperature") >= 0 &&
                                       local.success && local.result == "18" &&
                                       qualified.success && qualified.result == "18";
+    const NightMareResults invalidResourcePeriod =
+        handleNightMareCommand("> managed_sensor period 1");
+    const NightMareResults missingResource =
+        handleNightMareCommand("> missing_resource");
+    const bool resourceErrorsAreExternal =
+        !invalidResourcePeriod.result &&
+        invalidResourcePeriod.response ==
+            "ERROR: PERIOD expects 0 or 5..86400 seconds" &&
+        !missingResource.result && missingResource.response == "ERROR: Resource not found";
     const bool customResourcesWork = managedTime.type() == NetValueType::TIME &&
                                      managedColour.type() == NetValueType::COLOUR &&
                                      timeValue.success && timeValue.result == "08:30:15" &&
@@ -248,7 +267,9 @@ void setup()
         advertisementPublisher.statePublishes == beforeInitialState + 1 &&
         advertisementPublisher.lastStatePayload == "10";
     const ActionResult periodSet =
-        advertisementManager.executeCommand(" advertisement:primary period 1");
+        advertisementManager.executeCommand(" advertisement:primary period 5");
+    const ActionResult invalidPeriod =
+        advertisementManager.executeCommand(" advertisement:primary period 4");
     const ActionResult disabled =
         advertisementManager.executeCommand(" advertisement:primary enable false");
     const int afterWithdrawal = advertisementPublisher.statePublishes;
@@ -278,7 +299,7 @@ void setup()
     ownerValue.add(static_cast<uint8_t>(NetValueType::INTEGER));
     ownerValue.add(nullptr);
     ownerValue.add(true);
-    ownerValue.add(1);
+    ownerValue.add(5);
     String encodedOwnerManifest;
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     ResourcesManager freshnessManager;
@@ -290,20 +311,42 @@ void setup()
     const bool remoteFresh = freshnessRemote.available() &&
         freshnessRemote.freshness() == ResourceFreshness::FRESH &&
         freshnessRemote.advertisementPolicyKnown() &&
-        freshnessRemote.advertisementPeriodSeconds() == 1;
+        freshnessRemote.advertisementPeriodSeconds() == 5;
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "");
     const bool remoteUnavailable = !freshnessRemote.available() &&
         freshnessRemote.freshness() == ResourceFreshness::FRESH;
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "21");
 
-    delay(2100);
+    delay(10100);
     freshnessManager.tick();
     const bool remoteAged = freshnessRemote.available() &&
         freshnessRemote.freshness() == ResourceFreshness::STALE;
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "22");
     const bool remoteRefreshed = freshnessRemote.freshness() == ResourceFreshness::FRESH;
 
-    flatAdvertisement.setAdvertisementPeriod(1);
+    ownerValue[5] = false;
+    encodedOwnerManifest = "";
+    serializeMsgPack(ownerManifest, encodedOwnerManifest);
+    freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
+                                          encodedOwnerManifest);
+    const bool metadataDisableMakesUnavailable = !freshnessRemote.available();
+    ownerValue[5] = true;
+    encodedOwnerManifest = "";
+    serializeMsgPack(ownerManifest, encodedOwnerManifest);
+    freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
+                                          encodedOwnerManifest);
+    const bool metadataEnableWaitsForState = !freshnessRemote.available();
+    freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "23");
+    ownerValue[6] = 0;
+    encodedOwnerManifest = "";
+    serializeMsgPack(ownerManifest, encodedOwnerManifest);
+    freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
+                                          encodedOwnerManifest);
+    const bool eventDrivenPolicyKnown = freshnessRemote.available() &&
+        freshnessRemote.advertisementPolicyKnown() &&
+        freshnessRemote.advertisementPeriodSeconds() == 0;
+
+    flatAdvertisement.setAdvertisementPeriod(5);
     flatAdvertisement.setValue(1);
     const int beforeBoundedTick = advertisementPublisher.stateAttempts;
     advertisementManager.tick();
@@ -313,7 +356,7 @@ void setup()
     advertisementManager.tick();
     const bool normalPublicationResetTimer =
         advertisementPublisher.stateAttempts == afterRefresh;
-    delay(1100);
+    delay(5100);
     advertisementPublisher.failState = true;
     const int beforeFailedRefresh = advertisementPublisher.stateAttempts;
     advertisementManager.tick();
@@ -329,6 +372,22 @@ void setup()
     const bool failedRefreshRetried =
         advertisementPublisher.statePublishes == beforeFailedRefreshRetry + 1;
 
+    freshnessManager.tick();
+    const bool eventDrivenDoesNotAge =
+        freshnessRemote.freshness() == ResourceFreshness::FRESH;
+
+    advertisementPublisher.failManifest = true;
+    const int beforeManifestFailure = advertisementPublisher.manifestAttempts;
+    const ActionResult eventDrivenSet =
+        advertisementManager.executeCommand(" advertisement:primary period 0");
+    const bool manifestFailureRecorded = eventDrivenSet.success &&
+        advertisementPublisher.manifestAttempts == beforeManifestFailure + 1;
+    advertisementPublisher.failManifest = false;
+    delay(1100);
+    advertisementManager.tick();
+    const bool dirtyManifestRetried =
+        advertisementPublisher.manifestAttempts == beforeManifestFailure + 3;
+
     advertisementManager.unbindResource(&advertised);
     ResourcesManager restoredAdvertisementManager;
     ManagedSensor<int> restoredAdvertisement("advertisement:primary");
@@ -336,14 +395,19 @@ void setup()
         restoredAdvertisementManager.bindResource(&restoredAdvertisement) &&
         restoredAdvertisementManager.loadAdvertisementSettings() &&
         restoredAdvertisement.advertisementEnabled() &&
-        restoredAdvertisement.advertisementPeriodSeconds() == 1;
+        restoredAdvertisement.advertisementPeriodSeconds() == 0;
 
     const bool advertisementLifecycle = advertisementBound && immediateAdvertisement &&
-        periodSet.success && disabledStillComputes && enabledAdvertised &&
+        periodSet.success && !invalidPeriod.success &&
+        invalidPeriod.result == "PERIOD expects 0 or 5..86400 seconds" &&
+        disabledStillComputes && enabledAdvertised &&
         unavailableStillComputes && availabilityRecovered && freshnessBound &&
         remoteFresh && remoteUnavailable && remoteAged && remoteRefreshed &&
+        metadataDisableMakesUnavailable && metadataEnableWaitsForState &&
+        eventDrivenPolicyKnown && eventDrivenDoesNotAge &&
         boundedTick && normalPublicationResetTimer && refreshRateLimited &&
-        failedRefreshRetried && restoredAdvertisementPolicy &&
+        failedRefreshRetried && manifestFailureRecorded && dirtyManifestRetried &&
+        restoredAdvertisementPolicy &&
         advertisementPublisher.stateWasRetained;
     smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&
@@ -353,7 +417,8 @@ void setup()
                                             !managedSensor.isRemote() && remoteSensor.isRemote() &&
                                             remoteSensor.hasValue() && !remoteSensor.isStale() &&
                                             resourceCommandsWork && consumeCodecWorks &&
-                                            consumeLifecycleWorks && customResourcesWork &&
+                                            resourceErrorsAreExternal && consumeLifecycleWorks &&
+                                            customResourcesWork &&
                                             advertisementLifecycle);
     const String timezone = gDeviceIdentity.getTimezone();
     const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");

@@ -12,9 +12,10 @@ constexpr size_t NetResourceMaxPayloadLength = 2048;
 constexpr size_t NetResourceMaxManifestLength = 16384;
 constexpr size_t NetResourceMaxCommandLength = NetResourceMaxManifestLength + 256;
 constexpr uint32_t NetResourceDefaultAdvertisementPeriodSeconds = 300;
-constexpr uint32_t NetResourceMinAdvertisementPeriodSeconds = 1;
+constexpr uint32_t NetResourceMinAdvertisementPeriodSeconds = 5;
 constexpr uint32_t NetResourceMaxAdvertisementPeriodSeconds = 86400;
 constexpr uint32_t NetResourceAdvertisementRetryMs = 1000;
+constexpr uint32_t NetResourceManifestRetryMs = 1000;
 
 enum class NetResourceType : uint8_t
 {

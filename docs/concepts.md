@@ -236,12 +236,15 @@ Freshness belongs to Value state.
 
 `UNKNOWN` means no valid value has arrived, `FRESH` means the value is inside
 the owner's expected refresh window, and `STALE` means it has aged beyond about
-twice the advertised period. A retained withdrawal changes availability; it
-does not use `STALE` as a synonym.
+twice a non-zero advertised period. Period `0` is event-driven and does not age
+to `STALE` by time. A retained withdrawal changes availability; it does not use
+`STALE` as a synonym.
 
 The retained Resource manifest supplies advertisement-period metadata but does
-not itself make a Value fresh. Device presence does not make a Value fresh.
-Only valid `/state` traffic supplies and reaffirms the authoritative Value.
+not itself make a Value fresh. Explicit disabled advertisement metadata makes a
+Remote Value unavailable, while enabled metadata alone never makes it
+available. Device presence does not make a Value fresh. Only valid `/state`
+traffic supplies and reaffirms the authoritative Value.
 
 This is one of the project's central rules:
 

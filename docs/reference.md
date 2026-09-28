@@ -275,10 +275,14 @@ Advertisement defaults and limits:
 
 ```cpp
 NetResourceDefaultAdvertisementPeriodSeconds = 300
-NetResourceMinAdvertisementPeriodSeconds = 1
+NetResourceMinAdvertisementPeriodSeconds = 5
 NetResourceMaxAdvertisementPeriodSeconds = 86400
 NetResourceAdvertisementRetryMs = 1000
+NetResourceManifestRetryMs = 1000
 ```
+
+Advertisement period `0` is also valid and means event-driven only. Values 1
+through 4 are invalid.
 
 ## Remote Value source selection
 

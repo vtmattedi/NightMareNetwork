@@ -574,11 +574,14 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         if (!ensureSize(expression, NetResourceMaxCommandLength, result.response))
         {
             result.result = false;
+            result.response = "ERROR: " + result.response;
             return result;
         }
         const ActionResult resourceResult = gResourcesManager.executeCommand(expression);
         result.result = resourceResult.success;
         result.response = resourceResult.result;
+        if (!result.result && !result.response.startsWith("ERROR:"))
+            result.response = "ERROR: " + result.response;
         return result;
     }
 #endif

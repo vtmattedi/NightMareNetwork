@@ -100,7 +100,20 @@ It also accepts `{"source":"OWNER/RESOURCE"}` or
 advertisement only, persist through `ResourcesManager`, and do not control
 hardware polling or application logic. `enable false` withdraws retained
 `/state`; `enable true` immediately advertises the current authoritative value
-when available. `period` accepts 1 through 86400 seconds.
+when available. `period 0` selects event-driven-only publication; periodic
+refresh accepts 5 through 86400 seconds. Values 1 through 4 are invalid.
+
+`ResourcesManager::executeCommand()` returns an unformatted `ActionResult`.
+At the external command-response boundary, unsuccessful Resource commands are
+rendered as `ERROR: <message>`. The shell protocol remains plain text; success
+responses remain specific to the command.
+
+```text
+ERROR: PERIOD expects 0 or 5..86400 seconds
+ERROR: ENABLE requires a Managed value resource
+ERROR: Resource not found
+ERROR: Could not persist advertisement setting
+```
 
 The implementation also accepts `action` as an alias for `invoke`, but `invoke` is the canonical spelling.
 
