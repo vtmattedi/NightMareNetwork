@@ -7,7 +7,9 @@
 #include <Core/Logs.h>
 #include <Core/PersistentKeys.h>
 #include <Core/StateStore.h>
-#include <Network/NmConnection.h>
+#if NM_ENABLE_NETWORK
+#include <Network/NmConnectionInternal.h>
+#endif
 #if NM_ENABLE_OTA
 #include <Util/OTA.h>
 #endif
@@ -44,20 +46,6 @@ void startFrameworkServices()
 #if NM_ENABLE_OTA
     initOTA();
 #endif
-#if NM_ENABLE_NETWORK && (NM_NETWORK_MQTT || NM_NETWORK_LOCALMQTT || NM_NETWORK_ESPNOW)
-    NightMare::ConnectionType connection = static_cast<NightMare::ConnectionType>(
-        NightMare::preferredConnection.value());
-    bool started = NightMare::SelectConnection(connection);
-#if NM_NETWORK_MQTT
-    if (!started && connection != NightMare::ConnectionType::MQTT)
-        started = NightMare::SelectConnection(NightMare::ConnectionType::MQTT);
-#elif NM_NETWORK_LOCALMQTT
-    if (!started && connection != NightMare::ConnectionType::LOCAL_MQTT)
-        started = NightMare::SelectConnection(NightMare::ConnectionType::LOCAL_MQTT);
-#endif
-    if (!started)
-        LOG_ERROR("NET", "Could not start the preferred connection");
-#endif
 #if NM_ENABLE_TIME_SYNC
     if (!startSntpTimeSync())
         LOG_ERROR("Time", "Could not start SNTP synchronization");
@@ -66,6 +54,10 @@ void startFrameworkServices()
 
 void onWiFiState(NightMare::WiFiState state)
 {
+#if NM_ENABLE_NETWORK
+    // Availability only; NmConnection decides what to do with it.
+    NightMare::OnLinkAvailabilityIngress(state == NightMare::WiFiState::CONNECTED);
+#endif
     if (state != NightMare::WiFiState::CONNECTED)
         return;
     startFrameworkServices();

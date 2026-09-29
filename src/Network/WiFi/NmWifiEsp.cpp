@@ -39,12 +39,48 @@ bool keepMonitoring = false;
 std::string currentIp;
 WiFiStateCallback stateCallback = nullptr;
 
+portMUX_TYPE mutexInit = portMUX_INITIALIZER_UNLOCKED;
+
 bool ensureMutex()
 {
-    if (stateMutex == nullptr)
-        stateMutex = xSemaphoreCreateMutex();
+    portENTER_CRITICAL(&mutexInit);
+    const bool needed = stateMutex == nullptr;
+    portEXIT_CRITICAL(&mutexInit);
+    if (needed)
+    {
+        SemaphoreHandle_t created = xSemaphoreCreateMutex();
+        portENTER_CRITICAL(&mutexInit);
+        if (stateMutex == nullptr)
+        {
+            stateMutex = created;
+            created = nullptr;
+        }
+        portEXIT_CRITICAL(&mutexInit);
+        if (created != nullptr)
+            vSemaphoreDelete(created);
+    }
     return stateMutex != nullptr;
 }
+
+// stateMutex guards every field below except the ESP handles and the two
+// task flags: currentState, currentIp, activeProfile, gTxPower, hostname and
+// all scan state. It is not recursive: never call a locking helper while held,
+// and never invoke a callback while held.
+class Lock
+{
+public:
+    Lock() { held_ = ensureMutex() && xSemaphoreTake(stateMutex, portMAX_DELAY) == pdTRUE; }
+    ~Lock()
+    {
+        if (held_)
+            xSemaphoreGive(stateMutex);
+    }
+    Lock(const Lock &) = delete;
+    Lock &operator=(const Lock &) = delete;
+
+private:
+    bool held_ = false;
+};
 
 bool isConnected() { return WiFi_state() == NightMare::WiFiState::CONNECTED; }
 
@@ -58,12 +94,12 @@ void publishState(NightMare::WiFiState status)
 
 void setStatus(NightMare::WiFiState status)
 {
-    if (!ensureMutex())
-        return;
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
-    const bool changed = currentState != status;
-    currentState = status;
-    xSemaphoreGive(stateMutex);
+    bool changed;
+    {
+        Lock lock;
+        changed = currentState != status;
+        currentState = status;
+    }
     if (changed)
         publishState(status);
 }
@@ -100,8 +136,14 @@ bool configureStation(const NightMare::WiFiProfile &profile)
 
 void notifyConnected()
 {
-    ESP_LOGI(Tag, "Connected to %s, IP: %s",
-             activeProfile.ssid.c_str(), currentIp.c_str());
+    std::string ssid;
+    std::string ip;
+    {
+        Lock lock;
+        ssid = activeProfile.ssid;
+        ip = currentIp;
+    }
+    ESP_LOGI(Tag, "Connected to %s, IP: %s", ssid.c_str(), ip.c_str());
     publishState(NightMare::WiFiState::CONNECTED);
 }
 
@@ -112,12 +154,10 @@ void handleIpEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     const auto *event = static_cast<ip_event_got_ip_t *>(eventData);
     char address[16] = {};
     snprintf(address, sizeof(address), IPSTR, IP2STR(&event->ip_info.ip));
-    if (ensureMutex())
     {
-        xSemaphoreTake(stateMutex, portMAX_DELAY);
+        Lock lock;
         currentIp = address;
         currentState = NightMare::WiFiState::CONNECTED;
-        xSemaphoreGive(stateMutex);
     }
     notifyConnected();
 }
@@ -131,11 +171,9 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
     }
     else if (eventId == WIFI_EVENT_STA_DISCONNECTED)
     {
-        if (ensureMutex())
         {
-            xSemaphoreTake(stateMutex, portMAX_DELAY);
+            Lock lock;
             currentIp.clear();
-            xSemaphoreGive(stateMutex);
         }
         if (WiFi_state() != NightMare::WiFiState::STOPPED)
             setStatus(NightMare::WiFiState::DISCONNECTED);
@@ -146,9 +184,10 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
     {
         uint16_t count = MaxScanResults;
         wifi_ap_record_t records[MaxScanResults] = {};
-        if (esp_wifi_scan_get_ap_records(&count, records) == ESP_OK && ensureMutex())
+        const bool read = esp_wifi_scan_get_ap_records(&count, records) == ESP_OK;
+        Lock lock;
+        if (read)
         {
-            xSemaphoreTake(stateMutex, portMAX_DELAY);
             scanResultCount = count;
             for (size_t i = 0; i < count; ++i)
             {
@@ -162,13 +201,8 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
                 scanResults[i].channel = records[i].primary;
                 scanResults[i].authMode = records[i].authmode;
             }
-            scanRunning = false;
-            xSemaphoreGive(stateMutex);
         }
-        else
-        {
-            scanRunning = false;
-        }
+        scanRunning = false;
     }
 }
 
@@ -205,11 +239,19 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
 {
     if (!initializeDriver() || !WiFi_isValidTxPower(profile.txPower))
         return false;
-    activeProfile = profile;
-    gTxPower = profile.txPower;
+    {
+        Lock lock;
+        activeProfile = profile;
+        gTxPower = profile.txPower;
+    }
     keepMonitoring = monitor;
-    if (!hostname.empty())
-        esp_netif_set_hostname(stationNetif, hostname.c_str());
+    std::string name;
+    {
+        Lock lock;
+        name = hostname;
+    }
+    if (!name.empty())
+        esp_netif_set_hostname(stationNetif, name.c_str());
     esp_wifi_disconnect();
     if (!configureStation(profile) || !applyTxPower(profile.txPower))
         return false;
@@ -224,7 +266,11 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
 void monitorTask(void *)
 {
     uint32_t attemptStarted = nowMs();
-    size_t powerIndex = nextPowerIndex(gTxPower);
+    size_t powerIndex;
+    {
+        Lock lock;
+        powerIndex = nextPowerIndex(gTxPower);
+    }
     while (keepMonitoring)
     {
         if (isConnected())
@@ -240,12 +286,10 @@ void monitorTask(void *)
             esp_wifi_disconnect();
             if (applyTxPower(retryPower))
             {
-                gTxPower = retryPower;
-                if (ensureMutex())
                 {
-                    xSemaphoreTake(stateMutex, portMAX_DELAY);
+                    Lock lock;
+                    gTxPower = retryPower;
                     activeProfile.txPower = retryPower;
-                    xSemaphoreGive(stateMutex);
                 }
                 esp_wifi_connect();
             }
@@ -321,14 +365,10 @@ void WiFi_stop()
     esp_netif_destroy_default_wifi(stationNetif);
     stationNetif = nullptr;
     driverInitialized = false;
-    if (ensureMutex())
-    {
-        xSemaphoreTake(stateMutex, portMAX_DELAY);
-        currentIp.clear();
-        scanResultCount = 0;
-        scanRunning = false;
-        xSemaphoreGive(stateMutex);
-    }
+    Lock lock;
+    currentIp.clear();
+    scanResultCount = 0;
+    scanRunning = false;
 }
 
 bool WiFi_start(const NightMare::WiFiProfile &profile, const char *stationHostname)
@@ -337,7 +377,10 @@ bool WiFi_start(const NightMare::WiFiProfile &profile, const char *stationHostna
     if (status == NightMare::WiFiState::CONNECTED ||
         status == NightMare::WiFiState::CONNECTING)
         return true;
-    hostname = stationHostname != nullptr ? stationHostname : "";
+    {
+        Lock lock;
+        hostname = stationHostname != nullptr ? stationHostname : "";
+    }
     if (!beginConnection(profile, true))
         return false;
     return startMonitor();
@@ -349,16 +392,17 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
         !WiFi_isValidTxPower(profile.txPower))
         return false;
     NightMare::WiFiProfile previous;
-    if (ensureMutex())
     {
-        xSemaphoreTake(stateMutex, portMAX_DELAY);
+        Lock lock;
         previous = activeProfile;
-        xSemaphoreGive(stateMutex);
     }
     stopMonitor();
     if (!connectBlocking(profile, AttemptTimeoutMs))
     {
-        gTxPower = previous.txPower;
+        {
+            Lock lock;
+            gTxPower = previous.txPower;
+        }
         beginConnection(previous, true);
         startMonitor();
         return false;
@@ -368,25 +412,20 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
 
 NightMare::WiFiState WiFi_state()
 {
-    if (!ensureMutex())
-        return NightMare::WiFiState::STOPPED;
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
-    const NightMare::WiFiState status = currentState;
-    xSemaphoreGive(stateMutex);
-    return status;
+    Lock lock;
+    return currentState;
 }
 
 NightMare::WiFiInfo WiFi_info()
 {
     NightMare::WiFiInfo info;
-    if (!ensureMutex())
-        return info;
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
-    info.state = currentState;
-    info.ssid = activeProfile.ssid;
-    info.txPower = activeProfile.txPower;
-    info.ip = currentIp;
-    xSemaphoreGive(stateMutex);
+    {
+        Lock lock;
+        info.state = currentState;
+        info.ssid = activeProfile.ssid;
+        info.txPower = activeProfile.txPower;
+        info.ip = currentIp;
+    }
     if (info.state == NightMare::WiFiState::STOPPED)
         return info;
     int8_t power = 0;
@@ -404,30 +443,42 @@ NightMare::WiFiInfo WiFi_info()
 
 bool WiFi_startScan()
 {
-    if (WiFi_state() == NightMare::WiFiState::STOPPED || scanRunning)
+    if (WiFi_state() == NightMare::WiFiState::STOPPED)
         return false;
-    scanRunning = true;
-    scanResultCount = 0;
+    {
+        Lock lock;
+        if (scanRunning)
+            return false;
+        scanRunning = true;
+        scanResultCount = 0;
+    }
     wifi_scan_config_t config = {};
     config.show_hidden = true;
     if (esp_wifi_scan_start(&config, false) == ESP_OK)
         return true;
+    Lock lock;
     scanRunning = false;
     return false;
 }
 
-bool WiFi_scanInProgress() { return scanRunning; }
-int WiFi_scanCount() { return scanRunning ? -1 : static_cast<int>(scanResultCount); }
+bool WiFi_scanInProgress()
+{
+    Lock lock;
+    return scanRunning;
+}
+
+int WiFi_scanCount()
+{
+    Lock lock;
+    return scanRunning ? -1 : static_cast<int>(scanResultCount);
+}
 
 bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result)
 {
-    if (!ensureMutex())
-        return false;
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    Lock lock;
     const bool exists = index < scanResultCount;
     if (exists)
         result = scanResults[index];
-    xSemaphoreGive(stateMutex);
     return exists;
 }
 
