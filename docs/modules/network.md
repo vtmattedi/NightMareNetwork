@@ -155,5 +155,10 @@ src/Network/WiFi/NmWifiService.*   storage, hostname, first-connection services
 ```
 
 It uses `esp_wifi`, `esp_netif`, and ESP events directly.
-While associated, `WiFi_RSSI()` and `WiFi_channel()` report the AP signal (dBm)
-and primary channel; both return 0 when not connected.
+While associated, `WiFi_info()` reports the AP signal (`rssi`, dBm) and primary
+`channel`; both are 0 when not connected. The driver's mutable state (state, IP,
+active profile, TX power, scan results) is guarded by one mutex.
+
+Wi-Fi reports availability to `NmConnection` (`OnLinkAvailabilityIngress`) and
+nothing more. `NmConnection` owns starting the preferred connection when the
+link comes up, selecting connections and failing over.

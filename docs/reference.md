@@ -1241,9 +1241,12 @@ The driver is ESP-IDF only and has three actions and a state.
 
 Storage, hostname and first-connection services live in `NmWifiService`:
 `WiFiBegin()` loads the stored profile (defaulting to `creds.h`), uses the device
-name as hostname, starts the stack, and on connection starts OTA, the preferred
-connection and SNTP once, persists a fallback TX power and then calls the
-`WiFi_onConnected()` callback.
+name as hostname, starts the stack, and on connection starts OTA and SNTP once,
+persists a fallback TX power and then calls the `WiFi_onConnected()` callback.
+Every Wi-Fi state change is reported to `NmConnection` as link availability
+(`OnLinkAvailabilityIngress`); Wi-Fi does not start or select connections.
+`NmConnection` starts the preferred connection (then the build's default profile)
+when the link comes up and nothing is running.
 `WiFiApplyProfile()` changes the running stack and persists on success, or only
 persists while stopped.
 

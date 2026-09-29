@@ -54,6 +54,7 @@ Subscription subscriptions[MaxSubscriptions];
 SemaphoreHandle_t subscriptionMutex = nullptr;
 bool frameworkSubscriptionsRegistered = false;
 bool resourceConnectionAttached = false;
+bool linkAvailable = false;
 ConnectionType rollbackConnection = ConnectionType::AUTO;
 bool rollbackAvailable = false;
 
@@ -241,6 +242,17 @@ bool startConnection(ConnectionType connection)
 #endif
 }
 
+// Start policy: the persisted preference first, then the build's default
+// profile. Used when the link comes up and nothing is running.
+bool startPreferredConnection()
+{
+    const ConnectionType preferred = static_cast<ConnectionType>(preferredConnection.value());
+    if (connectionEnabled(preferred) && startConnection(preferred))
+        return true;
+    const ConnectionType fallback = defaultConnection();
+    return fallback != preferred && connectionEnabled(fallback) && startConnection(fallback);
+}
+
 bool changePreferredConnection(Config<int> &, const int &requested)
 {
     const ConnectionType connection = static_cast<ConnectionType>(requested);
@@ -417,6 +429,18 @@ void OnConnectionFailedIngress(ConnectionType connection)
         LOG_ERROR("NET", "Could not persist the rollback connection");
     if (!startConnection(fallback))
         connectionState = ConnectionState::ERROR;
+}
+
+void OnLinkAvailabilityIngress(bool available)
+{
+    linkAvailable = available;
+    if (!available)
+        return;
+    if (connectionState != ConnectionState::STOPPED && connectionState != ConnectionState::ERROR)
+        return;
+    // No enabled profile means there is nothing to start, which is not an error.
+    if (!startPreferredConnection() && defaultConnection() != ConnectionType::AUTO)
+        LOG_ERROR("NET", "Could not start the preferred connection");
 }
 
 bool PublishText(const String &topic, const String &payload, bool retained)

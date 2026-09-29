@@ -444,11 +444,11 @@ On the first successful WiFi connection in a boot, the current implementation st
 
 ```text
 OTA
-MQTT
 SNTP time synchronization
 ```
 
-in that order.
+in that order. Wi-Fi also reports link availability to `NmConnection`, which
+starts the preferred connection itself; that is not a Wi-Fi service.
 
 Specifically:
 
