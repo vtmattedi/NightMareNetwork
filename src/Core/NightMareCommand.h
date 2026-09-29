@@ -13,9 +13,6 @@
 #if NM_ENABLE_NETWORK
 #include <Network/NmTransport.h>
 #endif
-#if NM_ENABLE_MQTT
-#include <Network/MQTT.h>
-#endif
 #if NM_ENABLE_WIFI
 #include <Network/WiFi/NmWifiEsp.h>
 #endif

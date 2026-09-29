@@ -42,7 +42,7 @@ struct TelemetryResult
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/heartbeat non-retained, controlled by heartbeat Configs
-// Static INFO and hardware documents are requested on every MQTT connection
+// Static INFO and hardware documents are requested on every transport connection
 // and published cooperatively. Sensors, actuators and application state belong
 // to NetResources, which carry their own freshness; nothing here duplicates them.
 class TelemetryService

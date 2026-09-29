@@ -570,7 +570,7 @@ JOB AFTER <label> <delay_ms> "<command>"
 Example:
 
 ```text
-JOB AFTER reconnect 5000 "MQTT CONNECT REMOTE"
+JOB AFTER reconnect 5000 "TRANSPORT SET MQTT"
 ```
 
 ### Repeat
@@ -632,55 +632,6 @@ are runtime-only.
 
 See the Scheduler module documentation for the full job model.
 
-## MQTT
-
-Available when MQTT support is enabled.
-
-### State
-
-```text
-MQTT STATE
-```
-
-Returns `MQTTStateJson()` after handling:
-
-```json
-{
-  "state": 2,
-  "broker": "remote"
-}
-```
-
-### Connect / switch broker
-
-```text
-MQTT CONNECT LOCAL
-MQTT CONNECT REMOTE
-```
-
-The implementation also accepts:
-
-```text
-MQTT CONNECT 1
-MQTT CONNECT 2
-```
-
-Any other/missing destination requests a connection using the currently selected broker.
-
-### Disconnect
-
-```text
-MQTT DISCONNECT
-```
-
-### Swap broker
-
-```text
-MQTT SWAP
-```
-
-Switches between local and remote broker selection.
-
 ## TRANSPORT
 
 Available when Network support is enabled. It selects the same enum integer
@@ -699,6 +650,10 @@ TRANSPORT SET AUTO
 `MQTT` selects Remote MQTT/TLS. `LOCAL_MQTT` selects the local broker.
 `ESP_NOW` and `AUTO` currently return an unavailable error without stopping the
 active MQTT connection; their implementations are deliberately deferred.
+
+The former `MQTT STATE`, `MQTT CONNECT`, `MQTT DISCONNECT`, and `MQTT SWAP`
+commands were removed. Connection selection and state now have one command
+surface.
 
 ## CONFIG
 

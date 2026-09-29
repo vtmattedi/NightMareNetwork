@@ -939,7 +939,8 @@ dependencies at `<device>/manifest/consume` and its MessagePack sibling. This
 document is separate from the Managed Resource provider manifest and requires
 no duplicate project declaration.
 
-MQTT transport is injected into the manager by the NightMare MQTT facade.
+The `ResourcePublisher` / `ResourceSubscriber` adapter is injected by
+`NmTransport`; the manager has no MQTT or broker-profile dependency.
 
 ## Manifest handler
 

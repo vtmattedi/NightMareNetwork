@@ -93,9 +93,11 @@ while more than one type may reuse one driver implementation. Remote `MQTT` and
 availability policy without justifying duplicated MQTT client code.
 
 **Consequence:** Config and commands store/select `TransportType` integers.
-`AUTO` policy and the ESP-NOW driver remain deferred; the existing MQTT
-implementation keeps its current MQTT-specific reconnect/fallback behavior
-during this migration.
+`AUTO` policy and the ESP-NOW driver remain deferred. MQTT reconnects the
+selected broker profile but cannot silently change the selected connection
+type; only `NmTransport` may do that. A failed explicit remote/local switch may
+be rolled back by `NmTransport` to the last connected profile; that safety
+transaction is not general automatic failover.
 
 ## A manifest describes; `/state` tells the truth
 

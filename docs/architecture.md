@@ -60,7 +60,7 @@ Application
 │ Scheduler                        │
 │ Telemetry                        │
 │ Command handling                 │
-│ MQTT facade / NmMessageRouter    │
+│ NmTransport / NmMessageRouter    │
 │ NightMareESP lifecycle           │
 └──────────────────────────────────┘
     │
@@ -163,23 +163,12 @@ protocol drivers.
 transport subscriptions, and Resource transport injection. It is the boundary
 used by Resources and transport-neutral framework publishers.
 
-### MQTT facade
+### NmMqttTransport
 
-`MQTT.cpp` retains the existing MQTT-specific application conveniences and
-lifecycle behavior.
-
-It provides conveniences for:
-
-```text
-publish
-custom subscriptions
-broker switching
-discovery
-project callbacks
-status serialization
-```
-
-It also provides the transport adapters used by ResourcesManager.
+`NmMqttTransport` adapts the `MQTT` and `LOCAL_MQTT` connection types to the
+shared ESP-IDF MQTT driver. It owns MQTT-specific lifecycle adaptation and the
+small reconnect delivery queue. Connection selection, generic publish/state,
+and subscription ownership remain in `NmTransport`.
 
 ### NmMqttEsp
 
@@ -205,7 +194,8 @@ It works with full MQTT topics and does not perform Resource semantics.
 
 Resource traffic is offered to `ResourcesManager` first. Other framework-owned traffic such as time synchronization and console commands is handled there as enabled.
 
-Traffic not consumed internally can then reach the project's generic MQTT callback.
+Traffic not consumed internally is ignored; transport ingress does not expose
+a parallel MQTT-specific application routing API.
 
 ## Retained state model
 
@@ -247,7 +237,10 @@ MQTT message
 NmMqttEsp
     │
     ▼
-MQTT.cpp
+NmMqttTransport
+    │
+    ▼
+NmTransport
     │
     ▼
 NmMessageRouter
@@ -262,7 +255,9 @@ NetValue<T>
 application onUpdate callback
 ```
 
-The Resource Manager consumes recognized Resource traffic even if the specific operation fails. A malformed or rejected message for a known Resource does not leak into the application's generic MQTT callback.
+The Resource Manager consumes recognized Resource traffic even if the specific
+operation fails. A malformed or rejected message for a known Resource does not
+escape into another application ingress path.
 
 ## Message flow: write to a ManagedState
 

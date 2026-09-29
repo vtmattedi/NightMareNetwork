@@ -1178,106 +1178,16 @@ generic boundary binary-safe. `ESP_NOW` and `AUTO` are represented but not yet
 implemented; selecting either returns `false` without interrupting the working
 MQTT connection.
 
-## MQTT compatibility facade
+## MQTT implementation limits
 
-Broker selectors:
-
-```cpp
-constexpr bool LOCAL_MQTT = true;
-constexpr bool REMOTE_MQTT = false;
-```
-
-Lifecycle/state:
-
-```cpp
-void MQTT_Init(
-    bool localBroker = REMOTE_MQTT);
-
-void MQTT_End();
-void MQTT_Finish();
-
-void MQTT_change_to(bool localBroker);
-
-bool MQTT_isLocal();
-bool MQTT_Connected();
-
-int8_t MQTT_State();
-String MQTTStateJson();
-```
-
-Publish:
-
-```cpp
-bool MQTT_Publish(
-    const String &topic,
-    const String &message,
-    bool insertOwner = true,
-    bool retained = false);
-
-void MQTT_Send(
-    String topic,
-    String message,
-    bool insertOwner = true,
-    bool retained = false);
-
-void MQTT_Send_Raw(
-    String topic,
-    String message);
-
-bool MQTT_Queue_Async_Message(
-    String topic,
-    String message,
-    bool insertOwner = false,
-    bool retained = false);
-```
-
-Custom subscriptions:
-
-```cpp
-bool MQTT_SubscribeTopic(
-    const String &topicFilter);
-
-bool MQTT_UnsubscribeTopic(
-    const String &topicFilter);
-```
-
-Discovery:
-
-```cpp
-bool MQTT_SetDiscovery(bool enabled);
-bool MQTT_DiscoveryEnabled();
-```
-
-Status helper:
-
-```cpp
-String deviceStatusJson(bool online);
-
-String deviceStatusJson(
-    const String &deviceName,
-    bool online);
-```
-
-Project hooks:
-
-```cpp
-void MQTT_onMessage(
-    void (*cb)(String topic, String message),
-    bool onlyDeviceMessages = true);
-
-void MQTT_onConnected(
-    void (*cb)(void));
-
-void MQTT_onDisconnected(
-    void (*cb)(bool localBroker));
-```
-
-Current MQTT implementation limits:
+MQTT is an implementation behind `NmTransport`; it does not expose a second
+public lifecycle, state, publish, or subscription API. Current implementation
+limits are:
 
 ```text
-queued async messages:      5
-custom subscriptions:       16
-custom filter length:       192
+queued reconnect messages:  5
+transport subscriptions:    256
+topic filter length:        192
 incoming MQTT payload:      32768 bytes
 MQTT QoS:                   0
 ```

@@ -1,7 +1,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
 #include "NmMqttEsp.h"
-#include "MQTT.h"
+#include <Network/NmTransportInternal.h>
 
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
@@ -11,6 +11,7 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 
 #ifndef MQTT_CREDS_H
@@ -24,7 +25,6 @@ namespace
 {
 enum class ControlCommand : uint8_t { LAN, CLOUD, STOP, SHUTDOWN };
 constexpr size_t MaxIncomingLength = 32768;
-constexpr uint8_t MaxBrokerErrors = 1;
 
 QueueHandle_t controlQueue = nullptr;
 TaskHandle_t controlTaskHandle = nullptr;
@@ -32,9 +32,9 @@ esp_mqtt_client_handle_t client = nullptr;
 NmMqttEsp::MessageHandler onMessage = nullptr;
 NmMqttEsp::ConnectedHandler onConnected = nullptr;
 NmMqttEsp::DisconnectedHandler onDisconnected = nullptr;
+NmMqttEsp::ErrorHandler onError = nullptr;
 volatile int8_t connectionState = -1;
 bool lanBroker = false;
-uint8_t brokerErrors = 0;
 String incomingTopic;
 String incomingPayload;
 bool receiving = false;
@@ -72,7 +72,6 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     {
     case MQTT_EVENT_CONNECTED:
         connectionState = lanBroker ? 1 : 2;
-        brokerErrors = 0;
         LOG("MQTT", "Connected to %s broker (%s)", lanBroker ? "LAN" : "cloud", brokerUri);
         if (onConnected != nullptr)
             onConnected(lanBroker);
@@ -124,12 +123,12 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
             if (err == EAGAIN || err == EWOULDBLOCK || err == ENOMEM)
                 break;
         }
-        if (++brokerErrors > MaxBrokerErrors && controlQueue != nullptr)
-        {
-            const ControlCommand cmd = lanBroker ? ControlCommand::CLOUD : ControlCommand::LAN;
-            xQueueSend(controlQueue, &cmd, 0);
-            brokerErrors = 0;
-        }
+        // The selected connection type is owned by NmTransport. ESP-IDF may
+        // reconnect this broker, but the driver must never silently swap to
+        // the other MQTT profile.
+        LOG_WARNING("MQTT", "Broker transport error; retaining selected profile");
+        if (onError != nullptr)
+            onError(lanBroker);
         break;
     default:
         break;
@@ -142,7 +141,7 @@ bool startClient(bool useLan)
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
     snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
-    const String offlineStatus = deviceStatusJson(false);
+    const String offlineStatus = NightMare::TransportDeviceStatusJson(false);
     if (offlineStatus.length() >= sizeof(willMessage))
     {
         // Cannot happen with a valid name, but a cut-off JSON last will would be
@@ -203,7 +202,6 @@ void controlTask(void *)
             stopRequested = false;
         if (cmd == ControlCommand::LAN || cmd == ControlCommand::CLOUD)
         {
-            brokerErrors = 0;
             startClient(cmd == ControlCommand::LAN);
         }
         if (cmd == ControlCommand::SHUTDOWN)
@@ -223,11 +221,12 @@ void controlTask(void *)
 namespace NmMqttEsp
 {
 void setHandlers(MessageHandler message, ConnectedHandler connectedHandler,
-                 DisconnectedHandler disconnectedHandler)
+                 DisconnectedHandler disconnectedHandler, ErrorHandler errorHandler)
 {
     onMessage = message;
     onConnected = connectedHandler;
     onDisconnected = disconnectedHandler;
+    onError = errorHandler;
 }
 
 bool begin(bool useLan)
@@ -280,26 +279,31 @@ bool changeTo(bool useLan)
     return xQueueSend(controlQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE;
 }
 
-bool publish(const String &topic, const String &payload, bool retained)
+bool publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
 {
-    if (client == nullptr || connectionState <= 0 || topic.length() == 0)
+    if (client == nullptr || connectionState <= 0 || topic == nullptr || topic[0] == '\0' ||
+        (payload == nullptr && length != 0) || length > static_cast<size_t>(INT_MAX))
         return false;
-    return esp_mqtt_client_publish(client, topic.c_str(), payload.c_str(),
-                                   payload.length(), 0, retained) >= 0;
+    return esp_mqtt_client_publish(client, topic,
+                                   reinterpret_cast<const char *>(payload),
+                                   static_cast<int>(length), 0, retained) >= 0;
 }
 
-bool subscribe(const String &topicFilter)
+bool subscribe(const char *topicFilter)
 {
-    const bool ok = client != nullptr && connectionState > 0 && topicFilter.length() != 0 &&
-                    esp_mqtt_client_subscribe(client, topicFilter.c_str(), 0) >= 0;
-    LOG_DEBUG("MQTT", "Subscribe %s: %s", topicFilter.c_str(), OK_LOG(ok));
+    const bool ok = client != nullptr && connectionState > 0 && topicFilter != nullptr &&
+                    topicFilter[0] != '\0' &&
+                    esp_mqtt_client_subscribe(client, topicFilter, 0) >= 0;
+    LOG_DEBUG("MQTT", "Subscribe %s: %s", topicFilter == nullptr ? "" : topicFilter,
+              OK_LOG(ok));
     return ok;
 }
 
-bool unsubscribe(const String &topicFilter)
+bool unsubscribe(const char *topicFilter)
 {
-    return client != nullptr && connectionState > 0 && topicFilter.length() != 0 &&
-           esp_mqtt_client_unsubscribe(client, topicFilter.c_str()) >= 0;
+    return client != nullptr && connectionState > 0 && topicFilter != nullptr &&
+           topicFilter[0] != '\0' &&
+           esp_mqtt_client_unsubscribe(client, topicFilter) >= 0;
 }
 
 bool connected() { return connectionState > 0; }

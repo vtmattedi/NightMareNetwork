@@ -165,7 +165,7 @@ namespace
             appendConnection(connections.add<JsonObject>(), members.connections[i]);
     }
 
-    // The MQTT topic of each publishable document; null for query-only sections.
+    // The transport topic of each publishable document; null for query-only sections.
     const char *documentTopic(InfoType type)
     {
         switch (type)
@@ -386,7 +386,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
 
     // Sizes itself as it is filled; the old fixed capacity asked for
     // 2048 + connections * 256 bytes contiguous, which on a board describing
-    // eighteen pins was a 6.6KB block demanded on every MQTT connect.
+    // eighteen pins was a 6.6KB block demanded on every transport connect.
     JsonDocument doc;
     switch (type)
     {

@@ -4,14 +4,14 @@
 #if NM_ENABLE_NETWORK
 
 #include <Arduino.h>
+#include <Network/NmTransport.h>
 
 namespace NightMare
 {
 // Driver-to-coordinator events. Not part of the application transport API.
-void TransportConnectedIngress(bool localMqtt);
-void TransportDisconnectedIngress();
-void TransportMqttStarting(bool localMqtt);
-void TransportMqttStopping(bool finish);
+void TransportConnectedIngress(TransportType transport);
+void TransportDisconnectedIngress(TransportType transport);
+void TransportConnectionFailedIngress(TransportType transport);
 bool PublishText(const String &topic, const String &payload, bool retained = false);
 bool PublishDeviceText(const String &topic, const String &payload, bool retained = false);
 String TransportDeviceStatusJson(bool online);

@@ -624,7 +624,7 @@ Resource model
 DeviceIdentity state
 Scheduler model
 Telemetry model
-MQTT facade vs ESP transport
+NmTransport vs NmMqttTransport vs ESP MQTT driver
 ```
 
 but the complete library is not yet portable beyond ESP32.

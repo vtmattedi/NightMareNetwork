@@ -31,7 +31,7 @@ static void publishUptime()
 static void preferLocalBroker(bool firstConnection)
 {
     if (firstConnection)
-        MQTT_change_to(LOCAL_MQTT);
+        NightMare::SelectTransport(NightMare::TransportType::LOCAL_MQTT);
 }
 
 void setup()

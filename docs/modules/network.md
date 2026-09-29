@@ -19,7 +19,10 @@ ResourcesManager / telemetry / framework
           ┌─────────┴─────────┐
           ▼                   ▼
  MQTT or LOCAL_MQTT       ESP_NOW
-     NmMqttEsp          not implemented
+  NmMqttTransport       not implemented
+          │
+          ▼
+      NmMqttEsp
 ```
 
 Connection type and driver implementation are separate concepts. `MQTT` and
@@ -96,43 +99,50 @@ policy.
 
 ## MQTT reuse
 
-`NmTransport` adapts the existing MQTT implementation rather than duplicating
-it:
+`NmTransport` selects a connection profile and delegates MQTT work without
+duplicating the client implementation:
 
 ```text
 TransportType::MQTT
-    -> MQTT_Init(false) / NmMqttEsp
+    -> NmMqttTransport::begin(TransportType::MQTT)
+    -> NmMqttEsp (remote/TLS profile)
 
 TransportType::LOCAL_MQTT
-    -> MQTT_Init(true) / NmMqttEsp
+    -> NmMqttTransport::begin(TransportType::LOCAL_MQTT)
+    -> NmMqttEsp (local profile)
 ```
 
-The existing MQTT queue, discovery, project callbacks, routing, reconnect
-publication, Last Will, and broker-error behavior remain in `MQTT.cpp` and
-`NmMqttEsp.cpp`.
+`NmMqttTransport` owns MQTT adaptation and the reconnect-only MQTT delivery
+queue. `NmMqttEsp` owns the ESP-IDF client, broker profiles, TLS, Last Will,
+and packet ingress. It reconnects the selected profile but never silently
+changes from local to remote or vice versa.
 
-Only the old `MqttResourceTransport` adapter was removed. `NmTransport` now
-implements the `ResourcePublisher` and `ResourceSubscriber` boundary and
-injects it into `ResourcesManager`. On MQTT reconnect, existing MQTT lifecycle
-code still asks `ResourcesManager` to restore exact subscriptions and announce
-framework/Resource state.
+`NmTransport` implements the `ResourcePublisher` and `ResourceSubscriber`
+boundary and injects it into `ResourcesManager`.
 
 ## Switching
 
-For MQTT connection types, `SelectTransport()` persists the enum value,
-updates the selected type, and asks the existing MQTT control task to switch
-the complete connection. The MQTT task stops the old client before starting
-the target client. The normal connected path then restores subscriptions and
-requests state publication.
+For MQTT connection types, `SelectTransport()` sends a write through
+`ConfigManager`. The Config write handler is the single runtime switching
+path. It asks the MQTT control task to stop the old client and start the target
+profile. On connection, `NmTransport` restores subscriptions once and invokes
+the generic connected publication path.
+
+When a switch started from a connected MQTT profile reaches two non-transient
+broker transport errors before connecting, `NmTransport` rolls back to the
+previous profile and restores that persisted selection. A first-start failure
+has no known-good profile and enters `ERROR`. This bounded rollback is separate
+from the deferred `AUTO` policy.
 
 No scoring, simultaneous transports, topic-specific routing, message
 duplication, or new automatic failover policy is introduced here.
 
 ## Transport subscriptions
 
-Transport-level subscription intent is stored in a fixed 16-entry table and
-restored when MQTT reconnects. Resource subscriptions are managed separately
-by `ResourcesManager` and do not consume these application subscription slots.
+All subscription intent is stored in one fixed 256-entry registry owned by
+`NmTransport`. Console, time synchronization, application, and Resource
+subscriptions all enter through `Subscribe()`. The active implementation only
+executes the broker operation requested by `NmTransport`.
 
 ## Direct ESP WiFi
 

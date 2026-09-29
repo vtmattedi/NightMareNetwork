@@ -264,7 +264,7 @@ Examples:
 ```text
 ManagedState
 gResourcesManager
-MQTT_Publish
+NightMare::Publish
 SchedulerRunMode
 NM_ENABLE_TELEMETRY
 ```

@@ -254,23 +254,6 @@ The `<id>` is supplied by the caller and creates the correlation.
 
 See [MQTTP](mqttp.md) for the exact ID rules and request/response behavior.
 
-## Discovery subscriptions
-
-Global device discovery is opt-in through `MQTT_SetDiscovery(true)`.
-
-When enabled, NightMare subscribes to:
-
-```text
-+/manifest
-+/status
-```
-
-`+/manifest` feeds valid other-device manifests to the configured Resource manifest handler.
-
-`+/status` is ordinary MQTT traffic; when the project message callback is configured to receive external topics, status messages can reach that callback.
-
-Discovery is separate from Remote Resource binding. A bound Remote Resource installs the exact subscriptions it needs even when global discovery is disabled.
-
 ## Time synchronization topics
 
 Automatic time synchronization now uses ESP32 SNTP. The MQTT control topics remain as an auxiliary timestamp path.
@@ -303,44 +286,23 @@ A `Control/time` payload must be a JSON object containing both:
 
 `offset` is currently required for the message to be accepted but is not otherwise used by the router.
 
-## Project MQTT subscriptions
+## Project transport subscriptions
 
 Applications may register additional topic filters with:
 
 ```cpp
-MQTT_SubscribeTopic(...);
-MQTT_UnsubscribeTopic(...);
+NightMare::Subscribe(...);
+NightMare::Unsubscribe(...);
 ```
 
-Custom subscriptions are remembered in RAM and restored on reconnect.
+Subscriptions are remembered in RAM by `NmTransport` and restored once on
+reconnect alongside framework and Resource subscriptions.
 
 The current limits are:
 
 ```text
-custom subscriptions: 16
-topic filter length:   192 characters
+all subscriptions:   256
+topic filter length: 192 characters
 ```
 
 NightMare validates MQTT wildcard placement for `+` and `#`.
-
-Framework-owned subscriptions remain owned by the framework even if the same filter is also requested by application code.
-
-## Project message callback
-
-Automatic NightMare routing runs before the project callback.
-
-The order is conceptually:
-
-```text
-incoming MQTT
-    |
-    +-> Resource routing
-    +-> time sync
-    +-> console / controlled console
-    |
-    `-> project MQTT callback, if still unconsumed
-```
-
-By default, `MQTT_onMessage()` only receives topics rooted at the current device and receives them with the `<device>/` prefix removed.
-
-With `onlyDeviceMessages = false`, the callback receives unconsumed full MQTT topics.

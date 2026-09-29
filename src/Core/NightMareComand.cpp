@@ -16,6 +16,9 @@
 #if NM_ENABLE_NETWORK
 #include <Network/NmTransportInternal.h>
 #endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttTransport.h>
+#endif
 #if NM_CONSOLE_BUILTINS
 #include <LittleFS.h>
 #endif
@@ -922,70 +925,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             result.result = false;
         }
     }
-#if NM_ENABLE_MQTT
-    else if (parsedMsg.command == "MQTT")
-    {
-        result.result = true;
-        if (parsedMsg.subcommand == "STATE")
-        {
-            int8_t state = MQTT_State();
-            switch (state)
-            {
-            case -2:
-                result.response = "MQTT Connecting";
-                break;
-            case -1:
-                result.response = "MQTT Not Initialized";
-                break;
-            case 0:
-                result.response = "MQTT Disconnected";
-                break;
-            case 1:
-                result.response = "MQTT Connected Local";
-                break;
-            case 2:
-                result.response = "MQTT Connected Remote";
-                break;
-            }
-        }
-        else if (parsedMsg.subcommand == "CONNECT")
-        {
-            String dest = parsedMsg.args[1];
-            dest.toUpperCase();
-            if (dest == "LOCAL" || dest == "1")
-            {
-                MQTT_change_to(true);
-            }
-            else if (dest == "REMOTE" || dest == "2")
-            {
-                MQTT_change_to(false);
-            }
-            else
-            {
-                // connect to current
-                MQTT_change_to(MQTT_isLocal());
-            }
-        }
-        else if (parsedMsg.subcommand == "DISCONNECT")
-        {
-            MQTT_End();
-        }
-        else if (parsedMsg.subcommand == "SWAP")
-        {
-            MQTT_change_to(!MQTT_isLocal());
-        }
-        else
-        {
-            result.response = "Unknown MQTT subcommand available: [CONNECT <Local|Remote>, STATE, DISCONNECT, SWAP].";
-            result.result = false;
-        }
-        if (result.result)
-        {
-            result.response = MQTTStateJson();
-        }
-    }
-#endif
-
 #if NM_ENABLE_NETWORK
     else if (parsedMsg.command == "TRANSPORT")
     {
@@ -1139,8 +1078,8 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 if (context.msgSource == NM_CMD_SRC_MQTT)
                 {
                     context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after reconnecting to MQTT with the new credentials
-                    MQTT_Queue_Async_Message(context.sourceIdentifier, result.response,
-                                             false, false);
+                    NmMqttTransport::queueAsyncMessage(context.sourceIdentifier,
+                                                       result.response, false, false);
                 };
 #endif
             }
