@@ -294,7 +294,7 @@ installs the periodic system/network publication jobs.
 When enabled:
 
 ```cpp
-    WiFi_start();
+    NightMare::WiFiBegin();
 ```
 
 starts the asynchronous WiFi path.
@@ -371,13 +371,15 @@ The project, not the NightMare library, owns this credential file.
 ## Direct ESP WiFi driver
 
 ```cpp
-WiFi_start();
+NightMare::WiFiBegin();
 ```
 
-delegates to the driver in `Network/WiFi/NmWifiEsp.*`, which uses `esp_wifi`,
-`esp_netif`, and ESP events directly rather than Arduino's `WiFi` singleton.
+loads the stored profile and starts the ESP-IDF driver in `Network/WiFi/NmWifiEsp.*`,
+which uses `esp_wifi`, `esp_netif`, and ESP events directly and has no Arduino,
+PersistentSettings or identity dependency. Storage, the hostname and the
+first-connection services live in `Network/WiFi/NmWifiService.*`.
 
-The driver initializes PersistentSettings.
+`WiFiBegin()` initializes PersistentSettings.
 
 If either stored key is absent:
 
@@ -396,7 +398,7 @@ DEFAULT_PASSWORD
 Then it starts an asynchronous connection using the stored values. If an
 attempt remains disconnected for 15 seconds, the asynchronous task retries at
 the next transmit-power level supported by the ESP32 driver. When one of those
-fallback levels connects, `WiFi_start()` persists it with the rest of the WiFi
+fallback levels connects, `WiFiBegin()` persists it with the rest of the WiFi
 profile. Its recovery task remains active after connection so a later loss uses
 the same retry sequence.
 
@@ -490,14 +492,14 @@ The callback runs whenever the WiFi monitor detects a connection and tells the p
 ## WiFi credential change
 
 ```cpp
-WiFi_changeProfile(profile);
+NightMare::WiFiApplyProfile(profile);
 ```
 
 does the following:
 
-1. stops the recovery task and disconnects current WiFi,
+1. calls `WiFi_changeProfile()`, which stops the recovery task and disconnects current WiFi,
 2. tries the new credentials synchronously for up to 15 seconds,
-3. if they fail, starts reconnect with the previous stored credentials,
+3. if they fail, restores the previous credentials,
 4. if they succeed, writes the profile (SSID, password and TX power) to PersistentSettings
    and resumes the recovery task.
 

@@ -960,9 +960,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             doc["state"] = static_cast<uint8_t>(NightMare::GetConnectionState());
 #endif
 #if NM_ENABLE_WIFI
-            const NightMare::WiFiStatus status = WiFi_status();
+            const NightMare::WiFiState status = WiFi_state();
             doc["wifi"] = static_cast<int>(status);
-            doc["wifi_name"] = WiFi_getStatusName(status);
+            doc["wifi_name"] = WiFi_stateName(status);
 #endif
             serializeJson(doc, result.response);
             result.result = true;
@@ -970,14 +970,14 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_WIFI
         else if (parsedMsg.subcommand == "IP")
         {
-            result.response = WiFi_localIP();
+            result.response = WiFi_info().ip.c_str();
         }
         else if (parsedMsg.subcommand == "TXPOWER")
         {
             if (parsedMsg.args[1].length() == 0)
             {
-                const int cfg = WiFi_getProfile().txPower;
-                result.response = "TX power: " + String(WiFi_getTxPowerDbm()) + " dBm (" +
+                const int cfg = NightMare::WiFiStoredProfile().txPower;
+                result.response = "TX power: " + String(WiFi_info().txPowerDbm) + " dBm (" +
                                   (cfg == NightMare::NM_TX_POWER_AUTO ? String("auto") : "configured " + String(cfg / 4.0f) + " dBm") + ")";
             }
             else
@@ -988,12 +988,14 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                     result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5, 20, 20.5, 21 dBm.";
                     result.result = false;
                 }
-                else if (WiFi_setTxPower(quarter))
-                    result.response = "TX power set.";
                 else
                 {
-                    result.response = "TX power change failed; previous settings restored.";
-                    result.result = false;
+                    NightMare::WiFiProfile profile = NightMare::WiFiStoredProfile();
+                    profile.txPower = quarter;
+                    result.result = NightMare::WiFiApplyProfile(profile);
+                    result.response = result.result
+                                          ? "TX power set."
+                                          : "TX power change failed; previous settings restored.";
                 }
             }
         }
@@ -1034,9 +1036,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                         if (!WiFi_scanResult(i, scan))
                             continue;
                         JsonObject net = networks.add<JsonObject>();
-                        net["ssid"] = scan.ssid;
+                        net["ssid"] = scan.ssid.c_str();
                         net["rssi"] = scan.rssi;
-                        net["mac"] = scan.bssid;
+                        net["mac"] = scan.bssid.c_str();
                         net["channel"] = scan.channel;
                         net["encryptionType"] = WiFi_getAuthTypeName(scan.authMode);
                     }
@@ -1056,9 +1058,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             else
             {
                 String ssid = parsedMsg.args[1];
-                NightMare::WiFiProfile profile = WiFi_getProfile();
-                profile.ssid = ssid;
-                profile.password = parsedMsg.args[2];
+                NightMare::WiFiProfile profile = NightMare::WiFiStoredProfile();
+                profile.ssid = ssid.c_str();
+                profile.password = parsedMsg.args[2].c_str();
                 if (parsedMsg.args[3].length() > 0 &&
                     !parseTxPowerArg(parsedMsg.args[3], profile.txPower))
                 {
@@ -1066,7 +1068,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                     result.result = false;
                     return result;
                 }
-                bool changeResult = WiFi_changeProfile(profile);
+                bool changeResult = NightMare::WiFiApplyProfile(profile);
                 result.response = String("WiFi credentials change ") +
                                   (changeResult ? "successful." : "failed.");
 #if NM_ENABLE_MQTT

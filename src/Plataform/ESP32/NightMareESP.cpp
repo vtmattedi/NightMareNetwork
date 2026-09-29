@@ -12,7 +12,7 @@
 #include <Core/Telemetry.h>
 #endif
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiEsp.h>
+#include <Network/WiFi/NmWifiService.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>
@@ -259,7 +259,7 @@ void startNightMareESP()
         LOG_ERROR("NM", "Could not schedule periodic telemetry");
 #endif
 #if NM_ENABLE_WIFI && NM_WIFI_AUTO
-    WiFi_start();
+    NightMare::WiFiBegin();
 #endif
 }
 

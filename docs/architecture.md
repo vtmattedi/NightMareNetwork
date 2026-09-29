@@ -395,7 +395,7 @@ pending identity cleanup retry
 Telemetry.start()
     installs periodic callback jobs
 
-WiFi_start()
+NightMare::WiFiBegin()
     starts the WiFi/network path
 ```
 

@@ -2,8 +2,12 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_WIFI
 
-#include <Arduino.h>
+// ESP-IDF only: no Arduino, PersistentSettings or NightMare identity here.
+// Persistence, hostname and follow-up services belong to the caller.
 #include <esp_wifi.h>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 namespace NightMare
 {
@@ -11,57 +15,67 @@ constexpr int NM_TX_POWER_AUTO = 0;
 
 struct WiFiProfile
 {
-    String ssid;
-    String password;
+    std::string ssid;
+    std::string password;
     int txPower = NM_TX_POWER_AUTO;
 };
 
-enum class WiFiStatus : uint8_t
+enum class WiFiState : uint8_t
 {
     STOPPED = 0,
     CONNECTING,
     CONNECTED,
-    DISCONNECTED,
-    FAILED
+    DISCONNECTED
+};
+
+// Snapshot of the stack. rssi and channel are 0 unless CONNECTED; txPowerDbm is
+// 0 while STOPPED.
+struct WiFiInfo
+{
+    WiFiState state = WiFiState::STOPPED;
+    std::string ssid;
+    std::string ip;
+    int txPower = NM_TX_POWER_AUTO; // in use; a fallback level replaces the requested one
+    float txPowerDbm = 0;
+    int8_t rssi = 0;
+    uint8_t channel = 0;
 };
 
 struct WiFiScanResult
 {
-    String ssid;
-    String bssid;
+    std::string ssid;
+    std::string bssid;
     int8_t rssi = 0;
     uint8_t channel = 0;
     wifi_auth_mode_t authMode = WIFI_AUTH_OPEN;
 };
 }
 
-using WiFiConnectedCallback = void (*)(bool firstConnection);
+using WiFiStateCallback = void (*)(NightMare::WiFiState state);
 
-void WiFi_onConnected(WiFiConnectedCallback callback);
-// Starts the station from the stored profile and keeps it connected. Idempotent.
-bool WiFi_start();
-void WiFi_Disconnect();
-void WiFi_Scan();
-bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force = false);
-NightMare::WiFiProfile WiFi_getProfile();
+// Runs on the ESP event task on every state change.
+void WiFi_onState(WiFiStateCallback callback);
 
-bool WiFi_isConnected();
-NightMare::WiFiStatus WiFi_status();
-String WiFi_localIP();
-String WiFi_currentSSID();
-int WiFi_RSSI();
-int WiFi_channel();
+// Starts the station with the given profile and keeps it connected, cycling
+// TX power levels on repeated failure. Idempotent while connecting/connected.
+bool WiFi_start(const NightMare::WiFiProfile &profile, const char *hostname = nullptr);
+// Tears the whole WiFi stack down (driver, netif, events, recovery task).
+// WiFi_start() brings it back.
+void WiFi_stop();
+// Tries the profile synchronously (up to 15 s). On failure the previous profile
+// is restored and false returned. Nothing is persisted; false while stopped.
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
+// STOPPED, or running: CONNECTING, CONNECTED, DISCONNECTED.
+NightMare::WiFiState WiFi_state();
+NightMare::WiFiInfo WiFi_info();
 
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
 int WiFi_scanCount();
 bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result);
-void WiFi_clearScan();
 
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
-const char *WiFi_getStatusName(NightMare::WiFiStatus status);
+const char *WiFi_stateName(NightMare::WiFiState status);
 bool WiFi_isValidTxPower(int quarterDbm);
-bool WiFi_setTxPower(int quarterDbm);
-float WiFi_getTxPowerDbm();
 
 #endif // NM_ENABLE_WIFI

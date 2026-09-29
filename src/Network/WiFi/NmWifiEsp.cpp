@@ -3,32 +3,20 @@
 
 #include "NmWifiEsp.h"
 
-#include <Core/DeviceIdentity.h>
-#include <Core/Logs.h>
-#include <Core/PersistentKeys.h>
-#include <Core/StateStore.h>
-#include <Network/NmConnection.h>
-#if NM_ENABLE_OTA
-#include <Util/OTA.h>
-#endif
-#if NM_ENABLE_TIME_SYNC
-#include <Util/TimeSyncronization.h>
-#endif
-#include <creds.h>
 #include <esp_event.h>
+#include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
+#include <cstdio>
 #include <cstring>
-
-#if !defined(DEFAULT_SSID) || !defined(DEFAULT_PASSWORD)
-#error "Please define DEFAULT_SSID and DEFAULT_PASSWORD in creds.h"
-#endif
 
 namespace
 {
 int gTxPower = NightMare::NM_TX_POWER_AUTO;
+constexpr char Tag[] = "WiFi";
 constexpr uint32_t AttemptTimeoutMs = 15000;
 constexpr size_t MaxScanResults = 32;
 const int8_t TxPowerLevels[] = {84, 82, 80, 78, 76, 74, 68, 60,
@@ -40,18 +28,16 @@ TaskHandle_t monitorTaskHandle = nullptr;
 esp_netif_t *stationNetif = nullptr;
 esp_event_handler_instance_t wifiEvents = nullptr;
 esp_event_handler_instance_t ipEvents = nullptr;
-NightMare::WiFiStatus currentStatus = NightMare::WiFiStatus::STOPPED;
+NightMare::WiFiState currentState = NightMare::WiFiState::STOPPED;
 NightMare::WiFiProfile activeProfile;
+std::string hostname;
 NightMare::WiFiScanResult scanResults[MaxScanResults];
 size_t scanResultCount = 0;
 bool scanRunning = false;
 bool driverInitialized = false;
 bool keepMonitoring = false;
-bool persistFallbackPower = false;
-bool firstConnection = true;
-bool servicesStarted = false;
-String currentIp;
-WiFiConnectedCallback connectedCallback = nullptr;
+std::string currentIp;
+WiFiStateCallback stateCallback = nullptr;
 
 bool ensureMutex()
 {
@@ -60,13 +46,26 @@ bool ensureMutex()
     return stateMutex != nullptr;
 }
 
-void setStatus(NightMare::WiFiStatus status)
+bool isConnected() { return WiFi_state() == NightMare::WiFiState::CONNECTED; }
+
+uint32_t nowMs() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+void publishState(NightMare::WiFiState status)
+{
+    if (stateCallback != nullptr)
+        stateCallback(status);
+}
+
+void setStatus(NightMare::WiFiState status)
 {
     if (!ensureMutex())
         return;
     xSemaphoreTake(stateMutex, portMAX_DELAY);
-    currentStatus = status;
+    const bool changed = currentState != status;
+    currentState = status;
     xSemaphoreGive(stateMutex);
+    if (changed)
+        publishState(status);
 }
 
 size_t nextPowerIndex(int power)
@@ -85,66 +84,25 @@ bool applyTxPower(int quarterDbm)
            esp_wifi_set_max_tx_power(static_cast<int8_t>(quarterDbm)) == ESP_OK;
 }
 
-bool saveProfile(const NightMare::WiFiProfile &profile)
-{
-    const String keys[] = {NightMare::PersistentKey::WifiSsid,
-                           NightMare::PersistentKey::WifiPassword,
-                           NightMare::PersistentKey::WifiTxPower};
-    const String values[] = {profile.ssid, profile.password, String(profile.txPower)};
-    return PersistentSettings.setMany(keys, values, 3);
-}
-
 bool configureStation(const NightMare::WiFiProfile &profile)
 {
-    if (profile.ssid.length() == 0 || profile.ssid.length() > 32 ||
-        profile.password.length() > 64)
+    if (profile.ssid.size() == 0 || profile.ssid.size() > 32 ||
+        profile.password.size() > 64)
         return false;
     wifi_config_t config = {};
-    memcpy(config.sta.ssid, profile.ssid.c_str(), profile.ssid.length());
-    memcpy(config.sta.password, profile.password.c_str(), profile.password.length());
+    memcpy(config.sta.ssid, profile.ssid.c_str(), profile.ssid.size());
+    memcpy(config.sta.password, profile.password.c_str(), profile.password.size());
     config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     config.sta.pmf_cfg.capable = true;
     config.sta.pmf_cfg.required = false;
     return esp_wifi_set_config(WIFI_IF_STA, &config) == ESP_OK;
 }
 
-void startFrameworkServices()
-{
-    if (servicesStarted)
-        return;
-    servicesStarted = true;
-#if NM_ENABLE_OTA
-    initOTA();
-#endif
-#if NM_ENABLE_NETWORK && (NM_NETWORK_MQTT || NM_NETWORK_LOCALMQTT || NM_NETWORK_ESPNOW)
-    NightMare::ConnectionType connection = static_cast<NightMare::ConnectionType>(
-        NightMare::preferredConnection.value());
-    bool started = NightMare::SelectConnection(connection);
-#if NM_NETWORK_MQTT
-    if (!started && connection != NightMare::ConnectionType::MQTT)
-        started = NightMare::SelectConnection(NightMare::ConnectionType::MQTT);
-#elif NM_NETWORK_LOCALMQTT
-    if (!started && connection != NightMare::ConnectionType::LOCAL_MQTT)
-        started = NightMare::SelectConnection(NightMare::ConnectionType::LOCAL_MQTT);
-#endif
-    if (!started)
-        LOG_ERROR("NET", "Could not start the preferred connection");
-#endif
-#if NM_ENABLE_TIME_SYNC
-    if (!startSntpTimeSync())
-        LOG_ERROR("Time", "Could not start SNTP synchronization");
-#endif
-}
-
 void notifyConnected()
 {
-    const bool wasFirst = firstConnection;
-    startFrameworkServices();
-    LOG("WiFi", "Connected to %s, IP: %s",
-        WiFi_currentSSID().c_str(), WiFi_localIP().c_str());
-    if (connectedCallback != nullptr)
-        connectedCallback(wasFirst);
-    firstConnection = false;
+    ESP_LOGI(Tag, "Connected to %s, IP: %s",
+             activeProfile.ssid.c_str(), currentIp.c_str());
+    publishState(NightMare::WiFiState::CONNECTED);
 }
 
 void handleIpEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
@@ -158,7 +116,7 @@ void handleIpEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     {
         xSemaphoreTake(stateMutex, portMAX_DELAY);
         currentIp = address;
-        currentStatus = NightMare::WiFiStatus::CONNECTED;
+        currentState = NightMare::WiFiState::CONNECTED;
         xSemaphoreGive(stateMutex);
     }
     notifyConnected();
@@ -168,7 +126,7 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
 {
     if (eventId == WIFI_EVENT_STA_START)
     {
-        setStatus(NightMare::WiFiStatus::CONNECTING);
+        setStatus(NightMare::WiFiState::CONNECTING);
         esp_wifi_connect();
     }
     else if (eventId == WIFI_EVENT_STA_DISCONNECTED)
@@ -176,11 +134,11 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
         if (ensureMutex())
         {
             xSemaphoreTake(stateMutex, portMAX_DELAY);
-            currentIp = String();
-            if (currentStatus != NightMare::WiFiStatus::STOPPED)
-                currentStatus = NightMare::WiFiStatus::DISCONNECTED;
+            currentIp.clear();
             xSemaphoreGive(stateMutex);
         }
+        if (WiFi_state() != NightMare::WiFiState::STOPPED)
+            setStatus(NightMare::WiFiState::DISCONNECTED);
         if (keepMonitoring)
             esp_wifi_connect();
     }
@@ -250,12 +208,12 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
     activeProfile = profile;
     gTxPower = profile.txPower;
     keepMonitoring = monitor;
-    gDeviceIdentity.lockAddress();
-    esp_netif_set_hostname(stationNetif, gDeviceIdentity.getDeviceName().c_str());
+    if (!hostname.empty())
+        esp_netif_set_hostname(stationNetif, hostname.c_str());
     esp_wifi_disconnect();
     if (!configureStation(profile) || !applyTxPower(profile.txPower))
         return false;
-    setStatus(NightMare::WiFiStatus::CONNECTING);
+    setStatus(NightMare::WiFiState::CONNECTING);
     const esp_err_t started = esp_wifi_start();
     if (started != ESP_OK && started != ESP_ERR_WIFI_CONN)
         return false;
@@ -265,17 +223,17 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
 
 void monitorTask(void *)
 {
-    uint32_t attemptStarted = millis();
+    uint32_t attemptStarted = nowMs();
     size_t powerIndex = nextPowerIndex(gTxPower);
     while (keepMonitoring)
     {
-        if (WiFi_isConnected())
+        if (isConnected())
         {
-            attemptStarted = millis();
+            attemptStarted = nowMs();
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
-        if (millis() - attemptStarted >= AttemptTimeoutMs)
+        if (nowMs() - attemptStarted >= AttemptTimeoutMs)
         {
             const int retryPower = TxPowerLevels[powerIndex];
             powerIndex = (powerIndex + 1) % TxPowerLevelCount;
@@ -283,14 +241,15 @@ void monitorTask(void *)
             if (applyTxPower(retryPower))
             {
                 gTxPower = retryPower;
-                esp_wifi_connect();
-                if (persistFallbackPower)
+                if (ensureMutex())
                 {
+                    xSemaphoreTake(stateMutex, portMAX_DELAY);
                     activeProfile.txPower = retryPower;
-                    saveProfile(activeProfile);
+                    xSemaphoreGive(stateMutex);
                 }
+                esp_wifi_connect();
             }
-            attemptStarted = millis();
+            attemptStarted = nowMs();
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -298,9 +257,8 @@ void monitorTask(void *)
     vTaskDelete(nullptr);
 }
 
-bool startMonitor(bool persistPower)
+bool startMonitor()
 {
-    persistFallbackPower = persistPower;
     keepMonitoring = true;
     if (monitorTaskHandle != nullptr)
         return true;
@@ -323,10 +281,10 @@ bool connectBlocking(const NightMare::WiFiProfile &profile, uint32_t timeoutMs)
 {
     if (!beginConnection(profile, false))
         return false;
-    const uint32_t started = millis();
-    while (!WiFi_isConnected())
+    const uint32_t started = nowMs();
+    while (!isConnected())
     {
-        if (millis() - started >= timeoutMs)
+        if (nowMs() - started >= timeoutMs)
             return false;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -334,7 +292,7 @@ bool connectBlocking(const NightMare::WiFiProfile &profile, uint32_t timeoutMs)
 }
 }
 
-void WiFi_onConnected(WiFiConnectedCallback callback) { connectedCallback = callback; }
+void WiFi_onState(WiFiStateCallback callback) { stateCallback = callback; }
 
 bool WiFi_isValidTxPower(int quarterDbm)
 {
@@ -346,130 +304,107 @@ bool WiFi_isValidTxPower(int quarterDbm)
     return false;
 }
 
-void WiFi_Disconnect()
+void WiFi_stop()
 {
+    keepMonitoring = false;
+    setStatus(NightMare::WiFiState::STOPPED);
     stopMonitor();
-    if (driverInitialized)
+    if (!driverInitialized)
+        return;
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifiEvents);
+    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ipEvents);
+    wifiEvents = nullptr;
+    ipEvents = nullptr;
+    esp_wifi_deinit();
+    esp_netif_destroy_default_wifi(stationNetif);
+    stationNetif = nullptr;
+    driverInitialized = false;
+    if (ensureMutex())
     {
-        esp_wifi_disconnect();
-        esp_wifi_stop();
+        xSemaphoreTake(stateMutex, portMAX_DELAY);
+        currentIp.clear();
+        scanResultCount = 0;
+        scanRunning = false;
+        xSemaphoreGive(stateMutex);
     }
-    setStatus(NightMare::WiFiStatus::STOPPED);
 }
 
-NightMare::WiFiProfile WiFi_getProfile()
+bool WiFi_start(const NightMare::WiFiProfile &profile, const char *stationHostname)
 {
-    PersistentSettings.begin();
-    NightMare::WiFiProfile profile;
-    profile.ssid = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiSsid,
-                                                 DEFAULT_SSID);
-    profile.password = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiPassword,
-                                                     DEFAULT_PASSWORD);
-    profile.txPower = PersistentSettings.getOrSave(NightMare::PersistentKey::WifiTxPower,
-                                                    String(NightMare::NM_TX_POWER_AUTO)).toInt();
-    return profile;
-}
-
-bool WiFi_start()
-{
-    const NightMare::WiFiStatus status = WiFi_status();
-    if (status == NightMare::WiFiStatus::CONNECTED ||
-        status == NightMare::WiFiStatus::CONNECTING)
+    const NightMare::WiFiState status = WiFi_state();
+    if (status == NightMare::WiFiState::CONNECTED ||
+        status == NightMare::WiFiState::CONNECTING)
         return true;
-    const NightMare::WiFiProfile profile = WiFi_getProfile();
+    hostname = stationHostname != nullptr ? stationHostname : "";
     if (!beginConnection(profile, true))
         return false;
-    return startMonitor(true);
+    return startMonitor();
 }
 
-bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile)
 {
-    if (!WiFi_isValidTxPower(profile.txPower) && !force)
+    if (WiFi_state() == NightMare::WiFiState::STOPPED ||
+        !WiFi_isValidTxPower(profile.txPower))
         return false;
-    const NightMare::WiFiProfile previous = WiFi_getProfile();
+    NightMare::WiFiProfile previous;
+    if (ensureMutex())
+    {
+        xSemaphoreTake(stateMutex, portMAX_DELAY);
+        previous = activeProfile;
+        xSemaphoreGive(stateMutex);
+    }
     stopMonitor();
-    gTxPower = profile.txPower;
-    if (!connectBlocking(profile, AttemptTimeoutMs) && !force)
+    if (!connectBlocking(profile, AttemptTimeoutMs))
     {
         gTxPower = previous.txPower;
         beginConnection(previous, true);
-        startMonitor(true);
+        startMonitor();
         return false;
     }
-    const bool saved = saveProfile(profile);
-    beginConnection(profile, true);
-    startMonitor(true);
-    return saved;
+    return startMonitor();
 }
 
-bool WiFi_setTxPower(int quarterDbm)
-{
-    NightMare::WiFiProfile profile = WiFi_getProfile();
-    profile.txPower = quarterDbm;
-    return WiFi_changeProfile(profile);
-}
-
-float WiFi_getTxPowerDbm()
-{
-    if (!driverInitialized)
-        return NightMare::NM_TX_POWER_AUTO;
-    int8_t power = 0;
-    return esp_wifi_get_max_tx_power(&power) == ESP_OK
-               ? static_cast<float>(power) / 4.0f
-               : NightMare::NM_TX_POWER_AUTO;
-}
-
-bool WiFi_isConnected() { return WiFi_status() == NightMare::WiFiStatus::CONNECTED; }
-
-NightMare::WiFiStatus WiFi_status()
+NightMare::WiFiState WiFi_state()
 {
     if (!ensureMutex())
-        return NightMare::WiFiStatus::FAILED;
+        return NightMare::WiFiState::STOPPED;
     xSemaphoreTake(stateMutex, portMAX_DELAY);
-    const NightMare::WiFiStatus status = currentStatus;
+    const NightMare::WiFiState status = currentState;
     xSemaphoreGive(stateMutex);
     return status;
 }
 
-String WiFi_localIP()
+NightMare::WiFiInfo WiFi_info()
 {
+    NightMare::WiFiInfo info;
     if (!ensureMutex())
-        return String();
+        return info;
     xSemaphoreTake(stateMutex, portMAX_DELAY);
-    const String value = currentIp;
+    info.state = currentState;
+    info.ssid = activeProfile.ssid;
+    info.txPower = activeProfile.txPower;
+    info.ip = currentIp;
     xSemaphoreGive(stateMutex);
-    return value;
-}
-
-String WiFi_currentSSID()
-{
-    if (!ensureMutex())
-        return String();
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
-    const String value = activeProfile.ssid;
-    xSemaphoreGive(stateMutex);
-    return value;
-}
-
-int WiFi_RSSI()
-{
+    if (info.state == NightMare::WiFiState::STOPPED)
+        return info;
+    int8_t power = 0;
+    if (esp_wifi_get_max_tx_power(&power) == ESP_OK)
+        info.txPowerDbm = static_cast<float>(power) / 4.0f;
     wifi_ap_record_t record = {};
-    return WiFi_isConnected() && esp_wifi_sta_get_ap_info(&record) == ESP_OK
-               ? record.rssi
-               : 0;
-}
-
-int WiFi_channel()
-{
-    wifi_ap_record_t record = {};
-    return WiFi_isConnected() && esp_wifi_sta_get_ap_info(&record) == ESP_OK
-               ? record.primary
-               : 0;
+    if (info.state == NightMare::WiFiState::CONNECTED &&
+        esp_wifi_sta_get_ap_info(&record) == ESP_OK)
+    {
+        info.rssi = record.rssi;
+        info.channel = record.primary;
+    }
+    return info;
 }
 
 bool WiFi_startScan()
 {
-    if (!initializeDriver() || scanRunning)
+    if (WiFi_state() == NightMare::WiFiState::STOPPED || scanRunning)
         return false;
     scanRunning = true;
     scanResultCount = 0;
@@ -496,40 +431,14 @@ bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result)
     return exists;
 }
 
-void WiFi_clearScan()
-{
-    if (!ensureMutex())
-        return;
-    xSemaphoreTake(stateMutex, portMAX_DELAY);
-    scanResultCount = 0;
-    xSemaphoreGive(stateMutex);
-}
-
-void WiFi_Scan()
-{
-    if (!WiFi_startScan())
-        return;
-    while (WiFi_scanInProgress())
-        vTaskDelay(pdMS_TO_TICKS(20));
-    for (int i = 0; i < WiFi_scanCount(); ++i)
-    {
-        NightMare::WiFiScanResult result;
-        if (WiFi_scanResult(i, result))
-            LOG("WiFi", "%d: %s (%d) %s", i + 1, result.ssid.c_str(),
-                result.rssi, WiFi_getAuthTypeName(result.authMode));
-    }
-    WiFi_clearScan();
-}
-
-const char *WiFi_getStatusName(NightMare::WiFiStatus status)
+const char *WiFi_stateName(NightMare::WiFiState status)
 {
     switch (status)
     {
-    case NightMare::WiFiStatus::STOPPED: return "Stopped";
-    case NightMare::WiFiStatus::CONNECTING: return "Connecting";
-    case NightMare::WiFiStatus::CONNECTED: return "Connected";
-    case NightMare::WiFiStatus::DISCONNECTED: return "Disconnected";
-    case NightMare::WiFiStatus::FAILED: return "Failed";
+    case NightMare::WiFiState::STOPPED: return "Stopped";
+    case NightMare::WiFiState::CONNECTING: return "Connecting";
+    case NightMare::WiFiState::CONNECTED: return "Connected";
+    case NightMare::WiFiState::DISCONNECTED: return "Disconnected";
     }
     return "Unknown";
 }

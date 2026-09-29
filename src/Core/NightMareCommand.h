@@ -14,7 +14,7 @@
 #include <Network/NmConnection.h>
 #endif
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiEsp.h>
+#include <Network/WiFi/NmWifiService.h>
 #endif
 #if NM_ENABLE_HTTP
 #include <HTTP/http.h>

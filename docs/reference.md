@@ -1197,55 +1197,55 @@ MQTT QoS:                   0
 When enabled:
 
 ```cpp
-typedef void (*WiFiConnectedCallback)(
-    bool firstConnection);
+// ESP-IDF driver (Network/WiFi/NmWifiEsp.h): no Arduino, storage or identity.
+bool WiFi_start(const NightMare::WiFiProfile &profile, const char *hostname = nullptr);
+bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
+void WiFi_stop();
 
-void WiFi_onConnected(
-    WiFiConnectedCallback callback);
-
-void WiFi_Disconnect();
-
-// Starts the station from the stored profile and keeps it connected. Idempotent.
-bool WiFi_start();
-
-void WiFi_Scan();
-
-bool WiFi_changeProfile(
-    const NightMare::WiFiProfile &profile,
-    bool force = false);
-
-NightMare::WiFiProfile WiFi_getProfile();
-
-const char *WiFi_getAuthTypeName(
-    wifi_auth_mode_t authType);
-
-const char *WiFi_getStatusName(
-    NightMare::WiFiStatus status);
-
-bool WiFi_isConnected();
-NightMare::WiFiStatus WiFi_status();
-String WiFi_localIP();
-String WiFi_currentSSID();
-int WiFi_RSSI();
-int WiFi_channel();
+NightMare::WiFiState WiFi_state();  // STOPPED, CONNECTING, CONNECTED, DISCONNECTED
+NightMare::WiFiInfo WiFi_info();    // state, ssid, ip, txPower, txPowerDbm, rssi, channel
+typedef void (*WiFiStateCallback)(NightMare::WiFiState state);
+void WiFi_onState(WiFiStateCallback callback);
 
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
 int WiFi_scanCount();
-bool WiFi_scanResult(
-    size_t index,
-    NightMare::WiFiScanResult &result);
-void WiFi_clearScan();
+bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result);
+
+const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
+const char *WiFi_stateName(NightMare::WiFiState state);
+bool WiFi_isValidTxPower(int quarterDbm);
+
+// NightMare integration (Network/WiFi/NmWifiService.h)
+typedef void (*WiFiConnectedCallback)(bool firstConnection);
+void WiFi_onConnected(WiFiConnectedCallback callback);
+NightMare::WiFiProfile NightMare::WiFiStoredProfile();
+bool NightMare::WiFiBegin();
+bool NightMare::WiFiApplyProfile(const NightMare::WiFiProfile &profile);
 ```
 
-`WiFi_start()` connects with the stored profile and keeps a recovery task
-running: it retries every 15 seconds while cycling through the ESP32 driver's
-supported transmit-power levels, and persists a fallback level once it connects.
+The driver is ESP-IDF only and has three actions and a state.
 
-`WiFi_changeProfile()` stops the recovery task and tries the new profile
-synchronously for up to 15 seconds. On success it persists the profile; on
-failure it restores the previous one, unless `force` is set. Either way the
-recovery task is resumed.
+- `WiFi_start()` starts the stack with the profile it is given and keeps a
+  recovery task running: it retries every 15 seconds while cycling through the
+  ESP32 driver's supported transmit-power levels.
+- `WiFi_changeProfile()` connects to a new network or applies a TX power. It
+  tries the profile for up to 15 seconds and restores the previous one on
+  failure. It persists nothing and fails while stopped.
+- `WiFi_stop()` disconnects and tears down the WiFi driver, netif, event
+  handlers and recovery task.
+- `WiFi_state()` is `STOPPED`, or running as `CONNECTING`, `CONNECTED` or
+  `DISCONNECTED`. `WiFi_info()` adds SSID, IP, TX power (including a fallback
+  level the driver settled on), RSSI and channel. `WiFi_onState()` fires on
+  every change. `WiFi_startScan()` fails while stopped.
+
+Storage, hostname and first-connection services live in `NmWifiService`:
+`WiFiBegin()` loads the stored profile (defaulting to `creds.h`), uses the device
+name as hostname, starts the stack, and on connection starts OTA, the preferred
+connection and SNTP once, persists a fallback TX power and then calls the
+`WiFi_onConnected()` callback.
+`WiFiApplyProfile()` changes the running stack and persists on success, or only
+persists while stopped.
 
 The implementation is under `Network/WiFi/` and uses `esp_wifi` directly.
 

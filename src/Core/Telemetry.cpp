@@ -354,14 +354,15 @@ void TelemetryService::appendSystem(JsonObject dst) const
 void TelemetryService::appendNetwork(JsonObject dst) const
 {
 #if NM_ENABLE_WIFI
-    const bool wifiConnected = WiFi_isConnected();
+    const NightMare::WiFiInfo wifi = WiFi_info();
+    const bool wifiConnected = wifi.state == NightMare::WiFiState::CONNECTED;
     dst["wifi_connected"] = wifiConnected;
     if (wifiConnected)
     {
-        dst["ip"] = WiFi_localIP();
-        dst["rssi_dbm"] = WiFi_RSSI();
-        dst["wifi_channel"] = WiFi_channel();
-        dst["tx_power_dbm"] = WiFi_getTxPowerDbm();
+        dst["ip"] = wifi.ip.c_str();
+        dst["rssi_dbm"] = wifi.rssi;
+        dst["wifi_channel"] = wifi.channel;
+        dst["tx_power_dbm"] = wifi.txPowerDbm;
     }
 #endif
     const NightMare::ConnectionType connection = NightMare::GetSelectedConnection();

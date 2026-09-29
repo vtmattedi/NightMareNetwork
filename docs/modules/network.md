@@ -149,8 +149,9 @@ executes the broker operation requested by `NmConnection`.
 The active WiFi implementation is under:
 
 ```text
-src/Network/WiFi/NmWifiEsp.h
+src/Network/WiFi/NmWifiEsp.h       ESP-IDF driver, no Arduino
 src/Network/WiFi/NmWifiEsp.cpp
+src/Network/WiFi/NmWifiService.*   storage, hostname, first-connection services
 ```
 
 It uses `esp_wifi`, `esp_netif`, and ESP events directly.

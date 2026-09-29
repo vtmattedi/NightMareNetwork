@@ -32,7 +32,7 @@
 #include <Core/Telemetry.h>
 #endif
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiEsp.h>
+#include <Network/WiFi/NmWifiService.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>

@@ -36,7 +36,7 @@ bool recordSynchronizedClock()
 
 bool startSntpTimeSync()
 {
-    if (!WiFi_isConnected())
+    if (WiFi_state() != NightMare::WiFiState::CONNECTED)
         return false;
 
     const char *timezone = getenv("TZ");
