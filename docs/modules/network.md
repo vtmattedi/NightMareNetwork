@@ -57,6 +57,12 @@ broker connection.
 deferred until the concrete connection types are reliable. Selecting either
 currently returns `false` without disrupting an active MQTT connection.
 
+A standalone gateway client exists in `Network/EspNow/EspNowClient.*` (built when
+`NM_NETWORK_ESPNOW` is set, ESP-IDF only). It finds the Nightmare Gateway from
+its beacon, keeps its registration alive with an automatic heartbeat, and
+re-sends subscriptions and last will after each reconnect. It is not yet wired
+into `NmConnection`, so `ESP_NOW` selection is still unavailable.
+
 ## API
 
 ```cpp

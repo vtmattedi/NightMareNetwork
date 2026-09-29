@@ -20,10 +20,10 @@ MacAddress MacAddress::operator=(const uint8_t *other)
     return *this;
 }
 
-std::string MacAddress::toString() const
+String MacAddress::toString() const
 {
     char buffer[18];
     snprintf(buffer, sizeof(buffer), "%02X:%02X:%02X:%02X:%02X:%02X",
              bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
-    return std::string(buffer);
+    return String(buffer);
 }

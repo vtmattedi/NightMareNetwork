@@ -1,7 +1,5 @@
 #pragma once
-#include <stdint.h>
-#include <stddef.h>
-#include <string>
+#include <Arduino.h>//Only while not moving over to espidf
 
 struct MacAddress {
     static constexpr size_t Length = 6;
