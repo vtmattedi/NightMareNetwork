@@ -374,7 +374,7 @@ restores Remote Resource source bindings
 starts the Scheduler
 installs pending identity-cleanup retry
 starts periodic telemetry scheduling
-starts WiFi_Auto()
+starts WiFi_start()
 ```
 
 MQTT is started by the first successful WiFi connection rather than directly by `startNightMareESP()`.

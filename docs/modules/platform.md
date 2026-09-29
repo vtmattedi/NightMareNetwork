@@ -294,7 +294,7 @@ installs the periodic system/network publication jobs.
 When enabled:
 
 ```cpp
-    WiFi_Auto();
+    WiFi_start();
 ```
 
 starts the asynchronous WiFi path.
@@ -371,12 +371,11 @@ The project, not the NightMare library, owns this credential file.
 ## Direct ESP WiFi driver
 
 ```cpp
-WiFi_Auto();
+WiFi_start();
 ```
 
 delegates to the driver in `Network/WiFi/NmWifiEsp.*`, which uses `esp_wifi`,
-`esp_netif`, and ESP events directly rather than Arduino's `WiFi` singleton. The legacy
-`Plataform/ESP32/NightMareWIFI.h` include remains as a compatibility shim.
+`esp_netif`, and ESP events directly rather than Arduino's `WiFi` singleton.
 
 The driver initializes PersistentSettings.
 
@@ -397,7 +396,7 @@ DEFAULT_PASSWORD
 Then it starts an asynchronous connection using the stored values. If an
 attempt remains disconnected for 15 seconds, the asynchronous task retries at
 the next transmit-power level supported by the ESP32 driver. When one of those
-fallback levels connects, `WiFi_Auto()` persists it with the rest of the WiFi
+fallback levels connects, `WiFi_start()` persists it with the rest of the WiFi
 profile. Its recovery task remains active after connection so a later loss uses
 the same retry sequence.
 
@@ -432,12 +431,10 @@ core:      tskNO_AFFINITY
 
 Using no fixed core allows the same code to run on single-core ESP variants such as C3/C6/H2/S2.
 
-The task owns copies of the supplied SSID and password. A disconnected attempt
-is retried every 15 seconds while cycling through the driver's supported
-transmit-power levels. With `deleteAfterConnect == true`, the task exits after
-the first connection. With `false`, it remains active and applies the same
-recovery sequence after a later disconnect. Direct `WiFi_ConnectAsync()` calls
-do not persist a fallback power; that persistence is specific to `WiFi_Auto()`.
+A disconnected attempt is retried every 15 seconds while cycling through the
+driver's supported transmit-power levels. The task stays active after connecting
+and applies the same recovery sequence after a later disconnect. A fallback
+level that connects is persisted with the rest of the profile.
 
 ## First WiFi connection
 
@@ -493,15 +490,16 @@ The callback runs whenever the WiFi monitor detects a connection and tells the p
 ## WiFi credential change
 
 ```cpp
-WiFi_ChangeCredentials(ssid, password);
+WiFi_changeProfile(profile);
 ```
 
 does the following:
 
-1. disconnects current WiFi,
+1. stops the recovery task and disconnects current WiFi,
 2. tries the new credentials synchronously for up to 15 seconds,
 3. if they fail, starts reconnect with the previous stored credentials,
-4. if they succeed, writes `_ssid` and `_password` to PersistentSettings.
+4. if they succeed, writes the profile (SSID, password and TX power) to PersistentSettings
+   and resumes the recovery task.
 
 The private storage keys should not be manipulated directly by applications.
 

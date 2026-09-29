@@ -157,7 +157,7 @@
 #define NM_CONSOLE_SERIAL 0
 #endif
 
-// Whether WiFi_Auto() is called from startNightMareESP(). If not, the application must call it itself.
+// Whether WiFi_start() is called from startNightMareESP(). If not, the application must call it itself.
 // If NM_ENABLE_WIFI is 0, this has no effect.
 #ifndef NM_WIFI_AUTO
 #define NM_WIFI_AUTO NM_ENABLE_WIFI

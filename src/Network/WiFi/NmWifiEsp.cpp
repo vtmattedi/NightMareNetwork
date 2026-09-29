@@ -26,10 +26,9 @@
 #error "Please define DEFAULT_SSID and DEFAULT_PASSWORD in creds.h"
 #endif
 
-int gTxPower = NightMare::NM_TX_POWER_AUTO;
-
 namespace
 {
+int gTxPower = NightMare::NM_TX_POWER_AUTO;
 constexpr uint32_t AttemptTimeoutMs = 15000;
 constexpr size_t MaxScanResults = 32;
 const int8_t TxPowerLevels[] = {84, 82, 80, 78, 76, 74, 68, 60,
@@ -308,6 +307,31 @@ bool startMonitor(bool persistPower)
     return xTaskCreate(monitorTask, "wifi_monitor", 4096, nullptr, 1,
                        &monitorTaskHandle) == pdPASS;
 }
+
+bool stopMonitor()
+{
+    if (monitorTaskHandle == nullptr)
+        return true;
+    keepMonitoring = false;
+    for (int i = 0; i < 50 && monitorTaskHandle != nullptr; ++i)
+        vTaskDelay(pdMS_TO_TICKS(10));
+    return monitorTaskHandle == nullptr;
+}
+
+// Blocks until the station is associated with an IP or timeoutMs elapses.
+bool connectBlocking(const NightMare::WiFiProfile &profile, uint32_t timeoutMs)
+{
+    if (!beginConnection(profile, false))
+        return false;
+    const uint32_t started = millis();
+    while (!WiFi_isConnected())
+    {
+        if (millis() - started >= timeoutMs)
+            return false;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    return true;
+}
 }
 
 void WiFi_onConnected(WiFiConnectedCallback callback) { connectedCallback = callback; }
@@ -322,39 +346,9 @@ bool WiFi_isValidTxPower(int quarterDbm)
     return false;
 }
 
-bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs,
-                  void *waitCallback(unsigned int))
-{
-    NightMare::WiFiProfile profile{String(ssid == nullptr ? "" : ssid),
-                                   String(password == nullptr ? "" : password),
-                                   gTxPower};
-    if (!beginConnection(profile, false))
-        return false;
-    const uint32_t started = millis();
-    while (!WiFi_isConnected())
-    {
-        if (waitCallback != nullptr)
-            waitCallback(millis() - started);
-        if (timeoutMs > 0 && millis() - started >= static_cast<uint32_t>(timeoutMs))
-            return false;
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    return true;
-}
-
-bool WiFi_ConnectAsync(const char *ssid, const char *password, bool deleteAfterConnect)
-{
-    NightMare::WiFiProfile profile{String(ssid == nullptr ? "" : ssid),
-                                   String(password == nullptr ? "" : password),
-                                   gTxPower};
-    if (!beginConnection(profile, !deleteAfterConnect))
-        return false;
-    return deleteAfterConnect || startMonitor(false);
-}
-
 void WiFi_Disconnect()
 {
-    WiFi_cancelAsyncConnect();
+    stopMonitor();
     if (driverInitialized)
     {
         esp_wifi_disconnect();
@@ -376,7 +370,7 @@ NightMare::WiFiProfile WiFi_getProfile()
     return profile;
 }
 
-bool WiFi_Auto()
+bool WiFi_start()
 {
     const NightMare::WiFiStatus status = WiFi_status();
     if (status == NightMare::WiFiStatus::CONNECTED ||
@@ -393,10 +387,9 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
     if (!WiFi_isValidTxPower(profile.txPower) && !force)
         return false;
     const NightMare::WiFiProfile previous = WiFi_getProfile();
-    WiFi_cancelAsyncConnect();
+    stopMonitor();
     gTxPower = profile.txPower;
-    if (!WiFi_Connect(profile.ssid.c_str(), profile.password.c_str(), AttemptTimeoutMs) &&
-        !force)
+    if (!connectBlocking(profile, AttemptTimeoutMs) && !force)
     {
         gTxPower = previous.txPower;
         beginConnection(previous, true);
@@ -407,14 +400,6 @@ bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force)
     beginConnection(profile, true);
     startMonitor(true);
     return saved;
-}
-
-bool WiFi_ChangeCredentials(const String &ssid, const String &password)
-{
-    NightMare::WiFiProfile profile = WiFi_getProfile();
-    profile.ssid = ssid;
-    profile.password = password;
-    return WiFi_changeProfile(profile);
 }
 
 bool WiFi_setTxPower(int quarterDbm)
@@ -432,16 +417,6 @@ float WiFi_getTxPowerDbm()
     return esp_wifi_get_max_tx_power(&power) == ESP_OK
                ? static_cast<float>(power) / 4.0f
                : NightMare::NM_TX_POWER_AUTO;
-}
-
-bool WiFi_cancelAsyncConnect()
-{
-    if (monitorTaskHandle == nullptr)
-        return true;
-    keepMonitoring = false;
-    for (int i = 0; i < 50 && monitorTaskHandle != nullptr; ++i)
-        vTaskDelay(pdMS_TO_TICKS(10));
-    return monitorTaskHandle == nullptr;
 }
 
 bool WiFi_isConnected() { return WiFi_status() == NightMare::WiFiStatus::CONNECTED; }
@@ -481,6 +456,14 @@ int WiFi_RSSI()
     wifi_ap_record_t record = {};
     return WiFi_isConnected() && esp_wifi_sta_get_ap_info(&record) == ESP_OK
                ? record.rssi
+               : 0;
+}
+
+int WiFi_channel()
+{
+    wifi_ap_record_t record = {};
+    return WiFi_isConnected() && esp_wifi_sta_get_ap_info(&record) == ESP_OK
+               ? record.primary
                : 0;
 }
 

@@ -395,7 +395,7 @@ pending identity cleanup retry
 Telemetry.start()
     installs periodic callback jobs
 
-WiFi_Auto()
+WiFi_start()
     starts the WiFi/network path
 ```
 

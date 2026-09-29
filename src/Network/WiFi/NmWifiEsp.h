@@ -38,14 +38,10 @@ struct WiFiScanResult
 using WiFiConnectedCallback = void (*)(bool firstConnection);
 
 void WiFi_onConnected(WiFiConnectedCallback callback);
-bool WiFi_Connect(const char *ssid, const char *password, int timeoutMs = 0,
-                  void *waitCallback(unsigned int) = nullptr);
-bool WiFi_ConnectAsync(const char *ssid, const char *password,
-                       bool deleteAfterConnect = true);
+// Starts the station from the stored profile and keeps it connected. Idempotent.
+bool WiFi_start();
 void WiFi_Disconnect();
-bool WiFi_Auto();
 void WiFi_Scan();
-bool WiFi_ChangeCredentials(const String &ssid, const String &password);
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile, bool force = false);
 NightMare::WiFiProfile WiFi_getProfile();
 
@@ -54,6 +50,7 @@ NightMare::WiFiStatus WiFi_status();
 String WiFi_localIP();
 String WiFi_currentSSID();
 int WiFi_RSSI();
+int WiFi_channel();
 
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
@@ -66,7 +63,5 @@ const char *WiFi_getStatusName(NightMare::WiFiStatus status);
 bool WiFi_isValidTxPower(int quarterDbm);
 bool WiFi_setTxPower(int quarterDbm);
 float WiFi_getTxPowerDbm();
-bool WiFi_cancelAsyncConnect();
-extern int gTxPower;
 
 #endif // NM_ENABLE_WIFI

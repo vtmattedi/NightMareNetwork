@@ -1203,26 +1203,18 @@ typedef void (*WiFiConnectedCallback)(
 void WiFi_onConnected(
     WiFiConnectedCallback callback);
 
-bool WiFi_Connect(
-    const char *ssid,
-    const char *password,
-    int timeoutMs = 0,
-    void *waitCallback(unsigned int) = nullptr);
-
-bool WiFi_ConnectAsync(
-    const char *ssid,
-    const char *password,
-    bool deleteAfterConnect = true);
-
 void WiFi_Disconnect();
 
-bool WiFi_Auto();
+// Starts the station from the stored profile and keeps it connected. Idempotent.
+bool WiFi_start();
 
 void WiFi_Scan();
 
-bool WiFi_ChangeCredentials(
-    const String &ssid,
-    const String &password);
+bool WiFi_changeProfile(
+    const NightMare::WiFiProfile &profile,
+    bool force = false);
+
+NightMare::WiFiProfile WiFi_getProfile();
 
 const char *WiFi_getAuthTypeName(
     wifi_auth_mode_t authType);
@@ -1235,6 +1227,7 @@ NightMare::WiFiStatus WiFi_status();
 String WiFi_localIP();
 String WiFi_currentSSID();
 int WiFi_RSSI();
+int WiFi_channel();
 
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
@@ -1245,14 +1238,16 @@ bool WiFi_scanResult(
 void WiFi_clearScan();
 ```
 
-An asynchronous connection retries every 15 seconds while cycling through the
-ESP32 driver's supported transmit-power levels. Passing
-`deleteAfterConnect == false` keeps that recovery task active after connecting.
-`WiFi_Auto()` additionally persists a fallback transmit-power level after it
-successfully connects and keeps the recovery task active.
+`WiFi_start()` connects with the stored profile and keeps a recovery task
+running: it retries every 15 seconds while cycling through the ESP32 driver's
+supported transmit-power levels, and persists a fallback level once it connects.
 
-The implementation is under `Network/WiFi/` and uses `esp_wifi` directly. The
-old platform include path remains a compatibility shim.
+`WiFi_changeProfile()` stops the recovery task and tries the new profile
+synchronously for up to 15 seconds. On success it persists the profile; on
+failure it restores the previous one, unless `force` is set. Either way the
+recovery task is resumed.
+
+The implementation is under `Network/WiFi/` and uses `esp_wifi` directly.
 
 ## ESP lifecycle
 

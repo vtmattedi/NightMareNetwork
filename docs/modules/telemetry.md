@@ -203,6 +203,7 @@ Current fields include:
 wifi_connected
 ip
 rssi_dbm
+wifi_channel
 tx_power_dbm
 connection
 connected
@@ -211,7 +212,7 @@ mqtt_connected
 broker
 ```
 
-`ip` and `rssi_dbm` are emitted only while WiFi is connected.
+`ip`, `rssi_dbm` and `wifi_channel` are emitted only while WiFi is connected.
 
 If WiFi support is disabled, WiFi-specific fields are omitted.
 

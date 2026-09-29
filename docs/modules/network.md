@@ -153,5 +153,6 @@ src/Network/WiFi/NmWifiEsp.h
 src/Network/WiFi/NmWifiEsp.cpp
 ```
 
-It uses `esp_wifi`, `esp_netif`, and ESP events directly. The old
-`Plataform/ESP32/NightMareWIFI.*` path remains as a compatibility shim.
+It uses `esp_wifi`, `esp_netif`, and ESP events directly.
+While associated, `WiFi_RSSI()` and `WiFi_channel()` report the AP signal (dBm)
+and primary channel; both return 0 when not connected.

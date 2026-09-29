@@ -360,6 +360,7 @@ void TelemetryService::appendNetwork(JsonObject dst) const
     {
         dst["ip"] = WiFi_localIP();
         dst["rssi_dbm"] = WiFi_RSSI();
+        dst["wifi_channel"] = WiFi_channel();
         dst["tx_power_dbm"] = WiFi_getTxPowerDbm();
     }
 #endif
