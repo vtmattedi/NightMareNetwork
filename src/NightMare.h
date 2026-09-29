@@ -19,6 +19,9 @@
 #if NM_ENABLE_RESOURCES
 #include <Core/ResourcesManager.h>
 #endif
+#if NM_ENABLE_NETWORK
+#include <Network/NmTransport.h>
+#endif
 #if NM_ENABLE_CONSOLE
 #include <Core/NightMareCommand.h>
 #endif
@@ -29,7 +32,7 @@
 #include <Core/Telemetry.h>
 #endif
 #if NM_ENABLE_WIFI
-#include <Plataform/ESP32/NightMareWIFI.h>
+#include <Network/WiFi/NmWifiEsp.h>
 #endif
 #if NM_ENABLE_MQTT
 #include <Network/MQTT.h>

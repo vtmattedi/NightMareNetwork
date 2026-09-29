@@ -1136,7 +1136,49 @@ bool Telemetry.publishHardware();
 bool Telemetry.publishAll();
 ```
 
-## MQTT facade
+## Network transport
+
+```cpp
+namespace NightMare
+{
+enum class TransportType : uint8_t
+{
+    AUTO = 0,
+    MQTT,
+    LOCAL_MQTT,
+    ESP_NOW
+};
+
+enum class TransportState : uint8_t
+{
+    STOPPED,
+    DISCOVERING,
+    CONNECTING,
+    CONNECTED,
+    ERROR
+};
+
+extern Config<int> preferredTransport;
+
+bool Publish(const char *topic,
+             const uint8_t *payload,
+             size_t length,
+             bool retained = false);
+bool Subscribe(const char *topicFilter);
+bool Unsubscribe(const char *topicFilter);
+
+bool SelectTransport(TransportType transport);
+TransportType GetSelectedTransport();
+TransportState GetTransportState();
+}
+```
+
+`MQTT` means Remote MQTT/TLS. The payload pointer and explicit length make the
+generic boundary binary-safe. `ESP_NOW` and `AUTO` are represented but not yet
+implemented; selecting either returns `false` without interrupting the working
+MQTT connection.
+
+## MQTT compatibility facade
 
 Broker selectors:
 
@@ -1276,7 +1318,21 @@ const char *WiFi_getAuthTypeName(
     wifi_auth_mode_t authType);
 
 const char *WiFi_getStatusName(
-    wl_status_t status);
+    NightMare::WiFiStatus status);
+
+bool WiFi_isConnected();
+NightMare::WiFiStatus WiFi_status();
+String WiFi_localIP();
+String WiFi_currentSSID();
+int WiFi_RSSI();
+
+bool WiFi_startScan();
+bool WiFi_scanInProgress();
+int WiFi_scanCount();
+bool WiFi_scanResult(
+    size_t index,
+    NightMare::WiFiScanResult &result);
+void WiFi_clearScan();
 ```
 
 An asynchronous connection retries every 15 seconds while cycling through the
@@ -1284,6 +1340,9 @@ ESP32 driver's supported transmit-power levels. Passing
 `deleteAfterConnect == false` keeps that recovery task active after connecting.
 `WiFi_Auto()` additionally persists a fallback transmit-power level after it
 successfully connects and keeps the recovery task active.
+
+The implementation is under `Network/WiFi/` and uses `esp_wifi` directly. The
+old platform include path remains a compatibility shim.
 
 ## ESP lifecycle
 
@@ -1563,7 +1622,7 @@ MQTT -> NETWORK
 NETWORK -> RESOURCES
 
 TELEMETRY -> SCHEDULER
-TELEMETRY -> MQTT
+TELEMETRY -> NETWORK
 
 JOBS -> SCHEDULER
 

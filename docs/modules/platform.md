@@ -165,7 +165,7 @@ NETWORK
 
 TELEMETRY
     -> SCHEDULER
-    -> MQTT
+    -> NETWORK
 
 JOBS
     -> SCHEDULER
@@ -199,12 +199,9 @@ CONSOLE_SERIAL
     -> CONSOLE
 ```
 
-> **Current MQTT-off limitation:** the feature graph does not formally require
-> MQTT when its dependents are disabled, but the current ESP32
-> `tickNightMareESP()` deferred-publication processor still checks MQTT
-> readiness directly. Treat the standard ESP lifecycle with
-> `NM_ENABLE_MQTT=0` as unsupported until that processor becomes
-> transport-neutral.
+The cooperative deferred-publication processor checks `NmTransport` readiness,
+not MQTT readiness. ESP-NOW-only operation still waits for an ESP-NOW driver,
+but the standard lifecycle no longer has an MQTT-specific check.
 
 These are current implementation dependencies, not necessarily permanent architectural requirements.
 
@@ -297,7 +294,7 @@ installs the periodic system/network publication jobs.
 When enabled:
 
 ```cpp
-WiFi_Auto();
+    WiFi_Auto();
 ```
 
 starts the asynchronous WiFi path.
@@ -371,13 +368,17 @@ DEFAULT_PASSWORD
 
 The project, not the NightMare library, owns this credential file.
 
-## WiFi_Auto
+## Direct ESP WiFi driver
 
 ```cpp
 WiFi_Auto();
 ```
 
-initializes PersistentSettings.
+delegates to the driver in `Network/WiFi/NmWifiEsp.*`, which uses `esp_wifi`,
+`esp_netif`, and ESP events directly rather than Arduino's `WiFi` singleton. The legacy
+`Plataform/ESP32/NightMareWIFI.h` include remains as a compatibility shim.
+
+The driver initializes PersistentSettings.
 
 If either stored key is absent:
 
@@ -412,12 +413,13 @@ and lock the identity address before network participation.
 
 This is one reason a later adoption may wait for reboot rather than changing the running name immediately.
 
-## Async WiFi task
+## Async WiFi monitor
 
-`WiFi_ConnectAsync()` starts:
+The driver uses ESP events for connection state and a small monitor task for
+timed retries and transmit-power fallback:
 
 ```text
-WiFi_Task
+wifi_monitor
 ```
 
 with:
@@ -453,13 +455,14 @@ Specifically:
 
 ```cpp
 initOTA();
-MQTT_Init(false);
+NightMare::SelectTransport(configuredTransport);
 startSntpTimeSync();
 ```
 
 according to feature flags.
 
-`MQTT_Init(false)` selects Remote MQTT initially.
+The initial concrete transport comes from `preferredTransport`, whose current
+default is Remote MQTT. `AUTO` policy is intentionally deferred.
 
 `startSntpTimeSync()` configures the ESP32 SNTP client and returns immediately. Completion is applied later through `tickNightMareESP()`.
 
@@ -632,7 +635,7 @@ Current platform-specific dependencies include:
 ESP hardware APIs
 FreeRTOS
 LittleFS
-Arduino WiFi
+esp_wifi / esp_netif
 esp_mqtt_client
 ArduinoOTA
 esp_sntp

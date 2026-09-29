@@ -1,7 +1,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
 #include "IdentityCleanup.h"
-#include "MQTT.h"
+#include "NmTransport.h"
+#include "NmTransportInternal.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -26,8 +27,10 @@ IdentityCleanupResult processPendingIdentityCleanup()
         // go away in the normal format, then empty to delete the retained
         // status so it does not linger as a ghost.
         const String statusTopic = cleanup.oldName + "/status";
-        if (MQTT_Publish(statusTopic, deviceStatusJson(cleanup.oldName, false), false, true) &&
-            MQTT_Publish(statusTopic, "", false, true))
+        if (NightMare::PublishText(
+                statusTopic,
+                NightMare::TransportDeviceStatusJson(cleanup.oldName, false), true) &&
+            NightMare::PublishText(statusTopic, "", true))
             gDeviceIdentity.markIdentityCleanupComplete(CLEANUP_STATUS);
     }
 

@@ -203,6 +203,10 @@ Current fields include:
 wifi_connected
 ip
 rssi_dbm
+tx_power_dbm
+transport
+transport_connected
+transport_state
 mqtt_connected
 broker
 ```
@@ -211,12 +215,21 @@ broker
 
 If WiFi support is disabled, WiFi-specific fields are omitted.
 
-`broker` is:
+`transport` is one of:
 
 ```text
-local
-remote
+auto
+mqtt
+local_mqtt
+esp_now
 ```
+
+`auto` is reported only while no concrete transport is active. `transport_state`
+is the integer value of `TransportState`. MQTT-specific
+`mqtt_connected` and `broker` fields are included only while the selected
+transport is Local or Remote MQTT. This lets the same network document describe
+an ESP-NOW connection once that driver is implemented without pretending it is
+MQTT.
 
 ## HEARTBEAT contents
 

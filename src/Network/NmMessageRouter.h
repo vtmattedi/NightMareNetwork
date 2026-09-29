@@ -1,6 +1,6 @@
 #pragma once
 #include <NightMare/Features.h>
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
 #include <Arduino.h>
 
 // Automatic NightMare routes, separate from the ESP MQTT client and project hook.
@@ -9,4 +9,4 @@ namespace NmMessageRouter
 void onConnected();
 bool handleMessage(const String &topic, const String &payload);
 }
-#endif // NM_ENABLE_MQTT
+#endif // NM_ENABLE_NETWORK

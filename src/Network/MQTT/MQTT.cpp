@@ -2,7 +2,8 @@
 #if NM_ENABLE_MQTT
 #include "MQTT.h"
 #include "NmMqttEsp.h"
-#include "NmMessageRouter.h"
+#include <Network/NmMessageRouter.h>
+#include <Network/NmTransportInternal.h>
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -49,24 +50,6 @@ namespace
     void (*projectConnected)() = nullptr;
     void (*projectDisconnected)(bool) = nullptr;
     bool deviceMessagesOnly = true;
-
-    class MqttResourceTransport : public ResourcePublisher, public ResourceSubscriber
-    {
-    public:
-        bool publish(const String &topic, const String &payload, bool retained) override
-        {
-            return MQTT_Publish(topic, payload, false, retained);
-        }
-        bool subscribe(const String &topicFilter) override
-        {
-            return NmMqttEsp::subscribe(topicFilter);
-        }
-        bool unsubscribe(const String &topicFilter) override
-        {
-            return isCustomSubscription(topicFilter) || NmMqttEsp::unsubscribe(topicFilter);
-        }
-    };
-    MqttResourceTransport resourceTransport;
 
     bool ensureSubscriptionMutex()
     {
@@ -191,8 +174,9 @@ namespace
             projectMessage(relative, payload);
     }
 
-    void connected(bool)
+    void connected(bool localBroker)
     {
+        NightMare::TransportConnectedIngress(localBroker);
         subscribeDefaults();
         NmMessageRouter::onConnected();
         flushQueuedMessages();
@@ -202,6 +186,7 @@ namespace
 
     void disconnected(bool localBroker)
     {
+        NightMare::TransportDisconnectedIngress();
         if (projectDisconnected != nullptr)
             projectDisconnected(localBroker);
     }
@@ -211,18 +196,20 @@ void MQTT_Init(bool localBroker)
 {
     gDeviceIdentity.begin();
     gDeviceIdentity.lockAddress();
-    gResourcesManager.setSubscriber(&resourceTransport);
-    gResourcesManager.setPublisher(&resourceTransport);
+    NightMare::TransportMqttStarting(localBroker);
     NmMqttEsp::setHandlers(messageReceived, connected, disconnected);
     NmMqttEsp::begin(localBroker);
 }
 
-void MQTT_End() { NmMqttEsp::end(); }
+void MQTT_End()
+{
+    NightMare::TransportMqttStopping(false);
+    NmMqttEsp::end();
+}
 void MQTT_Finish()
 {
+    NightMare::TransportMqttStopping(true);
     NmMqttEsp::finish();
-    gResourcesManager.setSubscriber(nullptr);
-    gResourcesManager.setPublisher(nullptr);
 }
 void MQTT_change_to(bool localBroker) { NmMqttEsp::changeTo(localBroker); }
 bool MQTT_isLocal() { return NmMqttEsp::isLanBroker(); }

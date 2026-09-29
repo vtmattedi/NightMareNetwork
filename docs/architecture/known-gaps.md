@@ -213,34 +213,35 @@ This reflects support for persisted wall jobs and String command dispatch.
 
 A callback-only Scheduler could theoretically operate without both dependencies, but the current feature graph does not expose that narrower configuration.
 
-## Telemetry currently depends on Scheduler and MQTT
+## Automatic telemetry currently depends on Scheduler and Network
 
 **Category:** Known implementation coupling.
 
-Automatic telemetry publication is implemented using Scheduler jobs and MQTT retained publications.
+Automatic telemetry publication is implemented using Scheduler jobs and the
+active `NmTransport` publisher.
 
-The current compile-time feature rules therefore require both.
+The current compile-time feature rules therefore require both Scheduler and
+Network. MQTT is no longer a direct telemetry dependency.
 
 A future design could separate “build/query telemetry JSON” from “automatically publish telemetry,” but that split is not part of the current feature model.
 
-## MQTT-disabled ESP lifecycle is not yet cleanly supported
+## ESP-NOW transport is declared but not implemented
 
-**Category:** Known implementation coupling.
+**Category:** Deferred design.
 
-The feature graph allows MQTT to be disabled when MQTT-dependent features are
-also disabled, but the current ESP32 cooperative deferred-publication processor
-still checks MQTT connection state directly.
-
-As a result, the standard `startNightMareESP()` / `tickNightMareESP()` lifecycle
-should currently be treated as MQTT-oriented. This needs to become
-transport-neutral before an ESP-NOW-only leaf can use the same lifecycle with
-`NM_ENABLE_MQTT=0` cleanly.
+`NmTransport`, lifecycle processing, Resource injection, and network telemetry
+are transport-neutral. `TransportType::ESP_NOW` is reserved so callers and
+telemetry do not need another enum change later, but selecting it currently
+returns false without disturbing the active transport. There is deliberately
+no ESP-NOW driver in this architecture pass.
 
 ## WiFi/time/OTA remain ESP-oriented services
 
 **Category:** Technical debt / platform limitation.
 
-WiFi orchestration, time synchronization, MQTT startup, and OTA are currently tied to the ESP32/Arduino platform implementation and its existing settings conventions.
+WiFi orchestration uses `esp_wifi` and `esp_netif` directly, while time
+synchronization and OTA remain ESP32/Arduino-platform services. The persisted
+profile still uses the existing settings conventions.
 
 They should be documented as platform services rather than treated as portable core abstractions.
 

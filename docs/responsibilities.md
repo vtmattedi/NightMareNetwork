@@ -50,13 +50,15 @@ Once Resources are declared and bound, NightMare owns the repetitive network beh
 
 The application owns the meaning of those Resources.
 
-### MQTT conventions and routing
+### Transport conventions and routing
 
-NightMare defines the standard topic families and routes framework traffic before it reaches the application's generic MQTT callback.
+NightMare defines the standard topic families and routes framework traffic
+before it reaches the application's generic transport callback.
 
 It manages:
 
-- local vs remote broker selection,
+- Local MQTT vs Remote MQTT selection,
+- complete connection-type selection,
 - MQTT client lifecycle,
 - framework subscriptions,
 - Resource transport integration,

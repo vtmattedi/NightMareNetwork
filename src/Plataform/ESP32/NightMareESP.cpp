@@ -12,14 +12,17 @@
 #include <Core/Telemetry.h>
 #endif
 #if NM_ENABLE_WIFI
-#include "NightMareWIFI.h"
+#include <Network/WiFi/NmWifiEsp.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>
 #endif
 #if NM_ENABLE_MQTT
 #include <Network/IdentityCleanup.h>
-#include <Network/MQTT.h>
+#endif
+#if NM_ENABLE_NETWORK
+#include <Network/NmTransport.h>
+#include <Network/NmTransportInternal.h>
 #endif
 
 namespace
@@ -52,8 +55,9 @@ namespace
 
     bool processSystemRequest(SystemRequest request)
     {
-#if NM_ENABLE_MQTT
-        if (!MQTT_Connected() && request != SystemRequest::Count)
+#if NM_ENABLE_NETWORK
+        if (NightMare::GetTransportState() != NightMare::TransportState::CONNECTED &&
+            request != SystemRequest::Count)
             return false;
 #endif
 
@@ -61,7 +65,8 @@ namespace
         {
         case SystemRequest::PublishStatus:
 #if NM_ENABLE_MQTT
-            return MQTT_Publish("status", deviceStatusJson(true), true, true);
+            return NightMare::PublishDeviceText(
+                "status", NightMare::TransportDeviceStatusJson(true), true);
 #else
             return true;
 #endif
@@ -129,10 +134,10 @@ namespace
     void processOneSystemRequest()
     {
         static uint16_t next = 0;
-#if NM_ENABLE_MQTT
-        // All current requests publish through MQTT. Stay idle while offline;
+#if NM_ENABLE_NETWORK
+        // All current requests publish through the active transport. Stay idle while offline;
         // an expired delay becomes ready after reconnect, without a busy loop.
-        if (!MQTT_Connected())
+        if (NightMare::GetTransportState() != NightMare::TransportState::CONNECTED)
             return;
 #endif
         const uint32_t now = millis();

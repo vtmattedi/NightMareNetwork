@@ -1,7 +1,8 @@
 #include <NightMare/Features.h>
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
 #include "NmMessageRouter.h"
-#include "MQTT.h"
+#include "NmTransport.h"
+#include "NmTransportInternal.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -41,7 +42,7 @@ void runCommand(const String &payload, const String &replyTopic)
     NightmareContext context(NM_CMD_SRC_MQTT, replyTopic);
     NightMareResults result = handleNightMareCommand(payload, context);
     if (result.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
-        MQTT_Publish(replyTopic, result.response, false, false);
+        NightMare::PublishText(replyTopic, result.response, false);
 }
 
 #endif
@@ -85,11 +86,12 @@ void onConnected()
     SystemState.request(SystemRequest::PublishHardwareJson);
 #endif
 #if NM_ENABLE_CONSOLE
-    MQTT_Publish("console/out", firstConnection ? "Booted" : "Connected");
+    NightMare::PublishDeviceText(
+        "console/out", firstConnection ? "Booted" : "Connected");
 #endif
 #if NM_ENABLE_TIME_SYNC
     if (!NightMare::Time::valid())
-        MQTT_Publish("Control/request", "time", false, false);
+        NightMare::PublishText("Control/request", "time", false);
 #endif
 #if NM_ENABLE_CONSOLE
     firstConnection = false;
@@ -133,4 +135,4 @@ bool handleMessage(const String &fullTopic, const String &payload)
     return false;
 }
 }
-#endif // NM_ENABLE_MQTT
+#endif // NM_ENABLE_NETWORK

@@ -32,7 +32,8 @@ A typical deployment looks like:
                         device device device
 ```
 
-Devices communicate through the Local MQTT broker.
+Devices may communicate through Local MQTT, Remote MQTT/TLS, or a local
+transport such as ESP-NOW. The ESP-NOW driver is not implemented yet.
 
 Selected traffic may be bridged to Remote MQTT for backend/global services. The backend belongs on the remote side rather than connecting directly to every local broker.
 
@@ -151,15 +152,23 @@ itself remains transport-neutral. Persistence uses `PersistentSettings` under
 reserved `_config:` keys. The ESP startup lifecycle calls `restore()` after
 persistent storage initialization and before normal framework services start.
 
-## MQTT layers
+## Transport and MQTT layers
 
-MQTT is deliberately split into layers.
+Networking is deliberately split into a NightMare transport coordinator and
+protocol drivers.
+
+### NmTransport
+
+`NmTransport` owns connection-type selection, binary-safe generic publication,
+transport subscriptions, and Resource transport injection. It is the boundary
+used by Resources and transport-neutral framework publishers.
 
 ### MQTT facade
 
-`MQTT.cpp` is the project-facing facade.
+`MQTT.cpp` retains the existing MQTT-specific application conveniences and
+lifecycle behavior.
 
-It exposes conveniences for:
+It provides conveniences for:
 
 ```text
 publish

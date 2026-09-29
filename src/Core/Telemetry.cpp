@@ -7,11 +7,11 @@
 #include <esp_heap_caps.h>
 #include "DocumentPayload.h"
 #include <NightMare/HardwareProfile.h>
-#include <Network/MQTT.h>
+#include <Network/NmTransport.h>
+#include <Network/NmTransportInternal.h>
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
-#include <WiFi.h>
-#include <Plataform/ESP32/NightMareWIFI.h>
+#include <Network/WiFi/NmWifiEsp.h>
 #endif
 
 namespace
@@ -182,6 +182,18 @@ namespace
             return nullptr;
         }
     }
+
+    const char *transportName(NightMare::TransportType transport)
+    {
+        switch (transport)
+        {
+        case NightMare::TransportType::AUTO: return "auto";
+        case NightMare::TransportType::MQTT: return "mqtt";
+        case NightMare::TransportType::LOCAL_MQTT: return "local_mqtt";
+        case NightMare::TransportType::ESP_NOW: return "esp_now";
+        }
+        return "unknown";
+    }
 }
 
 TelemetryService Telemetry;
@@ -342,17 +354,28 @@ void TelemetryService::appendSystem(JsonObject dst) const
 void TelemetryService::appendNetwork(JsonObject dst) const
 {
 #if NM_ENABLE_WIFI
-    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+    const bool wifiConnected = WiFi_isConnected();
     dst["wifi_connected"] = wifiConnected;
     if (wifiConnected)
     {
-        dst["ip"] = WiFi.localIP().toString();
-        dst["rssi_dbm"] = WiFi.RSSI();
+        dst["ip"] = WiFi_localIP();
+        dst["rssi_dbm"] = WiFi_RSSI();
         dst["tx_power_dbm"] = WiFi_getTxPowerDbm();
     }
 #endif
-    dst["mqtt_connected"] = MQTT_Connected();
-    dst["broker"] = MQTT_isLocal() ? "local" : "remote";
+    const NightMare::TransportType transport = NightMare::GetSelectedTransport();
+    const NightMare::TransportState state = NightMare::GetTransportState();
+    dst["transport"] = transportName(transport);
+    dst["transport_connected"] = state == NightMare::TransportState::CONNECTED;
+    dst["transport_state"] = static_cast<uint8_t>(state);
+    if (transport == NightMare::TransportType::LOCAL_MQTT ||
+        transport == NightMare::TransportType::MQTT)
+    {
+        dst["mqtt_connected"] = state == NightMare::TransportState::CONNECTED;
+        dst["broker"] = transport == NightMare::TransportType::LOCAL_MQTT
+                            ? "local"
+                            : "remote";
+    }
 }
 
 TelemetryResult TelemetryService::getInfo(InfoType type) const
@@ -425,8 +448,8 @@ bool TelemetryService::publishInfo(InfoType type)
         return false;
     const TelemetryResult info = getInfo(type);
     const bool published = info.valid &&
-                           MQTT_Publish(topic, info.data, true,
-                                        type != InfoType::HEARTBEAT);
+                           NightMare::PublishDeviceText(
+                               topic, info.data, type != InfoType::HEARTBEAT);
     if (published && type == InfoType::HEARTBEAT)
         ++heartbeatCounter_;
     return published;
@@ -470,7 +493,8 @@ TelemetryResult TelemetryService::getHardware() const
 bool TelemetryService::publishHardware()
 {
     const TelemetryResult hardware = getHardware();
-    return hardware.valid && MQTT_Publish("hardware", hardware.data, true, true);
+    return hardware.valid && NightMare::PublishDeviceText(
+                                 "hardware", hardware.data, true);
 }
 
 bool TelemetryService::publishAll()

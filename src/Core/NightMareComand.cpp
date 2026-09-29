@@ -13,6 +13,9 @@
 #if NM_ENABLE_TELEMETRY
 #include "Telemetry.h"
 #endif
+#if NM_ENABLE_NETWORK
+#include <Network/NmTransportInternal.h>
+#endif
 #if NM_CONSOLE_BUILTINS
 #include <LittleFS.h>
 #endif
@@ -387,10 +390,11 @@ static NightMareResults executeAdoptCommand(const String &newName, NightmareCont
 
 static void refreshIdentityDocuments()
 {
-#if NM_ENABLE_MQTT
-    if (MQTT_Connected())
+#if NM_ENABLE_NETWORK
+    if (NightMare::GetTransportState() == NightMare::TransportState::CONNECTED)
     {
-        MQTT_Publish("status", deviceStatusJson(true), true, true);
+        NightMare::PublishDeviceText(
+            "status", NightMare::TransportDeviceStatusJson(true), true);
 #if NM_ENABLE_TELEMETRY
         Telemetry.publishInfo(InfoType::INFO);
 #endif
@@ -982,47 +986,57 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     }
 #endif
 
+#if NM_ENABLE_NETWORK
+    else if (parsedMsg.command == "TRANSPORT")
+    {
+        if (parsedMsg.subcommand == "SET")
+        {
+            String requested = parsedMsg.args[1];
+            requested.toUpperCase();
+            NightMare::TransportType transport = NightMare::TransportType::AUTO;
+            bool known = true;
+            if (requested == "MQTT")
+                transport = NightMare::TransportType::MQTT;
+            else if (requested == "LOCAL_MQTT")
+                transport = NightMare::TransportType::LOCAL_MQTT;
+            else if (requested == "ESP_NOW")
+                transport = NightMare::TransportType::ESP_NOW;
+            else if (requested != "AUTO")
+                known = false;
+            result.result = known && NightMare::SelectTransport(transport);
+            result.response = result.result ? "Transport change started."
+                                            : "Transport unavailable or invalid.";
+        }
+        else if (parsedMsg.subcommand == "GET" ||
+                 parsedMsg.subcommand == "STATE")
+        {
+            JsonDocument doc;
+            doc["selected"] = static_cast<uint8_t>(NightMare::GetSelectedTransport());
+            doc["preferred"] = NightMare::preferredTransport.value();
+            doc["state"] = static_cast<uint8_t>(NightMare::GetTransportState());
+            serializeJson(doc, result.response);
+            result.result = true;
+        }
+        else
+        {
+            result.result = false;
+            result.response = "Unknown TRANSPORT subcommand available: [GET, SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>].";
+        }
+    }
+#endif
+
 #if NM_ENABLE_WIFI
     else if (parsedMsg.command == "WIFI")
     {
         if (parsedMsg.subcommand == "IP")
         {
-            result.response = WiFi.localIP().toString();
+            result.response = WiFi_localIP();
         }
         else if (parsedMsg.subcommand == "STATE")
         {
-            wl_status_t status = WiFi.status();
+            const NightMare::WiFiStatus status = WiFi_status();
             result.response += "WiFi Status Code: " + String(static_cast<int>(status)) + " - ";
-            switch (status)
-            {
-            case WL_NO_SHIELD:
-                result.response += "No Shield";
-                break;
-            case WL_IDLE_STATUS:
-                result.response += "Idle";
-                break;
-            case WL_NO_SSID_AVAIL:
-                result.response += "SSID Unavailable";
-                break;
-            case WL_SCAN_COMPLETED:
-                result.response += "Scan Completed";
-                break;
-            case WL_CONNECTED:
-                result.response += "Connected";
-                break;
-            case WL_CONNECT_FAILED:
-                result.response += "Connect Failed";
-                break;
-            case WL_CONNECTION_LOST:
-                result.response += "Connection Lost";
-                break;
-            case WL_DISCONNECTED:
-                result.response += "Disconnected";
-                break;
-            default:
-                result.response += "Unknown Status";
-                break;
-            }
+            result.response += WiFi_getStatusName(status);
         }
         else if (parsedMsg.subcommand == "TXPOWER")
         {
@@ -1057,12 +1071,11 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         else if (parsedMsg.subcommand == "SCAN")
         {
             bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
-            int16_t res = WiFi.scanComplete();
+            int res = WiFi_scanCount();
             JsonDocument doc;
-            if (start || res == -2)
+            if (start || (res == 0 && !WiFi_scanInProgress()))
             {
-                int16_t res = WiFi.scanNetworks(true);
-                if (res == -1)
+                if (WiFi_startScan())
                 {
                     doc["control"] = "scan_started";
                 }
@@ -1073,7 +1086,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             }
             else
             {
-                if (res == -1)
+                if (WiFi_scanInProgress())
                 {
                     doc["control"] = "scan_in_progress";
                 }
@@ -1083,12 +1096,15 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                     JsonArray networks = doc["networks"].to<JsonArray>();
                     for (int i = 0; i < res; i++)
                     {
+                        NightMare::WiFiScanResult scan;
+                        if (!WiFi_scanResult(i, scan))
+                            continue;
                         JsonObject net = networks.add<JsonObject>();
-                        net["ssid"] = WiFi.SSID(i);
-                        net["rssi"] = WiFi.RSSI(i);
-                        net["mac"] = WiFi.BSSIDstr(i);
-                        net["channel"] = WiFi.channel(i);
-                        net["encryptionType"] = WiFi_getAuthTypeName(WiFi.encryptionType(i));
+                        net["ssid"] = scan.ssid;
+                        net["rssi"] = scan.rssi;
+                        net["mac"] = scan.bssid;
+                        net["channel"] = scan.channel;
+                        net["encryptionType"] = WiFi_getAuthTypeName(scan.authMode);
                     }
                 }
             }
@@ -1123,7 +1139,8 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 if (context.msgSource == NM_CMD_SRC_MQTT)
                 {
                     context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after reconnecting to MQTT with the new credentials
-                    MQTT_Queue_Async_Message(context.sourceIdentifier, result.response, false, false);
+                    MQTT_Queue_Async_Message(context.sourceIdentifier, result.response,
+                                             false, false);
                 };
 #endif
             }

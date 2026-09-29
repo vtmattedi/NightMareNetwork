@@ -56,7 +56,7 @@ class ResourcesManager
 public:
     static constexpr int MaxResources = 100;
 
-    // Framework setup: publishing is injected by the MQTT facade.
+    // Framework setup: publishing is injected by the active transport.
     void setPublisher(ResourcePublisher *publisher);
     void setSubscriber(ResourceSubscriber *subscriber);
 

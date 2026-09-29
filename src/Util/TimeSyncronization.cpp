@@ -6,7 +6,7 @@
 #include <Core/Logs.h>
 #include <Core/SystemState.h>
 #include <Core/Time.h>
-#include <WiFi.h>
+#include <Network/WiFi/NmWifiEsp.h>
 #include <atomic>
 #include <esp_sntp.h>
 
@@ -36,7 +36,7 @@ bool recordSynchronizedClock()
 
 bool startSntpTimeSync()
 {
-    if (WiFi.status() != WL_CONNECTED)
+    if (!WiFi_isConnected())
         return false;
 
     const char *timezone = getenv("TZ");

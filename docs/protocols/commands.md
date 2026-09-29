@@ -651,8 +651,6 @@ Returns `MQTTStateJson()` after handling:
 }
 ```
 
-State values are implementation state codes.
-
 ### Connect / switch broker
 
 ```text
@@ -682,6 +680,25 @@ MQTT SWAP
 ```
 
 Switches between local and remote broker selection.
+
+## TRANSPORT
+
+Available when Network support is enabled. It selects the same enum integer
+stored by `preferredTransport`.
+
+```text
+TRANSPORT GET
+TRANSPORT STATE
+TRANSPORT SET MQTT
+TRANSPORT SET LOCAL_MQTT
+TRANSPORT SET ESP_NOW
+TRANSPORT SET AUTO
+```
+
+`GET` and `STATE` return enum integers for selected, preferred, and state.
+`MQTT` selects Remote MQTT/TLS. `LOCAL_MQTT` selects the local broker.
+`ESP_NOW` and `AUTO` currently return an unavailable error without stopping the
+active MQTT connection; their implementations are deliberately deferred.
 
 ## CONFIG
 
@@ -818,7 +835,8 @@ WIFI IP
 WIFI STATE
 ```
 
-Returns the current Arduino WiFi status code plus a readable state name.
+Returns the current NightMare WiFi-driver status code plus a readable state
+name.
 
 ### Scan
 

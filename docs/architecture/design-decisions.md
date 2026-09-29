@@ -83,6 +83,20 @@ Examples include:
 
 **Consequence:** the design inherits MQTT's retained-message model. A retained value is last known state, not a transaction log or proof that the publishing device is currently online.
 
+## Connection type is separate from driver implementation
+
+**Decision:** public `TransportType` values describe complete connection types,
+while more than one type may reuse one driver implementation. Remote `MQTT` and
+`LOCAL_MQTT` both adapt the existing `NmMqttEsp` implementation.
+
+**Reason:** Local and Remote MQTT can differ in endpoint, credentials, TLS, and
+availability policy without justifying duplicated MQTT client code.
+
+**Consequence:** Config and commands store/select `TransportType` integers.
+`AUTO` policy and the ESP-NOW driver remain deferred; the existing MQTT
+implementation keeps its current MQTT-specific reconnect/fallback behavior
+during this migration.
+
 ## A manifest describes; `/state` tells the truth
 
 **Decision:** Resource manifests are descriptive and diagnostic. Valid Value

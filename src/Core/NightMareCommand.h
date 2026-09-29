@@ -10,11 +10,14 @@
 #if NM_CONSOLE_BUILTINS
 #include <ArduinoJson.h>
 
+#if NM_ENABLE_NETWORK
+#include <Network/NmTransport.h>
+#endif
 #if NM_ENABLE_MQTT
 #include <Network/MQTT.h>
 #endif
 #if NM_ENABLE_WIFI
-#include <Plataform/ESP32/NightMareWIFI.h>
+#include <Network/WiFi/NmWifiEsp.h>
 #endif
 #if NM_ENABLE_HTTP
 #include <HTTP/http.h>
