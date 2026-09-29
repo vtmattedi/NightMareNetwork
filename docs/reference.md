@@ -577,7 +577,7 @@ ActionResult executeCommand(
 bool withdrawIdentity(const String &oldDeviceName);
 ```
 
-Transport boundary:
+Connection boundary:
 
 ```cpp
 class ResourcePublisher
@@ -1136,12 +1136,12 @@ bool Telemetry.publishHardware();
 bool Telemetry.publishAll();
 ```
 
-## Network transport
+## Network connection
 
 ```cpp
 namespace NightMare
 {
-enum class TransportType : uint8_t
+enum class ConnectionType : uint8_t
 {
     AUTO = 0,
     MQTT,
@@ -1149,7 +1149,7 @@ enum class TransportType : uint8_t
     ESP_NOW
 };
 
-enum class TransportState : uint8_t
+enum class ConnectionState : uint8_t
 {
     STOPPED,
     DISCOVERING,
@@ -1158,7 +1158,7 @@ enum class TransportState : uint8_t
     ERROR
 };
 
-extern Config<int> preferredTransport;
+extern Config<int> preferredConnection;
 
 bool Publish(const char *topic,
              const uint8_t *payload,
@@ -1167,9 +1167,9 @@ bool Publish(const char *topic,
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
 
-bool SelectTransport(TransportType transport);
-TransportType GetSelectedTransport();
-TransportState GetTransportState();
+bool SelectConnection(ConnectionType connection);
+ConnectionType GetSelectedConnection();
+ConnectionState GetConnectionState();
 }
 ```
 
@@ -1180,13 +1180,13 @@ MQTT connection.
 
 ## MQTT implementation limits
 
-MQTT is an implementation behind `NmTransport`; it does not expose a second
+MQTT is an implementation behind `NmConnection`; it does not expose a second
 public lifecycle, state, publish, or subscription API. Current implementation
 limits are:
 
 ```text
 queued reconnect messages:  5
-transport subscriptions:    256
+connection subscriptions:    256
 topic filter length:        192
 incoming MQTT payload:      32768 bytes
 MQTT QoS:                   0

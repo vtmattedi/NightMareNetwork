@@ -25,7 +25,7 @@ surfaces disagree about the same C++ value.
 
 **Consequence:** both types work through existing Config and Resource paths.
 Their canonical wire forms are fixed by their codecs, existing enum numbers
-remain stable, and no manifest encoding-version bump or transport-specific
+remain stable, and no manifest encoding-version bump or connection-specific
 handling is required.
 
 ## Configs are local parameters, not Resources
@@ -85,18 +85,18 @@ Examples include:
 
 ## Connection type is separate from driver implementation
 
-**Decision:** public `TransportType` values describe complete connection types,
+**Decision:** public `ConnectionType` values describe complete connection types,
 while more than one type may reuse one driver implementation. Remote `MQTT` and
 `LOCAL_MQTT` both adapt the existing `NmMqttEsp` implementation.
 
 **Reason:** Local and Remote MQTT can differ in endpoint, credentials, TLS, and
 availability policy without justifying duplicated MQTT client code.
 
-**Consequence:** Config and commands store/select `TransportType` integers.
+**Consequence:** Config and commands store/select `ConnectionType` integers.
 `AUTO` policy and the ESP-NOW driver remain deferred. MQTT reconnects the
 selected broker profile but cannot silently change the selected connection
-type; only `NmTransport` may do that. A failed explicit remote/local switch may
-be rolled back by `NmTransport` to the last connected profile; that safety
+type; only `NmConnection` may do that. A failed explicit remote/local switch may
+be rolled back by `NmConnection` to the last connected profile; that safety
 transaction is not general automatic failover.
 
 ## A manifest describes; `/state` tells the truth
@@ -322,7 +322,7 @@ the direct local edge.
 
 **Reason:** Resource Actions describe application capabilities. Commands operate the framework, configuration, diagnostics, and administrative control plane.
 
-**Consequence:** there are two deliberate execution surfaces. A capability such as `learn_ir` remains a Resource Action, while `INFO NETWORK`, `TIME`, or `JOB CLEAR` is a command. The `>` Resource-command syntax is only an adapter from command transports into existing Resources; it does not create a second Resource model.
+**Consequence:** there are two deliberate execution surfaces. A capability such as `learn_ir` remains a Resource Action, while `INFO NETWORK`, `TIME`, or `JOB CLEAR` is a command. The `>` Resource-command syntax is only an adapter from command sources into existing Resources; it does not create a second Resource model.
 
 ## Ordinary `/invoke` is fire-and-forget
 
@@ -330,7 +330,7 @@ the direct local edge.
 
 **Reason:** most Action requests only need to be delivered. Adding request IDs and result topics to every invocation would make the basic Resource protocol heavier.
 
-**Consequence:** successful raw `/invoke` publish means accepted for transport, not successful remote execution. A correlated command/MQTTP request using the `>` Resource-command form can surface the `ActionResult` of a ManagedAction executed on the receiving device. Invoking a RemoteAction still only reports whether its MQTT publication was accepted.
+**Consequence:** successful raw `/invoke` publish means accepted for connection, not successful remote execution. A correlated command/MQTTP request using the `>` Resource-command form can surface the `ActionResult` of a ManagedAction executed on the receiving device. Invoking a RemoteAction still only reports whether its MQTT publication was accepted.
 
 ## Remote local identity is separate from its source
 

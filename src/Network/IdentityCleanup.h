@@ -1,6 +1,6 @@
 #pragma once
 #include <NightMare/Features.h>
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
 #include <Arduino.h>
 
 enum class IdentityCleanupResult : uint8_t
@@ -15,4 +15,4 @@ enum class IdentityCleanupResult : uint8_t
 /// once it succeeded, so this is safe to call as often as wanted: from the
 /// startup retry job, a test, or by hand in a build without the Scheduler.
 IdentityCleanupResult processPendingIdentityCleanup();
-#endif // NM_ENABLE_MQTT
+#endif // NM_ENABLE_NETWORK

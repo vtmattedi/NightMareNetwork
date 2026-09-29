@@ -53,13 +53,13 @@ static_assert(!HasFreshnessField<RemoteSensor<int>>::value,
 static_assert(!HasEncodedValue<ManagedSensor<int>>::value, "wire encoding is framework-internal");
 static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
               "NetValue is an implementation base, not an application resource");
-static_assert(static_cast<uint8_t>(NightMare::TransportType::AUTO) == 0,
-              "TransportType persistence values must remain stable");
-static_assert(static_cast<uint8_t>(NightMare::TransportType::MQTT) == 1,
-              "Remote MQTT is the first concrete transport");
+static_assert(static_cast<uint8_t>(NightMare::ConnectionType::AUTO) == 0,
+              "ConnectionType persistence values must remain stable");
+static_assert(static_cast<uint8_t>(NightMare::ConnectionType::MQTT) == 1,
+              "Remote MQTT is the first concrete connection");
 static_assert(std::is_same<decltype(&NightMare::Publish),
                            bool (*)(const char *, const uint8_t *, size_t, bool)>::value,
-              "The generic transport publication boundary must remain binary-safe");
+              "The generic connection publication boundary must remain binary-safe");
 
 ManagedSensor<int> managedSensor("managed_sensor");
 ManagedSensor<TimeType> managedTime("managed_time");

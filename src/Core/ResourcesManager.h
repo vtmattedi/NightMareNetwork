@@ -4,7 +4,7 @@
 #include "NetResources.h"
 #include <ArduinoJson.h>
 
-// Implement this at the transport boundary. A successful return means that the
+// Implement this at the connection boundary. A successful return means that the
 // message was accepted for publishing; it does not acknowledge execution by another device.
 class ResourcePublisher
 {
@@ -56,7 +56,7 @@ class ResourcesManager
 public:
     static constexpr int MaxResources = 100;
 
-    // Framework setup: publishing is injected by the active transport.
+    // Framework setup: publishing is injected by the active connection.
     void setPublisher(ResourcePublisher *publisher);
     void setSubscriber(ResourceSubscriber *subscriber);
 
@@ -76,13 +76,13 @@ public:
     /// inspects at most one Resource.
     void tick();
 
-    // Call after transport reconnection to republish the retained manifest and
+    // Call after connection reconnection to republish the retained manifest and
     // every managed value that has authoritative state. Binding one also announces it.
     bool announceAll();
     bool publishManifest();
     bool publishConsumeManifest();
     bool publishResourceStates();
-    // Rebuild exact subscriptions after a transport reconnects.
+    // Rebuild exact subscriptions after a connection reconnects.
     void subscribeAll();
     bool needsSubscription(const String &topicFilter) const;
 

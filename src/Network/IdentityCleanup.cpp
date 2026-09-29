@@ -1,8 +1,8 @@
 #include <NightMare/Features.h>
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
 #include "IdentityCleanup.h"
-#include "NmTransport.h"
-#include "NmTransportInternal.h"
+#include "NmConnection.h"
+#include "NmConnectionInternal.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -29,7 +29,7 @@ IdentityCleanupResult processPendingIdentityCleanup()
         const String statusTopic = cleanup.oldName + "/status";
         if (NightMare::PublishText(
                 statusTopic,
-                NightMare::TransportDeviceStatusJson(cleanup.oldName, false), true) &&
+                NightMare::ConnectionDeviceStatusJson(cleanup.oldName, false), true) &&
             NightMare::PublishText(statusTopic, "", true))
             gDeviceIdentity.markIdentityCleanupComplete(CLEANUP_STATUS);
     }
@@ -37,4 +37,4 @@ IdentityCleanupResult processPendingIdentityCleanup()
     return gDeviceIdentity.hasPendingIdentityCleanup() ? IdentityCleanupResult::PENDING
                                                        : IdentityCleanupResult::COMPLETE;
 }
-#endif // NM_ENABLE_MQTT
+#endif // NM_ENABLE_NETWORK

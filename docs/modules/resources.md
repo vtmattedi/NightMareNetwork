@@ -18,10 +18,10 @@ whether it is state or an operation
 how another device may interact with it
 ```
 
-The Resource layer deliberately separates application types from MQTT transport.
+The Resource layer deliberately separates application types from MQTT connection.
 
 ```text
-application                     transport
+application                     connection
     T
     │
 NetValue<T>
@@ -156,13 +156,13 @@ void updateTemperature(float value)
 
 `setValue()` updates authoritative local truth.
 
-If the Resource is bound and MQTT transport is available, NightMare publishes the state retained at:
+If the Resource is bound and MQTT connection is available, NightMare publishes the state retained at:
 
 ```text
 <device>/resource/temperature/state
 ```
 
-If transport is unavailable, the local value still changes. Reconnect re-announcement publishes the authoritative state later.
+If connection is unavailable, the local value still changes. Reconnect re-announcement publishes the authoritative state later.
 
 ## Managed advertisement policy
 
@@ -316,7 +316,7 @@ publishes:
 bedroom-ac/resource/power/set
 ```
 
-The call returns `true` only if the request was accepted for transport.
+The call returns `true` only if the request was accepted for connection.
 
 It does not mean the remote device accepted the requested state.
 
@@ -892,7 +892,7 @@ always identifies exactly one Resource.
 
 For a ManagedState, `set` uses the same decode + `onWrite` acceptance path as MQTT `/set` ingress.
 
-For a RemoteState, `set` uses the normal typed `setValue()` path, including optimistic behavior, and success means the request was accepted for transport.
+For a RemoteState, `set` uses the normal typed `setValue()` path, including optimistic behavior, and success means the request was accepted for connection.
 
 `invoke` is valid only for Actions. Everything after the verb is one opaque Resource payload.
 
@@ -940,7 +940,7 @@ document is separate from the Managed Resource provider manifest and requires
 no duplicate project declaration.
 
 The `ResourcePublisher` / `ResourceSubscriber` adapter is injected by
-`NmTransport`; the manager has no MQTT or broker-profile dependency.
+`NmConnection`; the manager has no MQTT or broker-profile dependency.
 
 ## Manifest handler
 

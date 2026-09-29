@@ -50,10 +50,10 @@ Once Resources are declared and bound, NightMare owns the repetitive network beh
 
 The application owns the meaning of those Resources.
 
-### Transport conventions and routing
+### Connection conventions and routing
 
 NightMare defines the standard topic families and routes framework traffic
-before it reaches the application's generic transport callback.
+before it reaches the application's generic connection callback.
 
 It manages:
 
@@ -61,7 +61,7 @@ It manages:
 - complete connection-type selection,
 - MQTT client lifecycle,
 - framework subscriptions,
-- Resource transport integration,
+- Resource connection integration,
 - console/control routing,
 - optional discovery subscriptions,
 - retained status,
@@ -207,7 +207,7 @@ belong in application code unless they are generic enough to become an explicit 
 
 The application chooses which capabilities are Resources and how they are named.
 
-That is the contract the device exposes to other devices and tooling, so names should describe application concepts rather than transport details.
+That is the contract the device exposes to other devices and tooling, so names should describe application concepts rather than connection details.
 
 If a module primarily implements a Sensor, State, Action, or Config, that module
 should normally own its declaration, stable name, handlers, and binding. This

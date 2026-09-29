@@ -1,12 +1,12 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
 
-#include "NmMqttTransport.h"
+#include "NmMqttConnection.h"
 #include "NmMqttEsp.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Network/NmMessageRouter.h>
-#include <Network/NmTransportInternal.h>
+#include <Network/NmConnectionInternal.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <atomic>
@@ -28,21 +28,21 @@ QueuedMessage pending[QueueCapacity];
 SemaphoreHandle_t queueMutex = nullptr;
 std::atomic<uint8_t> connectionErrors{0};
 
-bool mqttType(NightMare::TransportType type)
+bool mqttType(NightMare::ConnectionType type)
 {
-    return type == NightMare::TransportType::MQTT ||
-           type == NightMare::TransportType::LOCAL_MQTT;
+    return type == NightMare::ConnectionType::MQTT ||
+           type == NightMare::ConnectionType::LOCAL_MQTT;
 }
 
-bool localBroker(NightMare::TransportType type)
+bool localBroker(NightMare::ConnectionType type)
 {
-    return type == NightMare::TransportType::LOCAL_MQTT;
+    return type == NightMare::ConnectionType::LOCAL_MQTT;
 }
 
-NightMare::TransportType connectionType(bool isLocalBroker)
+NightMare::ConnectionType connectionType(bool isLocalBroker)
 {
-    return isLocalBroker ? NightMare::TransportType::LOCAL_MQTT
-                         : NightMare::TransportType::MQTT;
+    return isLocalBroker ? NightMare::ConnectionType::LOCAL_MQTT
+                         : NightMare::ConnectionType::MQTT;
 }
 
 bool ensureQueueMutex()
@@ -90,16 +90,16 @@ void messageReceived(const String &topic, const String &payload)
 void connected(bool isLocalBroker)
 {
     connectionErrors.store(0);
-    const NightMare::TransportType type = connectionType(isLocalBroker);
-    NightMare::TransportConnectedIngress(type);
-    if (NightMare::GetSelectedTransport() == type &&
-        NightMare::GetTransportState() == NightMare::TransportState::CONNECTED)
+    const NightMare::ConnectionType type = connectionType(isLocalBroker);
+    NightMare::OnConnectedIngress(type);
+    if (NightMare::GetSelectedConnection() == type &&
+        NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED)
         flushQueuedMessages();
 }
 
 void disconnected(bool isLocalBroker)
 {
-    NightMare::TransportDisconnectedIngress(connectionType(isLocalBroker));
+    NightMare::OnDisconnectedIngress(connectionType(isLocalBroker));
 }
 
 void connectionError(bool isLocalBroker)
@@ -107,13 +107,13 @@ void connectionError(bool isLocalBroker)
     if (connectionErrors.fetch_add(1) + 1 < ErrorsBeforeSwitchFailure)
         return;
     connectionErrors.store(0);
-    NightMare::TransportConnectionFailedIngress(connectionType(isLocalBroker));
+    NightMare::OnConnectionFailedIngress(connectionType(isLocalBroker));
 }
 }
 
-namespace NmMqttTransport
+namespace NmMqttConnection
 {
-bool begin(NightMare::TransportType type)
+bool begin(NightMare::ConnectionType type)
 {
     if (!mqttType(type))
         return false;
@@ -125,7 +125,7 @@ bool begin(NightMare::TransportType type)
     return NmMqttEsp::begin(localBroker(type));
 }
 
-bool changeTo(NightMare::TransportType type)
+bool changeTo(NightMare::ConnectionType type)
 {
     if (!mqttType(type))
         return false;

@@ -129,7 +129,7 @@ Namespace is not currently encoded in the MQTT topic root.
 
 ### MQTT publication is not proof of remote execution
 
-Successful MQTT publication means the local transport accepted the message.
+Successful MQTT publication means the local connection accepted the message.
 
 It is not proof that another device executed an Action or applied a requested state.
 
@@ -165,7 +165,7 @@ A practical test is:
 
 ## Resource Manager and registry
 
-`ResourcesManager` is the runtime boundary between declared Resources and NightMare transport/routing.
+`ResourcesManager` is the runtime boundary between declared Resources and NightMare connection/routing.
 
 Applications create Resource objects and bind them to the manager.
 

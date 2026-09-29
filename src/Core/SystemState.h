@@ -20,6 +20,7 @@ enum class SystemRequest : uint16_t
     PublishResourceStates,
     PublishInfo,
     PublishHardwareJson,
+    PublishTelemetry,
 
     Count
 };

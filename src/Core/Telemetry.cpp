@@ -7,8 +7,8 @@
 #include <esp_heap_caps.h>
 #include "DocumentPayload.h"
 #include <NightMare/HardwareProfile.h>
-#include <Network/NmTransport.h>
-#include <Network/NmTransportInternal.h>
+#include <Network/NmConnection.h>
+#include <Network/NmConnectionInternal.h>
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
 #include <Network/WiFi/NmWifiEsp.h>
@@ -165,7 +165,7 @@ namespace
             appendConnection(connections.add<JsonObject>(), members.connections[i]);
     }
 
-    // The transport topic of each publishable document; null for query-only sections.
+    // The connection topic of each publishable document; null for query-only sections.
     const char *documentTopic(InfoType type)
     {
         switch (type)
@@ -183,14 +183,14 @@ namespace
         }
     }
 
-    const char *transportName(NightMare::TransportType transport)
+    const char *connectionName(NightMare::ConnectionType connection)
     {
-        switch (transport)
+        switch (connection)
         {
-        case NightMare::TransportType::AUTO: return "auto";
-        case NightMare::TransportType::MQTT: return "mqtt";
-        case NightMare::TransportType::LOCAL_MQTT: return "local_mqtt";
-        case NightMare::TransportType::ESP_NOW: return "esp_now";
+        case NightMare::ConnectionType::AUTO: return "auto";
+        case NightMare::ConnectionType::MQTT: return "mqtt";
+        case NightMare::ConnectionType::LOCAL_MQTT: return "local_mqtt";
+        case NightMare::ConnectionType::ESP_NOW: return "esp_now";
         }
         return "unknown";
     }
@@ -363,16 +363,16 @@ void TelemetryService::appendNetwork(JsonObject dst) const
         dst["tx_power_dbm"] = WiFi_getTxPowerDbm();
     }
 #endif
-    const NightMare::TransportType transport = NightMare::GetSelectedTransport();
-    const NightMare::TransportState state = NightMare::GetTransportState();
-    dst["transport"] = transportName(transport);
-    dst["transport_connected"] = state == NightMare::TransportState::CONNECTED;
-    dst["transport_state"] = static_cast<uint8_t>(state);
-    if (transport == NightMare::TransportType::LOCAL_MQTT ||
-        transport == NightMare::TransportType::MQTT)
+    const NightMare::ConnectionType connection = NightMare::GetSelectedConnection();
+    const NightMare::ConnectionState state = NightMare::GetConnectionState();
+    dst["connection"] = connectionName(connection);
+    dst["connected"] = state == NightMare::ConnectionState::CONNECTED;
+    dst["connection_state"] = static_cast<uint8_t>(state);
+    if (connection == NightMare::ConnectionType::LOCAL_MQTT ||
+        connection == NightMare::ConnectionType::MQTT)
     {
-        dst["mqtt_connected"] = state == NightMare::TransportState::CONNECTED;
-        dst["broker"] = transport == NightMare::TransportType::LOCAL_MQTT
+        dst["mqtt_connected"] = state == NightMare::ConnectionState::CONNECTED;
+        dst["broker"] = connection == NightMare::ConnectionType::LOCAL_MQTT
                             ? "local"
                             : "remote";
     }
@@ -386,7 +386,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
 
     // Sizes itself as it is filled; the old fixed capacity asked for
     // 2048 + connections * 256 bytes contiguous, which on a board describing
-    // eighteen pins was a 6.6KB block demanded on every transport connect.
+    // eighteen pins was a 6.6KB block demanded on every connection connect.
     JsonDocument doc;
     switch (type)
     {
@@ -448,8 +448,7 @@ bool TelemetryService::publishInfo(InfoType type)
         return false;
     const TelemetryResult info = getInfo(type);
     const bool published = info.valid &&
-                           NightMare::PublishDeviceText(
-                               topic, info.data, type != InfoType::HEARTBEAT);
+                           NightMare::PublishText(gDeviceIdentity.topic(topic), info.data, type != InfoType::HEARTBEAT);
     if (published && type == InfoType::HEARTBEAT)
         ++heartbeatCounter_;
     return published;
@@ -493,8 +492,7 @@ TelemetryResult TelemetryService::getHardware() const
 bool TelemetryService::publishHardware()
 {
     const TelemetryResult hardware = getHardware();
-    return hardware.valid && NightMare::PublishDeviceText(
-                                 "hardware", hardware.data, true);
+    return hardware.valid && NightMare::PublishText(gDeviceIdentity.topic("hardware"), hardware.data, true);
 }
 
 bool TelemetryService::publishAll()

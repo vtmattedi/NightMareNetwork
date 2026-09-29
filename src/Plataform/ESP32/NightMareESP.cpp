@@ -17,12 +17,12 @@
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>
 #endif
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
 #include <Network/IdentityCleanup.h>
 #endif
 #if NM_ENABLE_NETWORK
-#include <Network/NmTransport.h>
-#include <Network/NmTransportInternal.h>
+#include <Network/NmConnection.h>
+#include <Network/NmConnectionInternal.h>
 #endif
 
 namespace
@@ -56,7 +56,7 @@ namespace
     bool processSystemRequest(SystemRequest request)
     {
 #if NM_ENABLE_NETWORK
-        if (NightMare::GetTransportState() != NightMare::TransportState::CONNECTED &&
+        if (NightMare::GetConnectionState() != NightMare::ConnectionState::CONNECTED &&
             request != SystemRequest::Count)
             return false;
 #endif
@@ -65,8 +65,7 @@ namespace
         {
         case SystemRequest::PublishStatus:
 #if NM_ENABLE_MQTT
-            return NightMare::PublishDeviceText(
-                "status", NightMare::TransportDeviceStatusJson(true), true);
+            return NightMare::PublishText(gDeviceIdentity.topic("status"), NightMare::ConnectionDeviceStatusJson(true), true);
 #else
             return true;
 #endif
@@ -100,6 +99,19 @@ namespace
 #else
             return true;
 #endif
+        case SystemRequest::PublishTelemetry:
+#if NM_ENABLE_TELEMETRY
+            {
+                // INFO and hardware have their own requests.
+                const bool system = Telemetry.publishInfo(InfoType::SYSTEM);
+                const bool network = Telemetry.publishInfo(InfoType::NETWORK);
+                const bool heartbeat = !HeartbeatEnabled.value() ||
+                                       Telemetry.publishInfo(InfoType::HEARTBEAT);
+                return system && network && heartbeat;
+            }
+#else
+            return true;
+#endif
         case SystemRequest::Count:
             return true;
         }
@@ -115,6 +127,7 @@ namespace
             "PublishResourceStates",
             "PublishInfo",
             "PublishHardwareJson",
+            "PublishTelemetry",
             "Count"};
         String result = "";
         for (size_t i = 0; i < SystemRequestCount; ++i)
@@ -135,9 +148,9 @@ namespace
     {
         static uint16_t next = 0;
 #if NM_ENABLE_NETWORK
-        // All current requests publish through the active transport. Stay idle while offline;
+        // All current requests publish through the active connection. Stay idle while offline;
         // an expired delay becomes ready after reconnect, without a busy loop.
-        if (NightMare::GetTransportState() != NightMare::TransportState::CONNECTED)
+        if (NightMare::GetConnectionState() != NightMare::ConnectionState::CONNECTED)
             return;
 #endif
         const uint32_t now = millis();
@@ -182,7 +195,7 @@ namespace
 #include <Core/NightMareCommand.h>
 #endif
 
-#if NM_ENABLE_SCHEDULER && NM_ENABLE_MQTT
+#if NM_ENABLE_SCHEDULER && NM_ENABLE_NETWORK
 namespace
 {
     constexpr char IdentityCleanupJob[] = "_nm_identity_cleanup";
@@ -234,7 +247,7 @@ void startNightMareESP()
     if (!gScheduler.begin(NM_SCHEDULER_OWN_TASK ? SchedulerRunMode::TASK
                                                 : SchedulerRunMode::MANUAL))
         LOG_ERROR("NM", "Scheduler did not start; no job will run");
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
     if (gDeviceIdentity.hasPendingIdentityCleanup() &&
         gScheduler.timer(IdentityCleanupJob, identityCleanupTask, NM_IDENTITY_CLEANUP_RETRY_MS) < 0)
         LOG_ERROR("NM", "Could not schedule cleanup of the previous identity; "

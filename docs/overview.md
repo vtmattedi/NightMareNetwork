@@ -62,7 +62,7 @@ Resources
     describe application capabilities and state
 
 ResourcesManager
-    binds Resources to transport and routes Resource traffic
+    binds Resources to connection and routes Resource traffic
 
 MQTT / NmMessageRouter
     moves messages and dispatches NightMare protocol traffic
@@ -175,7 +175,7 @@ Commands are used for things such as:
 INFO
 JOB
 MQTT
-WIFI
+NETWORK
 CONFIG
 REBOOT
 ```

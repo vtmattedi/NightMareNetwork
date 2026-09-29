@@ -33,7 +33,7 @@ A typical deployment looks like:
 ```
 
 Devices may communicate through Local MQTT, Remote MQTT/TLS, or a local
-transport such as ESP-NOW. The ESP-NOW driver is not implemented yet.
+connection such as ESP-NOW. The ESP-NOW driver is not implemented yet.
 
 Selected traffic may be bridged to Remote MQTT for backend/global services. The backend belongs on the remote side rather than connecting directly to every local broker.
 
@@ -60,7 +60,7 @@ Application
 │ Scheduler                        │
 │ Telemetry                        │
 │ Command handling                 │
-│ NmTransport / NmMessageRouter    │
+│ NmConnection / NmMessageRouter    │
 │ NightMareESP lifecycle           │
 └──────────────────────────────────┘
     │
@@ -92,7 +92,7 @@ timezone
 
 It also owns timezone application plus the persistence state needed for timezone configuration, adoption, and old-identity cleanup.
 
-It does not own MQTT publication or Resource cleanup. That prevents identity storage from becoming coupled to the transport implementation.
+It does not own MQTT publication or Resource cleanup. That prevents identity storage from becoming coupled to the connection implementation.
 
 ## Resources
 
@@ -148,27 +148,27 @@ String ingress plus a compact MessagePack declaration manifest.
 
 It has no connection to `ResourcesManager` or MQTT. The command layer routes
 its `CONFIG ...` namespace to `configManager().handle(...)`; ConfigManager
-itself remains transport-neutral. Persistence uses `PersistentSettings` under
+itself remains connection-neutral. Persistence uses `PersistentSettings` under
 reserved `_config:` keys. The ESP startup lifecycle calls `restore()` after
 persistent storage initialization and before normal framework services start.
 
-## Transport and MQTT layers
+## Connection and MQTT layers
 
-Networking is deliberately split into a NightMare transport coordinator and
+Networking is deliberately split into a NightMare connection coordinator and
 protocol drivers.
 
-### NmTransport
+### NmConnection
 
-`NmTransport` owns connection-type selection, binary-safe generic publication,
-transport subscriptions, and Resource transport injection. It is the boundary
-used by Resources and transport-neutral framework publishers.
+`NmConnection` owns connection-type selection, binary-safe generic publication,
+connection subscriptions, and Resource connection injection. It is the boundary
+used by Resources and connection-neutral framework publishers.
 
-### NmMqttTransport
+### NmMqttConnection
 
-`NmMqttTransport` adapts the `MQTT` and `LOCAL_MQTT` connection types to the
+`NmMqttConnection` adapts the `MQTT` and `LOCAL_MQTT` connection types to the
 shared ESP-IDF MQTT driver. It owns MQTT-specific lifecycle adaptation and the
 small reconnect delivery queue. Connection selection, generic publish/state,
-and subscription ownership remain in `NmTransport`.
+and subscription ownership remain in `NmConnection`.
 
 ### NmMqttEsp
 
@@ -194,7 +194,7 @@ It works with full MQTT topics and does not perform Resource semantics.
 
 Resource traffic is offered to `ResourcesManager` first. Other framework-owned traffic such as time synchronization and console commands is handled there as enabled.
 
-Traffic not consumed internally is ignored; transport ingress does not expose
+Traffic not consumed internally is ignored; connection ingress does not expose
 a parallel MQTT-specific application routing API.
 
 ## Retained state model
@@ -237,10 +237,10 @@ MQTT message
 NmMqttEsp
     │
     ▼
-NmMqttTransport
+NmMqttConnection
     │
     ▼
-NmTransport
+NmConnection
     │
     ▼
 NmMessageRouter
@@ -281,7 +281,7 @@ ManagedState<T>::onWrite
       retained /state publication
 ```
 
-The application makes the domain decision. NightMare owns the transport and state contract.
+The application makes the domain decision. NightMare owns the connection and state contract.
 
 ## Message flow: RemoteState write
 

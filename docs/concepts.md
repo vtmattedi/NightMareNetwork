@@ -72,7 +72,7 @@ Value
 Action
 ```
 
-Resources belong to the application layer. NightMare provides their registration, addressing, discovery, state routing, subscriptions, and transport behavior.
+Resources belong to the application layer. NightMare provides their registration, addressing, discovery, state routing, subscriptions, and connection behavior.
 
 ## Config
 
@@ -144,7 +144,7 @@ Invocation uses:
 <device>/resource/<name>/invoke
 ```
 
-Ordinary MQTT invocation is fire-and-forget. The transport accepting the message is not proof that the remote Action executed successfully.
+Ordinary MQTT invocation is fire-and-forget. The connection accepting the message is not proof that the remote Action executed successfully.
 
 When the result matters, use a correlated command/MQTTP path that can preserve the local `ActionResult`.
 
@@ -335,7 +335,7 @@ INFO
 TIME
 JOB
 MQTT
-WIFI
+NETWORK
 CONFIG
 REBOOT
 ```

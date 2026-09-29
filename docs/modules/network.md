@@ -1,25 +1,25 @@
 ---
-title: Network transports
-description: Lean transport selection, MQTT adaptation, binary-safe messages, and direct ESP WiFi.
+title: Network connections
+description: Lean connection selection, MQTT adaptation, binary-safe messages, and direct ESP WiFi.
 section: modules
 order: 50
 ---
 
-# Network transports
+# Network connections
 
-`NmTransport` is the transport-neutral boundary used by Resources and other
+`NmConnection` is the connection-neutral boundary used by Resources and other
 framework publishers.
 
 ```text
 ResourcesManager / telemetry / framework
                     │
                     ▼
-               NmTransport
+               NmConnection
                     │
           ┌─────────┴─────────┐
           ▼                   ▼
  MQTT or LOCAL_MQTT       ESP_NOW
-  NmMqttTransport       not implemented
+  NmMqttConnection       not implemented
           │
           ▼
       NmMqttEsp
@@ -32,7 +32,7 @@ broker configuration, TLS, credentials, and failure behavior.
 ## Connection types and states
 
 ```cpp
-enum class TransportType : uint8_t
+enum class ConnectionType : uint8_t
 {
     AUTO = 0,
     MQTT,
@@ -40,7 +40,7 @@ enum class TransportType : uint8_t
     ESP_NOW
 };
 
-enum class TransportState : uint8_t
+enum class ConnectionState : uint8_t
 {
     STOPPED,
     DISCOVERING,
@@ -69,10 +69,10 @@ bool NightMare::Publish(
 bool NightMare::Subscribe(const char *topicFilter);
 bool NightMare::Unsubscribe(const char *topicFilter);
 
-bool NightMare::SelectTransport(NightMare::TransportType transport);
+bool NightMare::SelectConnection(NightMare::ConnectionType connection);
 
-NightMare::TransportType NightMare::GetSelectedTransport();
-NightMare::TransportState NightMare::GetTransportState();
+NightMare::ConnectionType NightMare::GetSelectedConnection();
+NightMare::ConnectionState NightMare::GetConnectionState();
 ```
 
 The generic payload boundary is byte pointer plus explicit length. Embedded
@@ -84,65 +84,65 @@ driver is not constrained to text payloads.
 The framework-owned Config is:
 
 ```cpp
-extern Config<int> NightMare::preferredTransport;
+extern Config<int> NightMare::preferredConnection;
 ```
 
 Its key is:
 
 ```text
-nightmare:connection:preferred_transport
+nightmare:connection:preferred_connection
 ```
 
-The accepted connection type is stored as its `TransportType` integer. The
-default for this first stage is `TransportType::MQTT`; `AUTO` is not yet a
+The accepted connection type is stored as its `ConnectionType` integer. The
+default for this first stage is `ConnectionType::MQTT`; `AUTO` is not yet a
 policy.
 
 ## MQTT reuse
 
-`NmTransport` selects a connection profile and delegates MQTT work without
+`NmConnection` selects a connection profile and delegates MQTT work without
 duplicating the client implementation:
 
 ```text
-TransportType::MQTT
-    -> NmMqttTransport::begin(TransportType::MQTT)
+ConnectionType::MQTT
+    -> NmMqttConnection::begin(ConnectionType::MQTT)
     -> NmMqttEsp (remote/TLS profile)
 
-TransportType::LOCAL_MQTT
-    -> NmMqttTransport::begin(TransportType::LOCAL_MQTT)
+ConnectionType::LOCAL_MQTT
+    -> NmMqttConnection::begin(ConnectionType::LOCAL_MQTT)
     -> NmMqttEsp (local profile)
 ```
 
-`NmMqttTransport` owns MQTT adaptation and the reconnect-only MQTT delivery
+`NmMqttConnection` owns MQTT adaptation and the reconnect-only MQTT delivery
 queue. `NmMqttEsp` owns the ESP-IDF client, broker profiles, TLS, Last Will,
 and packet ingress. It reconnects the selected profile but never silently
 changes from local to remote or vice versa.
 
-`NmTransport` implements the `ResourcePublisher` and `ResourceSubscriber`
+`NmConnection` implements the `ResourcePublisher` and `ResourceSubscriber`
 boundary and injects it into `ResourcesManager`.
 
 ## Switching
 
-For MQTT connection types, `SelectTransport()` sends a write through
+For MQTT connection types, `SelectConnection()` sends a write through
 `ConfigManager`. The Config write handler is the single runtime switching
 path. It asks the MQTT control task to stop the old client and start the target
-profile. On connection, `NmTransport` restores subscriptions once and invokes
+profile. On connection, `NmConnection` restores subscriptions once and invokes
 the generic connected publication path.
 
 When a switch started from a connected MQTT profile reaches two non-transient
-broker transport errors before connecting, `NmTransport` rolls back to the
+broker connection errors before connecting, `NmConnection` rolls back to the
 previous profile and restores that persisted selection. A first-start failure
 has no known-good profile and enters `ERROR`. This bounded rollback is separate
 from the deferred `AUTO` policy.
 
-No scoring, simultaneous transports, topic-specific routing, message
+No scoring, simultaneous connections, topic-specific routing, message
 duplication, or new automatic failover policy is introduced here.
 
-## Transport subscriptions
+## Connection subscriptions
 
 All subscription intent is stored in one fixed 256-entry registry owned by
-`NmTransport`. Console, time synchronization, application, and Resource
+`NmConnection`. Console, time synchronization, application, and Resource
 subscriptions all enter through `Subscribe()`. The active implementation only
-executes the broker operation requested by `NmTransport`.
+executes the broker operation requested by `NmConnection`.
 
 ## Direct ESP WiFi
 

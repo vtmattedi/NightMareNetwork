@@ -27,6 +27,18 @@
 #ifndef NM_ENABLE_MQTT
 #define NM_ENABLE_MQTT 1
 #endif
+// Selectable NightMare connection profiles. NM_ENABLE_MQTT controls whether
+// the shared MQTT implementation is compiled; these flags control which
+// profiles NmConnection will accept. Defaults preserve existing builds.
+#ifndef NM_NETWORK_MQTT
+#define NM_NETWORK_MQTT NM_ENABLE_MQTT
+#endif
+#ifndef NM_NETWORK_LOCALMQTT
+#define NM_NETWORK_LOCALMQTT NM_ENABLE_MQTT
+#endif
+#ifndef NM_NETWORK_ESPNOW
+#define NM_NETWORK_ESPNOW 0
+#endif
 #ifndef NM_ENABLE_TELEMETRY
 #define NM_ENABLE_TELEMETRY 1
 #endif
@@ -153,6 +165,15 @@
 
 #if NM_ENABLE_MQTT && !NM_ENABLE_NETWORK
 #error "NM_ENABLE_MQTT requires NM_ENABLE_NETWORK"
+#endif
+#if NM_NETWORK_MQTT && !NM_ENABLE_MQTT
+#error "NM_NETWORK_MQTT requires NM_ENABLE_MQTT"
+#endif
+#if NM_NETWORK_LOCALMQTT && !NM_ENABLE_MQTT
+#error "NM_NETWORK_LOCALMQTT requires NM_ENABLE_MQTT"
+#endif
+#if (NM_NETWORK_MQTT || NM_NETWORK_LOCALMQTT || NM_NETWORK_ESPNOW) && !NM_ENABLE_NETWORK
+#error "NM_NETWORK_* connection profiles require NM_ENABLE_NETWORK"
 #endif
 #if NM_ENABLE_NETWORK && !NM_ENABLE_RESOURCES
 #error "NM_ENABLE_NETWORK requires NM_ENABLE_RESOURCES"

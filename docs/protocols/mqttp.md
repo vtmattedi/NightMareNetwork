@@ -71,7 +71,7 @@ payload:
 INFO SYSTEM
 ```
 
-The payload is parsed by the same `handleNightMareCommand()` implementation used by the other command transports.
+The payload is parsed by the same `handleNightMareCommand()` implementation used by the other command sources.
 
 All normal command grammar rules therefore apply:
 
@@ -262,7 +262,7 @@ Raw Resource Action MQTT still uses:
 
 and remains fire-and-forget.
 
-The `>` Resource-command adapter gives command transports a correlated path around **local** Resource execution. An MQTTP request such as:
+The `>` Resource-command adapter gives command sources a correlated path around **local** Resource execution. An MQTTP request such as:
 
 ```text
 > identify invoke {"mode":"blink"}

@@ -245,7 +245,7 @@ bool NetActionResource::dispatchInvoke(const String &payload)
     (void)payload;
 #endif
     // Invoking always means reaching the implementing device, so without a
-    // transport there is nothing to report success about.
+    // connection there is nothing to report success about.
     LOG_WARNING("NET", "Cannot invoke unbound action '%s' owned by '%s'",
                 name_.c_str(), ownerDevice_.deviceName.c_str());
     return false;

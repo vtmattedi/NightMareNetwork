@@ -15,7 +15,7 @@ constexpr uint8_t ConfigManifestVersion = 1;
 using ConfigChangeHandler = bool (*)(const String &key, const String &value);
 
 /// @brief Persistent registry, text ingress and declaration manifest for Config<T>.
-/// This manager owns no Config objects and has no transport role. Persistence
+/// This manager owns no Config objects and has no connection role. Persistence
 /// is backed by PersistentSettings after the explicit startup restore phase.
 class ConfigManager
 {

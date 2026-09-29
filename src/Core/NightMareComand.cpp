@@ -14,10 +14,10 @@
 #include "Telemetry.h"
 #endif
 #if NM_ENABLE_NETWORK
-#include <Network/NmTransportInternal.h>
+#include <Network/NmConnectionInternal.h>
 #endif
 #if NM_ENABLE_MQTT
-#include <Network/MQTT/NmMqttTransport.h>
+#include <Network/MQTT/NmMqttConnection.h>
 #endif
 #if NM_CONSOLE_BUILTINS
 #include <LittleFS.h>
@@ -138,7 +138,7 @@ bool ensureSize(const String &str, size_t maxLength, String &error)
 }
 
 /// @brief Every ASCII blank separates tokens, not just ' '. MQTT, HTTP, WS and TCP pass their
-/// payload straight through untrimmed, so a trailing \r or \n is routine on those transports.
+/// payload straight through untrimmed, so a trailing \r or \n is routine on those sources.
 static inline bool isTokenSeparator(char c)
 {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
@@ -310,7 +310,7 @@ NightMareMessage parseNightMareMessage2(const String &message)
         return msg;
     if (slot == 0)
     {
-        // Nothing but separators. Reachable from any transport that does not trim its payload,
+        // Nothing but separators. Reachable from any connection that does not trim its payload,
         // where a bare "\r\n" would otherwise parse "successfully" into an empty command.
         msg.valid = false;
         msg.error = "empty command";
@@ -394,10 +394,9 @@ static NightMareResults executeAdoptCommand(const String &newName, NightmareCont
 static void refreshIdentityDocuments()
 {
 #if NM_ENABLE_NETWORK
-    if (NightMare::GetTransportState() == NightMare::TransportState::CONNECTED)
+    if (NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED)
     {
-        NightMare::PublishDeviceText(
-            "status", NightMare::TransportDeviceStatusJson(true), true);
+        NightMare::PublishText(gDeviceIdentity.topic("status"), NightMare::ConnectionDeviceStatusJson(true), true);
 #if NM_ENABLE_TELEMETRY
         Telemetry.publishInfo(InfoType::INFO);
 #endif
@@ -925,57 +924,53 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             result.result = false;
         }
     }
-#if NM_ENABLE_NETWORK
-    else if (parsedMsg.command == "TRANSPORT")
+#if NM_ENABLE_NETWORK || NM_ENABLE_WIFI
+    else if (parsedMsg.command == "NETWORK")
     {
-        if (parsedMsg.subcommand == "SET")
+        if (false)
+        {
+        }
+#if NM_ENABLE_NETWORK
+        else if (parsedMsg.subcommand == "SET")
         {
             String requested = parsedMsg.args[1];
             requested.toUpperCase();
-            NightMare::TransportType transport = NightMare::TransportType::AUTO;
+            NightMare::ConnectionType connection = NightMare::ConnectionType::AUTO;
             bool known = true;
             if (requested == "MQTT")
-                transport = NightMare::TransportType::MQTT;
+                connection = NightMare::ConnectionType::MQTT;
             else if (requested == "LOCAL_MQTT")
-                transport = NightMare::TransportType::LOCAL_MQTT;
+                connection = NightMare::ConnectionType::LOCAL_MQTT;
             else if (requested == "ESP_NOW")
-                transport = NightMare::TransportType::ESP_NOW;
+                connection = NightMare::ConnectionType::ESP_NOW;
             else if (requested != "AUTO")
                 known = false;
-            result.result = known && NightMare::SelectTransport(transport);
-            result.response = result.result ? "Transport change started."
-                                            : "Transport unavailable or invalid.";
+            result.result = known && NightMare::SelectConnection(connection);
+            result.response = result.result ? "Connection change started."
+                                            : "Connection unavailable or invalid.";
         }
+#endif
         else if (parsedMsg.subcommand == "GET" ||
                  parsedMsg.subcommand == "STATE")
         {
             JsonDocument doc;
-            doc["selected"] = static_cast<uint8_t>(NightMare::GetSelectedTransport());
-            doc["preferred"] = NightMare::preferredTransport.value();
-            doc["state"] = static_cast<uint8_t>(NightMare::GetTransportState());
+#if NM_ENABLE_NETWORK
+            doc["selected"] = static_cast<uint8_t>(NightMare::GetSelectedConnection());
+            doc["preferred"] = NightMare::preferredConnection.value();
+            doc["state"] = static_cast<uint8_t>(NightMare::GetConnectionState());
+#endif
+#if NM_ENABLE_WIFI
+            const NightMare::WiFiStatus status = WiFi_status();
+            doc["wifi"] = static_cast<int>(status);
+            doc["wifi_name"] = WiFi_getStatusName(status);
+#endif
             serializeJson(doc, result.response);
             result.result = true;
         }
-        else
-        {
-            result.result = false;
-            result.response = "Unknown TRANSPORT subcommand available: [GET, SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>].";
-        }
-    }
-#endif
-
 #if NM_ENABLE_WIFI
-    else if (parsedMsg.command == "WIFI")
-    {
-        if (parsedMsg.subcommand == "IP")
+        else if (parsedMsg.subcommand == "IP")
         {
             result.response = WiFi_localIP();
-        }
-        else if (parsedMsg.subcommand == "STATE")
-        {
-            const NightMare::WiFiStatus status = WiFi_status();
-            result.response += "WiFi Status Code: " + String(static_cast<int>(status)) + " - ";
-            result.response += WiFi_getStatusName(status);
         }
         else if (parsedMsg.subcommand == "TXPOWER")
         {
@@ -1078,16 +1073,24 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 if (context.msgSource == NM_CMD_SRC_MQTT)
                 {
                     context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after reconnecting to MQTT with the new credentials
-                    NmMqttTransport::queueAsyncMessage(context.sourceIdentifier,
+                    NmMqttConnection::queueAsyncMessage(context.sourceIdentifier,
                                                        result.response, false, false);
                 };
 #endif
             }
         }
+#endif
         else
         {
-            result.response = "Unknown WIFI subcommand available: [IP, STATE, SCAN <-s|-start>, CHANGE <ssid> <password> [dBm|AUTO], TXPOWER [dBm|AUTO], RECONNECT].";
             result.result = false;
+            result.response = "Unknown NETWORK subcommand available: [GET"
+#if NM_ENABLE_NETWORK
+                              ", SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>"
+#endif
+#if NM_ENABLE_WIFI
+                              ", IP, SCAN <-s|-start>, CHANGE <ssid> <password> [dBm|AUTO], TXPOWER [dBm|AUTO], RECONNECT"
+#endif
+                              "].";
         }
     }
 #endif

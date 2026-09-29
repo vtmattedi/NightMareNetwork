@@ -65,7 +65,7 @@ The current MQTT ingress path performs automatic routing through
 Reconnect publication is narrower: it uses typed `SystemRequest` bits and the
 cooperative ESP tick to spread framework re-announcement across ticks.
 
-The intended longer-term architecture may introduce a central Runtime/queue so transport ingress is cleanly separated from application execution.
+The intended longer-term architecture may introduce a central Runtime/queue so connection ingress is cleanly separated from application execution.
 
 A general execution queue is not implemented and should not be assumed by
 application code. `SystemState` requests are a fixed framework publication
@@ -218,21 +218,21 @@ A callback-only Scheduler could theoretically operate without both dependencies,
 **Category:** Known implementation coupling.
 
 Automatic telemetry publication is implemented using Scheduler jobs and the
-active `NmTransport` publisher.
+active `NmConnection` publisher.
 
 The current compile-time feature rules therefore require both Scheduler and
 Network. MQTT is no longer a direct telemetry dependency.
 
 A future design could separate “build/query telemetry JSON” from “automatically publish telemetry,” but that split is not part of the current feature model.
 
-## ESP-NOW transport is declared but not implemented
+## ESP-NOW connection is declared but not implemented
 
 **Category:** Deferred design.
 
-`NmTransport`, lifecycle processing, Resource injection, and network telemetry
-are transport-neutral. `TransportType::ESP_NOW` is reserved so callers and
+`NmConnection`, lifecycle processing, Resource injection, and network telemetry
+are connection-neutral. `ConnectionType::ESP_NOW` is reserved so callers and
 telemetry do not need another enum change later, but selecting it currently
-returns false without disturbing the active transport. There is deliberately
+returns false without disturbing the active connection. There is deliberately
 no ESP-NOW driver in this architecture pass.
 
 ## WiFi/time/OTA remain ESP-oriented services

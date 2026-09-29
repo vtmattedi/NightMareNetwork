@@ -1,8 +1,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
 
-#include "NmTransport.h"
-#include "NmTransportInternal.h"
+#include "NmConnection.h"
+#include "NmConnectionInternal.h"
 
 #include <Core/ConfigManager.h>
 #include <Core/DeviceIdentity.h>
@@ -10,7 +10,7 @@
 #include <Core/ResourcesManager.h>
 #include <Network/NmMessageRouter.h>
 #if NM_ENABLE_MQTT
-#include <Network/MQTT/NmMqttTransport.h>
+#include <Network/MQTT/NmMqttConnection.h>
 #endif
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
@@ -18,8 +18,22 @@
 
 namespace NightMare
 {
-Config<int> preferredTransport("nightmare:connection:preferred_transport",
-                               static_cast<int>(TransportType::MQTT));
+namespace
+{
+constexpr ConnectionType defaultConnection()
+{
+#if NM_NETWORK_MQTT
+    return ConnectionType::MQTT;
+#elif NM_NETWORK_LOCALMQTT
+    return ConnectionType::LOCAL_MQTT;
+#else
+    return ConnectionType::AUTO;
+#endif
+}
+}
+
+Config<int> preferredConnection("nightmare:connection:preferred_connection",
+                               static_cast<int>(defaultConnection()));
 
 namespace
 {
@@ -29,8 +43,8 @@ namespace
 constexpr size_t MaxSubscriptions = 256;
 constexpr size_t MaxTopicFilterLength = 192;
 
-volatile TransportType selectedTransport = TransportType::AUTO;
-volatile TransportState transportState = TransportState::STOPPED;
+volatile ConnectionType selectedConnection = ConnectionType::AUTO;
+volatile ConnectionState connectionState = ConnectionState::STOPPED;
 struct Subscription
 {
     String filter;
@@ -39,14 +53,30 @@ struct Subscription
 Subscription subscriptions[MaxSubscriptions];
 SemaphoreHandle_t subscriptionMutex = nullptr;
 bool frameworkSubscriptionsRegistered = false;
-bool resourceTransportAttached = false;
-TransportType rollbackTransport = TransportType::AUTO;
+bool resourceConnectionAttached = false;
+ConnectionType rollbackConnection = ConnectionType::AUTO;
 bool rollbackAvailable = false;
 
-bool isMqtt(TransportType transport)
+bool isMqtt(ConnectionType connection)
 {
-    return transport == TransportType::MQTT ||
-           transport == TransportType::LOCAL_MQTT;
+    return connection == ConnectionType::MQTT ||
+           connection == ConnectionType::LOCAL_MQTT;
+}
+
+bool connectionEnabled(ConnectionType connection)
+{
+    switch (connection)
+    {
+    case ConnectionType::MQTT:
+        return NM_NETWORK_MQTT != 0;
+    case ConnectionType::LOCAL_MQTT:
+        return NM_NETWORK_LOCALMQTT != 0;
+    case ConnectionType::ESP_NOW:
+        return NM_NETWORK_ESPNOW != 0;
+    case ConnectionType::AUTO:
+        return false;
+    }
+    return false;
 }
 
 bool validTopicFilter(const char *topicFilter)
@@ -82,8 +112,8 @@ bool ensureSubscriptionMutex()
 bool driverSubscribe(const char *topicFilter)
 {
 #if NM_ENABLE_MQTT
-    return isMqtt(static_cast<TransportType>(selectedTransport)) &&
-           NmMqttTransport::subscribe(topicFilter);
+    return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
+           NmMqttConnection::subscribe(topicFilter);
 #else
     (void)topicFilter;
     return false;
@@ -93,15 +123,15 @@ bool driverSubscribe(const char *topicFilter)
 bool driverUnsubscribe(const char *topicFilter)
 {
 #if NM_ENABLE_MQTT
-    return isMqtt(static_cast<TransportType>(selectedTransport)) &&
-           NmMqttTransport::unsubscribe(topicFilter);
+    return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
+           NmMqttConnection::unsubscribe(topicFilter);
 #else
     (void)topicFilter;
     return false;
 #endif
 }
 
-class TransportResourceAdapter : public ResourcePublisher, public ResourceSubscriber
+class ConnectionResourceAdapter : public ResourcePublisher, public ResourceSubscriber
 {
 public:
     bool publish(const String &topic, const String &payload, bool retained) override
@@ -122,13 +152,13 @@ public:
     }
 };
 
-TransportResourceAdapter resourceAdapter;
+ConnectionResourceAdapter resourceAdapter;
 
-void attachResourceTransport()
+void attachResourceConnection()
 {
-    if (resourceTransportAttached)
+    if (resourceConnectionAttached)
         return;
-    resourceTransportAttached = true;
+    resourceConnectionAttached = true;
     gResourcesManager.setSubscriber(&resourceAdapter);
     gResourcesManager.setPublisher(&resourceAdapter);
 }
@@ -170,82 +200,82 @@ void restoreSubscriptions()
     xSemaphoreGive(subscriptionMutex);
 }
 
-bool startTransport(TransportType transport)
+bool startConnection(ConnectionType connection)
 {
-    if (!isMqtt(transport))
+    if (!connectionEnabled(connection) || !isMqtt(connection))
         return false;
 #if NM_ENABLE_MQTT
-    if (selectedTransport == transport &&
-        (transportState == TransportState::CONNECTING ||
-         transportState == TransportState::CONNECTED))
+    if (selectedConnection == connection &&
+        (connectionState == ConnectionState::CONNECTING ||
+         connectionState == ConnectionState::CONNECTED))
         return true;
 
-    attachResourceTransport();
+    attachResourceConnection();
     registerFrameworkSubscriptions();
 
-    const TransportType previousTransport = selectedTransport;
-    const TransportState previousState = transportState;
-    const TransportType previousRollbackTransport = rollbackTransport;
+    const ConnectionType previousConnection = selectedConnection;
+    const ConnectionState previousState = connectionState;
+    const ConnectionType previousRollbackConnection = rollbackConnection;
     const bool previousRollbackAvailable = rollbackAvailable;
-    rollbackAvailable = previousState == TransportState::CONNECTED &&
-                        isMqtt(previousTransport) && previousTransport != transport;
+    rollbackAvailable = previousState == ConnectionState::CONNECTED &&
+                        isMqtt(previousConnection) && previousConnection != connection;
     if (rollbackAvailable)
-        rollbackTransport = previousTransport;
-    selectedTransport = transport;
-    transportState = TransportState::CONNECTING;
+        rollbackConnection = previousConnection;
+    selectedConnection = connection;
+    connectionState = ConnectionState::CONNECTING;
 
-    const bool accepted = NmMqttTransport::state() == -1
-                              ? NmMqttTransport::begin(transport)
-                              : NmMqttTransport::changeTo(transport);
+    const bool accepted = NmMqttConnection::state() == -1
+                              ? NmMqttConnection::begin(connection)
+                              : NmMqttConnection::changeTo(connection);
     if (!accepted)
     {
-        selectedTransport = previousTransport;
-        transportState = previousState;
-        rollbackTransport = previousRollbackTransport;
+        selectedConnection = previousConnection;
+        connectionState = previousState;
+        rollbackConnection = previousRollbackConnection;
         rollbackAvailable = previousRollbackAvailable;
     }
     return accepted;
 #else
-    (void)transport;
+    (void)connection;
     return false;
 #endif
 }
 
-bool changePreferredTransport(Config<int> &, const int &requested)
+bool changePreferredConnection(Config<int> &, const int &requested)
 {
-    const TransportType transport = static_cast<TransportType>(requested);
-    return isMqtt(transport) && startTransport(transport);
+    const ConnectionType connection = static_cast<ConnectionType>(requested);
+    return connectionEnabled(connection) && startConnection(connection);
 }
 
-struct PreferredTransportHandlerInstaller
+struct PreferredConnectionHandlerInstaller
 {
-    PreferredTransportHandlerInstaller()
+    PreferredConnectionHandlerInstaller()
     {
-        preferredTransport.onWrite = changePreferredTransport;
+        preferredConnection.onWrite = changePreferredConnection;
     }
 };
 
-PreferredTransportHandlerInstaller preferredTransportHandlerInstaller;
+PreferredConnectionHandlerInstaller preferredConnectionHandlerInstaller;
 }
 
 bool Publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
 {
     if (topic == nullptr || topic[0] == '\0' ||
         (payload == nullptr && length != 0) ||
-        transportState != TransportState::CONNECTED)
+        connectionState != ConnectionState::CONNECTED)
         return false;
 
-    switch (selectedTransport)
+    switch (selectedConnection)
     {
-    case TransportType::MQTT:
-    case TransportType::LOCAL_MQTT:
+    case ConnectionType::MQTT:
+    case ConnectionType::LOCAL_MQTT:
 #if NM_ENABLE_MQTT
-        return NmMqttTransport::publish(topic, payload, length, retained);
+        return NmMqttConnection::publish(topic, payload, length, retained);
 #else
         return false;
 #endif
-    case TransportType::AUTO:
-    case TransportType::ESP_NOW:
+    case ConnectionType::AUTO:
+    case ConnectionType::ESP_NOW:
         return false;
     }
     return false;
@@ -281,7 +311,7 @@ bool Subscribe(const char *topicFilter)
         return false;
     }
 
-    if (transportState == TransportState::CONNECTED && !driverSubscribe(topicFilter))
+    if (connectionState == ConnectionState::CONNECTED && !driverSubscribe(topicFilter))
     {
         xSemaphoreGive(subscriptionMutex);
         return false;
@@ -319,7 +349,7 @@ bool Unsubscribe(const char *topicFilter)
         xSemaphoreGive(subscriptionMutex);
         return true;
     }
-    if (transportState == TransportState::CONNECTED && !driverUnsubscribe(topicFilter))
+    if (connectionState == ConnectionState::CONNECTED && !driverUnsubscribe(topicFilter))
     {
         xSemaphoreGive(subscriptionMutex);
         return false;
@@ -329,64 +359,64 @@ bool Unsubscribe(const char *topicFilter)
     return true;
 }
 
-bool SelectTransport(TransportType transport)
+bool SelectConnection(ConnectionType connection)
 {
-    if (!isMqtt(transport))
+    if (!connectionEnabled(connection))
         return false;
 
     String request = "set ";
-    request += preferredTransport.name();
+    request += preferredConnection.name();
     request += ' ';
-    request += String(static_cast<int>(transport));
+    request += String(static_cast<int>(connection));
     return configManager().handle(request) == "OK";
 }
 
-TransportType GetSelectedTransport()
+ConnectionType GetSelectedConnection()
 {
-    return static_cast<TransportType>(selectedTransport);
+    return static_cast<ConnectionType>(selectedConnection);
 }
 
-TransportState GetTransportState()
+ConnectionState GetConnectionState()
 {
-    return static_cast<TransportState>(transportState);
+    return static_cast<ConnectionState>(connectionState);
 }
 
-void TransportConnectedIngress(TransportType transport)
+void OnConnectedIngress(ConnectionType connection)
 {
-    if (transport != selectedTransport)
+    if (connection != selectedConnection)
         return;
-    transportState = TransportState::CONNECTED;
+    connectionState = ConnectionState::CONNECTED;
     rollbackAvailable = false;
     restoreSubscriptions();
     NmMessageRouter::onConnected();
 }
 
-void TransportDisconnectedIngress(TransportType transport)
+void OnDisconnectedIngress(ConnectionType connection)
 {
-    if (transport == selectedTransport && transportState != TransportState::STOPPED)
-        transportState = TransportState::CONNECTING;
+    if (connection == selectedConnection && connectionState != ConnectionState::STOPPED)
+        connectionState = ConnectionState::CONNECTING;
 }
 
-void TransportConnectionFailedIngress(TransportType transport)
+void OnConnectionFailedIngress(ConnectionType connection)
 {
-    if (transport != selectedTransport)
+    if (connection != selectedConnection)
         return;
 
     if (!rollbackAvailable)
     {
-        transportState = TransportState::ERROR;
+        connectionState = ConnectionState::ERROR;
         return;
     }
 
-    const TransportType fallback = rollbackTransport;
+    const ConnectionType fallback = rollbackConnection;
     rollbackAvailable = false;
     LOG_WARNING("NET", "Connection type %u failed; rolling back to %u",
-                static_cast<unsigned>(transport), static_cast<unsigned>(fallback));
+                static_cast<unsigned>(connection), static_cast<unsigned>(fallback));
 
-    if (!preferredTransport.set(static_cast<int>(fallback)))
-        LOG_ERROR("NET", "Could not persist the rollback transport");
-    if (!startTransport(fallback))
-        transportState = TransportState::ERROR;
+    if (!preferredConnection.set(static_cast<int>(fallback)))
+        LOG_ERROR("NET", "Could not persist the rollback connection");
+    if (!startConnection(fallback))
+        connectionState = ConnectionState::ERROR;
 }
 
 bool PublishText(const String &topic, const String &payload, bool retained)
@@ -396,12 +426,7 @@ bool PublishText(const String &topic, const String &payload, bool retained)
                    payload.length(), retained);
 }
 
-bool PublishDeviceText(const String &topic, const String &payload, bool retained)
-{
-    return PublishText(gDeviceIdentity.topic(topic), payload, retained);
-}
-
-String TransportDeviceStatusJson(const String &deviceName, bool online)
+String ConnectionDeviceStatusJson(const String &deviceName, bool online)
 {
     JsonDocument doc;
     doc["name"] = deviceName;
@@ -413,9 +438,9 @@ String TransportDeviceStatusJson(const String &deviceName, bool online)
     return payload;
 }
 
-String TransportDeviceStatusJson(bool online)
+String ConnectionDeviceStatusJson(bool online)
 {
-    return TransportDeviceStatusJson(gDeviceIdentity.getDeviceName(), online);
+    return ConnectionDeviceStatusJson(gDeviceIdentity.getDeviceName(), online);
 }
 }
 

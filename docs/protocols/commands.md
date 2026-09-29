@@ -1,13 +1,13 @@
 ---
 title: Commands
-description: NightMare command grammar, transports, built-ins, and USER Scheduler jobs.
+description: NightMare command grammar, sources, built-ins, and USER Scheduler jobs.
 section: protocols
 order: 40
 ---
 
 # Commands
 
-NightMare has one text command grammar that can be executed from different transports.
+NightMare has one text command grammar that can be executed from different sources.
 
 The parser and built-in command handler are shared. A command behaves as the same command whether it came from serial, MQTT console, controlled MQTT request/response, an HTTP endpoint, or a Scheduler String job.
 
@@ -256,7 +256,7 @@ message too long
 
 They do not silently fall through as unknown commands.
 
-## Transports
+## Command sources
 
 The same command handler is used by several sources.
 
@@ -343,8 +343,8 @@ HW
 MQTT
     requires NM_ENABLE_MQTT
 
-WIFI
-    requires NM_ENABLE_WIFI
+NETWORK
+    requires NM_ENABLE_NETWORK or NM_ENABLE_WIFI
 
 HTTPSERVER
     requires NM_ENABLE_HTTP
@@ -570,7 +570,7 @@ JOB AFTER <label> <delay_ms> "<command>"
 Example:
 
 ```text
-JOB AFTER reconnect 5000 "TRANSPORT SET MQTT"
+JOB AFTER reconnect 5000 "NETWORK SET MQTT"
 ```
 
 ### Repeat
@@ -632,28 +632,108 @@ are runtime-only.
 
 See the Scheduler module documentation for the full job model.
 
-## TRANSPORT
+## NETWORK
 
-Available when Network support is enabled. It selects the same enum integer
-stored by `preferredTransport`.
+Selects the connection and manages the WiFi link. `GET`/`STATE` and `SET` need
+Network support; the WiFi subcommands need WiFi support. `SET` selects the same
+enum integer stored by `preferredConnection`.
 
 ```text
-TRANSPORT GET
-TRANSPORT STATE
-TRANSPORT SET MQTT
-TRANSPORT SET LOCAL_MQTT
-TRANSPORT SET ESP_NOW
-TRANSPORT SET AUTO
+NETWORK GET
+NETWORK STATE
+NETWORK SET MQTT
+NETWORK SET LOCAL_MQTT
+NETWORK SET ESP_NOW
+NETWORK SET AUTO
 ```
 
-`GET` and `STATE` return enum integers for selected, preferred, and state.
+`GET` and `STATE` are identical. They return JSON with the enum integers
+`selected`, `preferred` and `state` (Network support) and the WiFi driver status
+code and readable name as `wifi` and `wifi_name` (WiFi support).
 `MQTT` selects Remote MQTT/TLS. `LOCAL_MQTT` selects the local broker.
 `ESP_NOW` and `AUTO` currently return an unavailable error without stopping the
 active MQTT connection; their implementations are deliberately deferred.
 
-The former `MQTT STATE`, `MQTT CONNECT`, `MQTT DISCONNECT`, and `MQTT SWAP`
-commands were removed. Connection selection and state now have one command
-surface.
+The former `TRANSPORT`, `WIFI`, `MQTT STATE`, `MQTT CONNECT`, `MQTT DISCONNECT`
+and `MQTT SWAP` commands were removed. Connection selection, state and WiFi
+control now have one command surface.
+
+### WiFi
+
+Available when WiFi support is enabled.
+
+#### IP
+
+```text
+NETWORK IP
+```
+
+#### Scan
+
+Start an asynchronous scan:
+
+```text
+NETWORK SCAN -s
+NETWORK SCAN start
+```
+
+Read scan state/results:
+
+```text
+NETWORK SCAN
+```
+
+The JSON response uses a `control` field:
+
+```text
+scan_started
+scan_start_failed
+scan_in_progress
+scan_done
+```
+
+When done, `networks` entries contain:
+
+```text
+ssid
+rssi
+mac
+channel
+encryptionType
+```
+
+#### Change credentials
+
+```text
+NETWORK CHANGE <ssid> <password> [dBm|AUTO]
+```
+
+Quote arguments containing spaces. The optional last argument sets the TX power; omitted, the stored power is kept.
+
+The implementation attempts the new connection (SSID, password and TX power together) before persisting anything, in a single write, and falls back to the previous profile if the change fails.
+
+#### TX power
+
+```text
+NETWORK TXPOWER
+NETWORK TXPOWER <dBm|AUTO>
+```
+
+With no argument, reports the live and configured power. `AUTO` means the library never sets the TX power and the driver default applies. Otherwise the value must be an exact driver level: `-1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5` dBm. Anything else is rejected, not rounded. The change reconnects and is persisted only if the connection succeeds; otherwise the previous profile is restored.
+
+#### Reconnect
+
+```text
+NETWORK RECONNECT
+```
+
+The command currently returns:
+
+```text
+not implemented yet
+```
+
+It is present in the command grammar but is not an implemented reconnect operation.
 
 ## CONFIG
 
@@ -774,92 +854,6 @@ FS FORMAT -p
 
 One failure string in the current implementation still says `FS FORMAT CONFIRM`; that message does not match the actual argument check and should be treated as stale text rather than protocol syntax.
 
-## WIFI
-
-Available when WiFi support is enabled.
-
-### IP
-
-```text
-WIFI IP
-```
-
-### State
-
-```text
-WIFI STATE
-```
-
-Returns the current NightMare WiFi-driver status code plus a readable state
-name.
-
-### Scan
-
-Start an asynchronous scan:
-
-```text
-WIFI SCAN -s
-WIFI SCAN start
-```
-
-Read scan state/results:
-
-```text
-WIFI SCAN
-```
-
-The JSON response uses a `control` field:
-
-```text
-scan_started
-scan_start_failed
-scan_in_progress
-scan_done
-```
-
-When done, `networks` entries contain:
-
-```text
-ssid
-rssi
-mac
-channel
-encryptionType
-```
-
-### Change credentials
-
-```text
-WIFI CHANGE <ssid> <password> [dBm|AUTO]
-```
-
-Quote arguments containing spaces. The optional last argument sets the TX power; omitted, the stored power is kept.
-
-The implementation attempts the new connection (SSID, password and TX power together) before persisting anything, in a single write, and falls back to the previous profile if the change fails.
-
-### TX power
-
-```text
-WIFI TXPOWER
-WIFI TXPOWER <dBm|AUTO>
-```
-
-With no argument, reports the live and configured power. `AUTO` means the library never sets the TX power and the driver default applies. Otherwise the value must be an exact driver level: `-1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5` dBm. Anything else is rejected, not rounded. The change reconnects and is persisted only if the connection succeeds; otherwise the previous profile is restored.
-
-### Reconnect
-
-```text
-WIFI RECONNECT
-```
-
-The command currently returns:
-
-```text
-not implemented yet
-```
-
-It is present in the command grammar but is not an implemented reconnect operation.
-
 ## Optional HTTPSERVER commands
 
 Only present when HTTP is compiled in.
@@ -909,7 +903,7 @@ INFO
 TIME
 JOB
 MQTT
-WIFI
+NETWORK
 CONFIG
 ```
 
@@ -923,4 +917,4 @@ run_cycle
 
 A Resource Action remains discoverable through the Resource manifest and belongs to the device's application contract.
 
-The `>` syntax is a bridge between command transports and already-bound Resources; it does not redefine a Resource Action as a command family.
+The `>` syntax is a bridge between command sources and already-bound Resources; it does not redefine a Resource Action as a command family.

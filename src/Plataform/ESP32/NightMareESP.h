@@ -28,7 +28,7 @@ void startNightMareESP();
 
 /// @brief The framework's cooperative service point: processes at most one
 /// pending framework publication, ticks the Scheduler when nothing else does
-/// (MANUAL mode), and reads the serial console when enabled. MQTT transport,
+/// (MANUAL mode), and reads the serial console when enabled. MQTT connection,
 /// WiFi, OTA, and a task-owned Scheduler are not polled here.
 void tickNightMareESP();
 

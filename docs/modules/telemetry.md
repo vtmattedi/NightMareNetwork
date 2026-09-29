@@ -204,9 +204,9 @@ wifi_connected
 ip
 rssi_dbm
 tx_power_dbm
-transport
-transport_connected
-transport_state
+connection
+connected
+connection_state
 mqtt_connected
 broker
 ```
@@ -215,7 +215,7 @@ broker
 
 If WiFi support is disabled, WiFi-specific fields are omitted.
 
-`transport` is one of:
+`connection` is one of:
 
 ```text
 auto
@@ -224,10 +224,10 @@ local_mqtt
 esp_now
 ```
 
-`auto` is reported only while no concrete transport is active. `transport_state`
-is the integer value of `TransportState`. MQTT-specific
+`auto` is reported only while no concrete connection is active. `connection_state`
+is the integer value of `ConnectionState`. MQTT-specific
 `mqtt_connected` and `broker` fields are included only while the selected
-transport is Local or Remote MQTT. This lets the same network document describe
+connection is Local or Remote MQTT. This lets the same network document describe
 an ESP-NOW connection once that driver is implemented without pretending it is
 MQTT.
 

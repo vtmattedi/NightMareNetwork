@@ -8,7 +8,8 @@
 
 namespace NightMare
 {
-enum class TransportType : uint8_t
+// Final public and persisted name. Values are stable configuration/wire IDs.
+enum class ConnectionType : uint8_t
 {
     AUTO = 0,
     MQTT,
@@ -16,7 +17,7 @@ enum class TransportType : uint8_t
     ESP_NOW
 };
 
-enum class TransportState : uint8_t
+enum class ConnectionState : uint8_t
 {
     STOPPED,
     DISCOVERING,
@@ -25,17 +26,17 @@ enum class TransportState : uint8_t
     ERROR
 };
 
-extern Config<int> preferredTransport;
+extern Config<int> preferredConnection;
 
 bool Publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
 
-bool SelectTransport(TransportType transport);
+bool SelectConnection(ConnectionType connection);
 
-TransportType GetSelectedTransport();
-TransportState GetTransportState();
+ConnectionType GetSelectedConnection();
+ConnectionState GetConnectionState();
 }
 
 #endif // NM_ENABLE_NETWORK

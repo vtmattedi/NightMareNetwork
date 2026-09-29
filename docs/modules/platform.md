@@ -199,7 +199,7 @@ CONSOLE_SERIAL
     -> CONSOLE
 ```
 
-The cooperative deferred-publication processor checks `NmTransport` readiness,
+The cooperative deferred-publication processor checks `NmConnection` readiness,
 not MQTT readiness. ESP-NOW-only operation still waits for an ESP-NOW driver,
 but the standard lifecycle no longer has an MQTT-specific check.
 
@@ -455,13 +455,13 @@ Specifically:
 
 ```cpp
 initOTA();
-NightMare::SelectTransport(configuredTransport);
+NightMare::SelectConnection(configuredConnection);
 startSntpTimeSync();
 ```
 
 according to feature flags.
 
-The initial concrete transport comes from `preferredTransport`, whose current
+The initial concrete connection comes from `preferredConnection`, whose current
 default is Remote MQTT. `AUTO` policy is intentionally deferred.
 
 `startSntpTimeSync()` configures the ESP32 SNTP client and returns immediately. Completion is applied later through `tickNightMareESP()`.
@@ -505,7 +505,7 @@ does the following:
 
 The private storage keys should not be manipulated directly by applications.
 
-## MQTT platform transport
+## MQTT platform connection
 
 The ESP MQTT implementation uses:
 
@@ -624,7 +624,7 @@ Resource model
 DeviceIdentity state
 Scheduler model
 Telemetry model
-NmTransport vs NmMqttTransport vs ESP MQTT driver
+NmConnection vs NmMqttConnection vs ESP MQTT driver
 ```
 
 but the complete library is not yet portable beyond ESP32.

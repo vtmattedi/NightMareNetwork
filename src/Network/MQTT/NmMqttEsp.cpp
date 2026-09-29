@@ -1,7 +1,7 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
 #include "NmMqttEsp.h"
-#include <Network/NmTransportInternal.h>
+#include <Network/NmConnectionInternal.h>
 
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
@@ -123,10 +123,10 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
             if (err == EAGAIN || err == EWOULDBLOCK || err == ENOMEM)
                 break;
         }
-        // The selected connection type is owned by NmTransport. ESP-IDF may
+        // The selected connection type is owned by NmConnection. ESP-IDF may
         // reconnect this broker, but the driver must never silently swap to
         // the other MQTT profile.
-        LOG_WARNING("MQTT", "Broker transport error; retaining selected profile");
+        LOG_WARNING("MQTT", "Broker connection error; retaining selected profile");
         if (onError != nullptr)
             onError(lanBroker);
         break;
@@ -141,7 +141,7 @@ bool startClient(bool useLan)
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
     snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
-    const String offlineStatus = NightMare::TransportDeviceStatusJson(false);
+    const String offlineStatus = NightMare::ConnectionDeviceStatusJson(false);
     if (offlineStatus.length() >= sizeof(willMessage))
     {
         // Cannot happen with a valid name, but a cut-off JSON last will would be

@@ -55,7 +55,7 @@ struct NetDeviceIdentity
  *   ResourcesManager / MQTT   String
  *
  * NetResource, NetValueResource and NetActionResource are non-template on
- * purpose: routing, manifests, subscriptions and the transport never see T.
+ * purpose: routing, manifests, subscriptions and the connection never see T.
  *
  *   NetResource
  *   |- NetValueResource            non-template boundary
@@ -360,7 +360,7 @@ protected:
     bool setManagedAdvertisementEnabled(bool enabled);
     bool setManagedAdvertisementPeriod(uint32_t seconds);
 
-    // Type-erasure boundary. These are the only value operations the transport
+    // Type-erasure boundary. These are the only value operations the connection
     // layer needs, and all three speak the encoded wire format.
 private:
     AccessPolicy access_ = AccessPolicy::READ;
@@ -835,7 +835,7 @@ public:
     bool clearSource() { return this->clearRemoteSource(); }
 
     /// @brief Application intent. True means the invocation was accepted for
-    /// transport, not that the remote action ran or succeeded; use the
+    /// connection, not that the remote action ran or succeeded; use the
     /// controlled console or MQTTP path when the result matters. Fails when
     /// unbound, because nothing was sent.
     bool invoke(const String &payload = String()) { return dispatchInvoke(payload); }

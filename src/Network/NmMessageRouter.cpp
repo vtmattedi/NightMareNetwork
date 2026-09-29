@@ -1,8 +1,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
 #include "NmMessageRouter.h"
-#include "NmTransport.h"
-#include "NmTransportInternal.h"
+#include "NmConnection.h"
+#include "NmConnectionInternal.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -84,10 +84,10 @@ void onConnected()
 #if NM_ENABLE_TELEMETRY
     SystemState.request(SystemRequest::PublishInfo);
     SystemState.request(SystemRequest::PublishHardwareJson);
+    SystemState.request(SystemRequest::PublishTelemetry);
 #endif
 #if NM_ENABLE_CONSOLE
-    NightMare::PublishDeviceText(
-        "console/out", firstConnection ? "Booted" : "Connected");
+    NightMare::PublishText(gDeviceIdentity.topic("console/out"), firstConnection ? "Booted" : "Connected");
 #endif
 #if NM_ENABLE_TIME_SYNC
     if (!NightMare::Time::valid())

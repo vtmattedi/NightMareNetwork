@@ -159,7 +159,7 @@ Do not include `mqtt://` in `LOCAL_MQTT_HOST`.
 
 Do not include `mqtts://` in `REMOTE_MQTT_URL`.
 
-The transport builds those URI schemes itself.
+The connection builds those URI schemes itself.
 
 Remote MQTT uses TLS and `ROOT_CA`.
 
@@ -524,7 +524,7 @@ Request a change:
 ```cpp
 if (!bedroomPower.setValue(true))
 {
-    Serial.println("write was not accepted for transport");
+    Serial.println("write was not accepted for connection");
 }
 ```
 
@@ -561,7 +561,7 @@ Invoke:
 bool sent = identifyRemote.invoke();
 ```
 
-`true` means the request was accepted for transport.
+`true` means the request was accepted for connection.
 
 It is not a remote execution acknowledgement.
 
@@ -622,7 +622,7 @@ INFO ...
 TIME
 JOB ...
 MQTT ...
-WIFI ...
+NETWORK ...
 CONFIG ...
 > ...
 ```

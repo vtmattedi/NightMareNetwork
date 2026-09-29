@@ -11,7 +11,7 @@
 #include <ArduinoJson.h>
 
 #if NM_ENABLE_NETWORK
-#include <Network/NmTransport.h>
+#include <Network/NmConnection.h>
 #endif
 #if NM_ENABLE_WIFI
 #include <Network/WiFi/NmWifiEsp.h>

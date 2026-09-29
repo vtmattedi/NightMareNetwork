@@ -20,7 +20,7 @@
 #include <Core/ResourcesManager.h>
 #endif
 #if NM_ENABLE_NETWORK
-#include <Network/NmTransport.h>
+#include <Network/NmConnection.h>
 #endif
 #if NM_ENABLE_CONSOLE
 #include <Core/NightMareCommand.h>

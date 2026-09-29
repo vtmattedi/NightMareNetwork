@@ -1787,7 +1787,7 @@ bool ResourcesManager::setValue(NetValueResource &resource, const String &encode
 
     if (!resource.isOwned())
     {
-        // A remote write only counts once the transport took it; otherwise the
+        // A remote write only counts once the connection took it; otherwise the
         // caller would start an optimistic window over a request nobody sent.
         if (resource.access_ != AccessPolicy::READ_WRITE || publisher_ == nullptr ||
             !hasResolvedSource(resource))
