@@ -35,6 +35,11 @@ bool Unsubscribe(const char *topicFilter);
 
 bool SelectConnection(ConnectionType connection);
 
+// Starts the preferred connection if it does not depend on a Wi-Fi link
+// (ESP-NOW). Broker connections keep waiting for the link. Called by
+// startNightMareESP(); safe to call again.
+bool ConnectionBegin();
+
 ConnectionType GetSelectedConnection();
 ConnectionState GetConnectionState();
 }

@@ -12,6 +12,9 @@
 #if NM_ENABLE_MQTT
 #include <Network/MQTT/NmMqttConnection.h>
 #endif
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
+#endif
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -26,6 +29,8 @@ constexpr ConnectionType defaultConnection()
     return ConnectionType::MQTT;
 #elif NM_NETWORK_LOCALMQTT
     return ConnectionType::LOCAL_MQTT;
+#elif NM_NETWORK_ESPNOW
+    return ConnectionType::ESP_NOW;
 #else
     return ConnectionType::AUTO;
 #endif
@@ -112,6 +117,10 @@ bool ensureSubscriptionMutex()
 
 bool driverSubscribe(const char *topicFilter)
 {
+#if NM_NETWORK_ESPNOW
+    if (selectedConnection == ConnectionType::ESP_NOW)
+        return NmEspNowConnection::subscribe(topicFilter);
+#endif
 #if NM_ENABLE_MQTT
     return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
            NmMqttConnection::subscribe(topicFilter);
@@ -123,6 +132,10 @@ bool driverSubscribe(const char *topicFilter)
 
 bool driverUnsubscribe(const char *topicFilter)
 {
+#if NM_NETWORK_ESPNOW
+    if (selectedConnection == ConnectionType::ESP_NOW)
+        return NmEspNowConnection::unsubscribe(topicFilter);
+#endif
 #if NM_ENABLE_MQTT
     return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
            NmMqttConnection::unsubscribe(topicFilter);
@@ -201,9 +214,47 @@ void restoreSubscriptions()
     xSemaphoreGive(subscriptionMutex);
 }
 
+#if NM_NETWORK_ESPNOW
+bool startEspNow()
+{
+    if (selectedConnection == ConnectionType::ESP_NOW &&
+        (connectionState == ConnectionState::CONNECTING ||
+         connectionState == ConnectionState::CONNECTED))
+        return true;
+
+    attachResourceConnection();
+    registerFrameworkSubscriptions();
+
+    const ConnectionType previousConnection = selectedConnection;
+    const ConnectionState previousState = connectionState;
+#if NM_ENABLE_MQTT
+    // One connection at a time: stop the MQTT client before ESP-NOW takes over.
+    if (isMqtt(previousConnection) && NmMqttConnection::state() != -1)
+        NmMqttConnection::end();
+#endif
+    // No rollback across drivers: a failed ESP-NOW start is reported as ERROR.
+    rollbackAvailable = false;
+    selectedConnection = ConnectionType::ESP_NOW;
+    connectionState = ConnectionState::CONNECTING;
+    if (NmEspNowConnection::begin())
+        return true;
+    selectedConnection = previousConnection;
+    connectionState = previousState;
+    return false;
+}
+#endif
+
 bool startConnection(ConnectionType connection)
 {
-    if (!connectionEnabled(connection) || !isMqtt(connection))
+    if (!connectionEnabled(connection))
+        return false;
+#if NM_NETWORK_ESPNOW
+    if (connection == ConnectionType::ESP_NOW)
+        return startEspNow();
+    if (NmEspNowConnection::running())
+        NmEspNowConnection::end();
+#endif
+    if (!isMqtt(connection))
         return false;
 #if NM_ENABLE_MQTT
     if (selectedConnection == connection &&
@@ -286,8 +337,13 @@ bool Publish(const char *topic, const uint8_t *payload, size_t length, bool reta
 #else
         return false;
 #endif
-    case ConnectionType::AUTO:
     case ConnectionType::ESP_NOW:
+#if NM_NETWORK_ESPNOW
+        return NmEspNowConnection::publish(topic, payload, length, retained);
+#else
+        return false;
+#endif
+    case ConnectionType::AUTO:
         return false;
     }
     return false;
@@ -429,6 +485,21 @@ void OnConnectionFailedIngress(ConnectionType connection)
         LOG_ERROR("NET", "Could not persist the rollback connection");
     if (!startConnection(fallback))
         connectionState = ConnectionState::ERROR;
+}
+
+bool ConnectionBegin()
+{
+    if (connectionState != ConnectionState::STOPPED && connectionState != ConnectionState::ERROR)
+        return true;
+    ConnectionType wanted = static_cast<ConnectionType>(preferredConnection.value());
+    if (!connectionEnabled(wanted))
+        wanted = defaultConnection();
+    if (wanted != ConnectionType::ESP_NOW || !connectionEnabled(wanted))
+        return false;
+    const bool started = startConnection(wanted);
+    if (!started)
+        LOG_ERROR("NET", "Could not start ESP-NOW");
+    return started;
 }
 
 void OnLinkAvailabilityIngress(bool available)

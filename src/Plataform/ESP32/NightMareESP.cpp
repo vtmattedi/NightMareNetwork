@@ -261,6 +261,10 @@ void startNightMareESP()
 #if NM_ENABLE_WIFI && NM_WIFI_AUTO
     NightMare::WiFiBegin();
 #endif
+#if NM_ENABLE_NETWORK
+    // ESP-NOW needs the Wi-Fi radio started, not an association, so it does not wait for the link.
+    NightMare::ConnectionBegin();
+#endif
 }
 
 void tickNightMareESP()

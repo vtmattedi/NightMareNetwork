@@ -28,6 +28,10 @@ struct Settings
 {
     uint32_t heartbeatMs = 30000; // must stay well under the gateway's 300 s timeout
     uint8_t missedBeforeLost = 3; // unanswered heartbeats before CONNECTED -> SEARCHING
+    // Radio channel to search on while the station is NOT associated to an AP
+    // (an associated station is pinned to its AP's channel and is left alone).
+    // 0 hops through channels 1..13 until a gateway answers, then stays on it.
+    uint8_t channel = 0;
 };
 
 using StateCallback = void (*)(State state);
