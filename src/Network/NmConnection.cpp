@@ -65,6 +65,50 @@ bool ipLinkAvailable = false;
 ConnectionType rollbackConnection = ConnectionType::AUTO;
 bool rollbackAvailable = false;
 
+// PublishTextWhenConnected() backlog, flushed on every connect whatever the
+// connection. Guarded by deferredMutex.
+constexpr size_t DeferredCapacity = 5;
+struct DeferredMessage
+{
+    bool active = false;
+    String topic;
+    String payload;
+    bool retained = false;
+};
+DeferredMessage deferred[DeferredCapacity];
+SemaphoreHandle_t deferredMutex = nullptr;
+
+bool ensureDeferredMutex()
+{
+    if (deferredMutex == nullptr)
+        deferredMutex = xSemaphoreCreateMutex();
+    return deferredMutex != nullptr;
+}
+
+void flushDeferred()
+{
+    if (deferredMutex == nullptr)
+        return;
+    for (size_t i = 0; i < DeferredCapacity; ++i)
+    {
+        xSemaphoreTake(deferredMutex, portMAX_DELAY);
+        if (!deferred[i].active)
+        {
+            xSemaphoreGive(deferredMutex);
+            continue;
+        }
+        const DeferredMessage message = deferred[i];
+        xSemaphoreGive(deferredMutex);
+
+        if (!PublishText(message.topic, message.payload, message.retained))
+            return; // still not deliverable; the next connect tries again
+
+        xSemaphoreTake(deferredMutex, portMAX_DELAY);
+        deferred[i] = DeferredMessage();
+        xSemaphoreGive(deferredMutex);
+    }
+}
+
 bool isMqtt(ConnectionType connection)
 {
     return connection == ConnectionType::MQTT ||
@@ -506,6 +550,7 @@ void OnConnectedIngress(ConnectionType connection)
     rollbackAvailable = false;
     restoreSubscriptions();
     NmMessageRouter::onConnected();
+    flushDeferred();
 }
 
 void OnDisconnectedIngress(ConnectionType connection)
@@ -593,6 +638,29 @@ bool PublishText(const String &topic, const String &payload, bool retained)
     return Publish(topic.c_str(),
                    reinterpret_cast<const uint8_t *>(payload.c_str()),
                    payload.length(), retained);
+}
+
+bool PublishTextWhenConnected(const String &topic, const String &payload, bool retained)
+{
+    if (PublishText(topic, payload, retained))
+        return true;
+    if (!ensureDeferredMutex())
+        return false;
+
+    xSemaphoreTake(deferredMutex, portMAX_DELAY);
+    for (DeferredMessage &slot : deferred)
+    {
+        if (slot.active)
+            continue;
+        slot.topic = topic;
+        slot.payload = payload;
+        slot.retained = retained;
+        slot.active = true;
+        xSemaphoreGive(deferredMutex);
+        return true;
+    }
+    xSemaphoreGive(deferredMutex);
+    return false;
 }
 
 String ConnectionDeviceStatusJson(const String &deviceName, bool online)

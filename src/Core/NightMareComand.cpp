@@ -16,9 +16,6 @@
 #if NM_ENABLE_NETWORK
 #include <Network/NmConnectionInternal.h>
 #endif
-#if NM_ENABLE_MQTT
-#include <Network/MQTT/NmMqttConnection.h>
-#endif
 #if NM_CONSOLE_BUILTINS
 #include <LittleFS.h>
 #endif
@@ -659,7 +656,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             result.response = hardware.valid ? hardware.data : "Could not serialize hardware configuration.";
             return result;
         }
-        result.response = result.result ? "Republished to MQTT." : "Hardware publish failed.";
+        result.response = result.result ? "Republished." : "Hardware publish failed.";
         return result;
     }
 
@@ -1071,13 +1068,17 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 bool changeResult = NightMare::WiFiApplyProfile(profile);
                 result.response = String("WiFi credentials change ") +
                                   (changeResult ? "successful." : "failed.");
-#if NM_ENABLE_MQTT
-                if (context.msgSource == NM_CMD_SRC_MQTT)
+#if NM_ENABLE_NETWORK
+                // The change may drop whichever connection carried the command
+                // (MQTT loses its IP link, ESP-NOW may follow the AP to another
+                // channel), so the reply waits for the next connect if needed.
+                if (context.msgSource == NM_CMD_SRC_MQTT ||
+                    context.msgSource == NM_CMD_SRC_ESPNOW)
                 {
-                    context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND; // Do not respond immediately, will respond after reconnecting to MQTT with the new credentials
-                    NmMqttConnection::queueAsyncMessage(context.sourceIdentifier,
-                                                       result.response, false, false);
-                };
+                    context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND;
+                    NightMare::PublishTextWhenConnected(context.sourceIdentifier,
+                                                        result.response, false);
+                }
 #endif
             }
         }

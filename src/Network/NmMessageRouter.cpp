@@ -37,9 +37,18 @@ bool validControlId(const String &id)
     return true;
 }
 
+// Console topics reach this router from whichever connection is active, so
+// the source says which one -- not always MQTT.
+CommandSource activeSource()
+{
+    return NightMare::GetSelectedConnection() == NightMare::ConnectionType::ESP_NOW
+               ? NM_CMD_SRC_ESPNOW
+               : NM_CMD_SRC_MQTT;
+}
+
 void runCommand(const String &payload, const String &replyTopic)
 {
-    NightmareContext context(NM_CMD_SRC_MQTT, replyTopic);
+    NightmareContext context(activeSource(), replyTopic);
     NightMareResults result = handleNightMareCommand(payload, context);
     if (result.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
         NightMare::PublishText(replyTopic, result.response, false);

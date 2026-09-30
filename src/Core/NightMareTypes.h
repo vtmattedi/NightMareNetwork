@@ -9,6 +9,7 @@ enum CommandSource
     NM_CMD_SRC_HTTP = 3,
     NM_CMD_SRC_WEBSOCKET = 4,
     NM_CMD_SRC_JOB = 5,
+    NM_CMD_SRC_ESPNOW = 6, // console topic delivered by the ESP-NOW gateway
     NM_CMD_ANS_DO_NOT_RESPOND = 0xFF
 };
 
@@ -18,7 +19,7 @@ enum CommandSource
 /// @param userContext An optional pointer to user-defined context (e.g., client object).
 struct NightmareContext
 {
-    CommandSource msgSource; // 0 = unknown, 1 = MQTT, 2 = Serial, 3 = HTTP, 4 = Websocket, 0xFF = Do not respond
+    CommandSource msgSource; // 0 = unknown, 1 = MQTT, 2 = Serial, 3 = HTTP, 4 = Websocket, 5 = Job, 6 = ESP-NOW, 0xFF = Do not respond
     String sourceIdentifier; // e.g. MQTT topic, Serial port, HTTP endpoint, Websocket ID
     void *userContext;       // Optional pointer for user-defined context (e.g. client object)
 

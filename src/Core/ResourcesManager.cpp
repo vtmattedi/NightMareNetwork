@@ -2085,7 +2085,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
             if (explicitPublish && formatArgument.length() == 0)
             {
                 const bool published = publishManifest();
-                return {published, published ? String("Republished to MQTT.")
+                return {published, published ? String("Republished.")
                                              : String("Manifest publish failed.")};
             }
 
@@ -2096,7 +2096,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
             if (explicitPublish || format == ManifestFormat::MSGPACK)
             {
                 const bool published = publishManifest(format);
-                return {published, published ? String("Republished to MQTT.")
+                return {published, published ? String("Republished.")
                                              : String("Manifest publish failed.")};
             }
 

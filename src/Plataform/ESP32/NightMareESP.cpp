@@ -37,6 +37,16 @@ namespace
         bool scheduled = false;
     };
 
+    const char *SystemRequestNames[] = {
+        "PublishStatus",
+        "PublishManifest",
+        "PublishConsumeManifest",
+        "PublishResourceStates",
+        "PublishInfo",
+        "PublishHardwareJson",
+        "PublishTelemetry",
+        "Count"};
+
     RequestRetry requestRetries[SystemRequestCount];
 
     bool retryReady(const RequestRetry &retry, uint32_t now)
@@ -64,28 +74,32 @@ namespace
             return false;
 #endif
 
+        // These publish through NmConnection, whichever connection is active --
+        // MQTT or ESP-NOW -- so they depend on NM_ENABLE_NETWORK, not the MQTT
+        // driver. Guarded on NM_ENABLE_MQTT they returned "done" without
+        // publishing on an ESP-NOW-only build: no status, no consume manifest.
         switch (request)
         {
         case SystemRequest::PublishStatus:
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
             return NightMare::PublishText(gDeviceIdentity.topic("status"), NightMare::ConnectionDeviceStatusJson(true), true);
 #else
             return true;
 #endif
         case SystemRequest::PublishManifest:
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
             return  gResourcesManager.publishManifest();
 #else
             return true;
 #endif
         case SystemRequest::PublishConsumeManifest:
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
             return gResourcesManager.publishConsumeManifest();
 #else
             return true;
 #endif
         case SystemRequest::PublishResourceStates:
-#if NM_ENABLE_MQTT
+#if NM_ENABLE_NETWORK
             return gResourcesManager.publishResourceStates();
 #else
             return true;
@@ -123,15 +137,7 @@ namespace
 
     String debugSystemRequest(int start = 0)
     {
-        static const char *SystemRequestNames[] = {
-            "PublishStatus",
-            "PublishManifest",
-            "PublishConsumeManifest",
-            "PublishResourceStates",
-            "PublishInfo",
-            "PublishHardwareJson",
-            "PublishTelemetry",
-            "Count"};
+        
         String result = "";
         for (size_t i = 0; i < SystemRequestCount; ++i)
         {
@@ -186,8 +192,8 @@ namespace
                 retry.delayMs = nextRetryDelay(retry.delayMs);
                 retry.retryAtMs = now + retry.delayMs;
                 retry.scheduled = true;
-                LOG_WARNING("NM", "System request %u failed; retrying in %lu ms",
-                            static_cast<unsigned>(index),
+                LOG_WARNING("NM", "System request \x1b[91m%s\x1b[0m failed; retrying in %lu ms",
+                            SystemRequestNames[index],
                             static_cast<unsigned long>(retry.delayMs));
             }
             return;

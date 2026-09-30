@@ -58,6 +58,28 @@ void onMessage(const char *topic, const uint8_t *payload, size_t length, bool)
     post(event);
 }
 
+// The gateway publishes this when the device goes silent (300 s), the same
+// role the MQTT last will plays.
+// Only resent when it changed: the client already re-sends the current one on
+// every reconnect.
+String currentWill;
+
+void refreshLastWill()
+{
+    const String offline = NightMare::ConnectionDeviceStatusJson(false);
+    if (offline == currentWill)
+        return;
+    const String willTopic = gDeviceIdentity.topic("status");
+    if (!NightMare::EspNowClient::setLastWill(willTopic.c_str(),
+                                              reinterpret_cast<const uint8_t *>(offline.c_str()),
+                                              offline.length(), true))
+    {
+        LOG_WARNING("ESPNOW", "Could not set the last will");
+        return;
+    }
+    currentWill = offline;
+}
+
 void handle(const Event &event)
 {
     using NightMare::EspNowClient::State;
@@ -72,6 +94,9 @@ void handle(const Event &event)
     }
     if (event.state == State::CONNECTED)
     {
+        // Rebuilt on every connect: the offline status carries the timezone,
+        // which can change while running.
+        refreshLastWill();
         connectedReported = true;
         NightMare::OnConnectedIngress(NightMare::ConnectionType::ESP_NOW);
     }
@@ -121,13 +146,7 @@ bool begin()
     drain();
     connectedReported = false;
 
-    // The gateway publishes this when the device goes silent (300 s), the same
-    // role the MQTT last will plays.
-    const String willTopic = gDeviceIdentity.topic("status");
-    const String offline = NightMare::ConnectionDeviceStatusJson(false);
-    NightMare::EspNowClient::setLastWill(willTopic.c_str(),
-                                         reinterpret_cast<const uint8_t *>(offline.c_str()),
-                                         offline.length(), true);
+    refreshLastWill();
 
     NightMare::EspNowClient::onState(onState);
     NightMare::EspNowClient::onMessage(onMessage);

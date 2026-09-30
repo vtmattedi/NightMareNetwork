@@ -773,9 +773,13 @@ enum CommandSource
     NM_CMD_SRC_HTTP,
     NM_CMD_SRC_WEBSOCKET,
     NM_CMD_SRC_JOB,
+    NM_CMD_SRC_ESPNOW,   // console topic delivered by the ESP-NOW gateway
     NM_CMD_ANS_DO_NOT_RESPOND = 0xFF
 };
 ```
+
+Console topics are labelled by the connection that delivered them:
+`NM_CMD_SRC_MQTT` for MQTT/LOCAL_MQTT, `NM_CMD_SRC_ESPNOW` for ESP-NOW.
 
 Context:
 

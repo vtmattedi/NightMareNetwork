@@ -13,6 +13,12 @@
 #if NM_ENABLE_WIFI
 #include <Network/WiFiIP/NmWifiEsp.h>
 #endif
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadio.h>
+#endif
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/EspNowClient.h>
+#endif
 
 namespace
 {
@@ -322,6 +328,7 @@ void TelemetryService::appendBuild(JsonObject dst) const
     features["network"] = NM_ENABLE_NETWORK != 0;
     features["wifi"] = NM_ENABLE_WIFI != 0;
     features["mqtt"] = NM_ENABLE_MQTT != 0;
+    features["espnow"] = NM_NETWORK_ESPNOW != 0;
     features["console"] = NM_ENABLE_CONSOLE != 0;
     features["resources"] = NM_ENABLE_RESOURCES != 0;
     features["scheduler"] = NM_ENABLE_SCHEDULER != 0;
@@ -370,13 +377,32 @@ void TelemetryService::appendNetwork(JsonObject dst) const
     dst["connection"] = connectionName(connection);
     dst["connected"] = state == NightMare::ConnectionState::CONNECTED;
     dst["connection_state"] = static_cast<uint8_t>(state);
-    if (connection == NightMare::ConnectionType::LOCAL_MQTT ||
-        connection == NightMare::ConnectionType::MQTT)
+#if NM_ENABLE_WIFI_RADIO
+    // The radio channel is meaningful without an AP too: it is where ESP-NOW
+    // found the gateway.
+    if (WiFiRadio_running())
+        dst["radio_channel"] = WiFiRadio_channel();
+#endif
+    // "broker" names whatever carries this device's topics, so a consumer can
+    // tell the three apart; mqtt_connected stays for existing dashboards.
+    switch (connection)
     {
+    case NightMare::ConnectionType::MQTT:
+    case NightMare::ConnectionType::LOCAL_MQTT:
         dst["mqtt_connected"] = state == NightMare::ConnectionState::CONNECTED;
         dst["broker"] = connection == NightMare::ConnectionType::LOCAL_MQTT
                             ? "local"
                             : "remote";
+        break;
+    case NightMare::ConnectionType::ESP_NOW:
+        dst["mqtt_connected"] = false;
+        dst["broker"] = "espnow";
+#if NM_NETWORK_ESPNOW
+        dst["espnow_rtt_ms"] = NightMare::EspNowClient::rttMs();
+#endif
+        break;
+    case NightMare::ConnectionType::AUTO:
+        break;
     }
 }
 
