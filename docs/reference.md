@@ -529,7 +529,7 @@ Project-facing methods:
 bool bindResource(NetResource *resource);
 void unbindResource(NetResource *resource);
 bool loadRemoteSources();
-bool loadAdvertisementSettings();
+bool loadResourceSettings();
 void tick();
 
 bool announceAll();

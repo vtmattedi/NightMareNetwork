@@ -552,7 +552,8 @@ Managed Values may opt into a `hardware` manifest object. `poll_ms > 0` is the
 desired interval, `0` means firmware/system default behavior, and `< 0` disables
 acquisition. Flags are capabilities: `1` reports connection state, `2` permits
 remote poll changes, and `4` permits remote disabling. `connected` is emitted
-only with flag `1`; `note` is optional informational UTF-8 limited to 64 bytes.
+only with flag `1` and defaults to `true` until firmware reports otherwise;
+`note` is optional informational UTF-8 limited to 64 bytes.
 NightMare does not perform polling. Only a remote `poll_ms` override is persisted.
 
 ## State freshness

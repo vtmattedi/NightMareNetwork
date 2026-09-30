@@ -401,7 +401,9 @@ private:
     HardwarePolicy hardwarePolicy_;
     int32_t hardwareDefaultPollMs_ = 0;
     bool hardwarePolicyDeclared_ = false;
-    bool hardwareConnected_ = false;
+    // Declaring REPORT_HW_CONNECTION must not assert a failure before the
+    // application has performed its first hardware check.
+    bool hardwareConnected_ = true;
     uint32_t lastAdvertisementMs_ = 0;
     uint32_t nextAdvertisementRetryMs_ = 0;
     bool advertisementRetryScheduled_ = false;

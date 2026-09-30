@@ -210,7 +210,8 @@ temperature.setHardwarePolicy({
 The application performs acquisition and consults `hardwarePollMs()` and
 `hardwareEnabled()`. It may report runtime connectivity with
 `setHardwareConnected()` when `REPORT_HW_CONNECTION` was declared. Notes are
-informational and limited to 64 encoded UTF-8 bytes. `ResourcesManager` may
+informational and limited to 64 encoded UTF-8 bytes. Reported connection state
+defaults to `true` until the application reports otherwise. `ResourcesManager` may
 persist only a remotely configured `poll_ms` override; flags, notes, connection
 state, and firmware defaults are never persisted.
 

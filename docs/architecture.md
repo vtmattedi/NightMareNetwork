@@ -380,7 +380,7 @@ DeviceIdentity.begin()
 ConfigManager.restore()
     restores bound Config values or persists their firmware defaults
 
-ResourcesManager.loadAdvertisementSettings()
+ResourcesManager.loadResourceSettings()
     restores Managed Value advertisement policy and hardware poll overrides
 
 ResourcesManager.loadRemoteSources()

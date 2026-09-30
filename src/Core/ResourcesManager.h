@@ -73,8 +73,9 @@ public:
     // Restore persisted Remote bindings after the application has bound all
     // resources and before networking starts.
     bool loadRemoteSources();
-    /// Restore persistent advertisement policy for bound Managed values.
-    bool loadAdvertisementSettings();
+    /// Restore persistent advertisement policy and hardware poll overrides for
+    /// bound Managed values.
+    bool loadResourceSettings();
 
     /// Cooperative bounded housekeeping. Performs one due manifest retry or
     /// inspects at most one Resource.
@@ -197,7 +198,7 @@ private:
     bool removePersistedRemoteSource(const String &localName) const;
     bool saveRemoteSources() const;
     static bool parseSourceAddress(const String &encoded, String &owner, String &resourceName);
-    bool restoreAdvertisementPolicy(NetValueResource &resource);
+    bool restoreResourceSettings(NetValueResource &resource);
     bool persistAdvertisementPolicy(const NetValueResource &resource,
                                     int32_t periodMs) const;
     bool persistPollOverride(const NetValueResource &resource, int32_t pollMs) const;
@@ -274,7 +275,7 @@ private:
     ResourceSubscriber *subscriber_ = nullptr; // Non-owning.
     ManifestHandler manifestHandler_ = nullptr;
     EncodedManifestHandler encodedManifestHandler_ = nullptr;
-    bool advertisementSettingsLoaded_ = false;
+    bool resourceSettingsLoaded_ = false;
     bool manifestDirty_ = false;
     uint32_t nextManifestRetryMs_ = 0;
     size_t housekeepingCursor_ = 0;

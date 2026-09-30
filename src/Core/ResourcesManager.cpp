@@ -944,7 +944,7 @@ bool ResourcesManager::removePollOverride(const NetValueResource &resource) cons
     return writeResourceSettingsDocument(doc);
 }
 
-bool ResourcesManager::restoreAdvertisementPolicy(NetValueResource &resource)
+bool ResourcesManager::restoreResourceSettings(NetValueResource &resource)
 {
     if (!resource.isOwned() || !beginRemoteResourceStorage())
         return resource.isOwned();
@@ -1014,9 +1014,9 @@ bool ResourcesManager::restoreAdvertisementPolicy(NetValueResource &resource)
     return !changed || writeResourceSettingsDocument(doc);
 }
 
-bool ResourcesManager::loadAdvertisementSettings()
+bool ResourcesManager::loadResourceSettings()
 {
-    if (advertisementSettingsLoaded_)
+    if (resourceSettingsLoaded_)
         return true;
     if (!beginRemoteResourceStorage())
         return false;
@@ -1139,7 +1139,7 @@ bool ResourcesManager::loadAdvertisementSettings()
 
     if (changed && !writeResourceSettingsDocument(doc))
         return false;
-    advertisementSettingsLoaded_ = true;
+    resourceSettingsLoaded_ = true;
     return true;
 }
 
@@ -1203,11 +1203,11 @@ bool ResourcesManager::bindResource(NetResource *resource)
         return false;
     }
 
-    if (advertisementSettingsLoaded_ && resource->isOwned() &&
+    if (resourceSettingsLoaded_ && resource->isOwned() &&
         resource->kind_ == NetResourceType::VALUE &&
-        !restoreAdvertisementPolicy(*static_cast<NetValueResource *>(resource)))
+        !restoreResourceSettings(*static_cast<NetValueResource *>(resource)))
     {
-        LOG_ERROR("RM", "Cannot bind resource '%s': advertisement settings unavailable",
+        LOG_ERROR("RM", "Cannot bind resource '%s': resource settings unavailable",
                   resource->name_.c_str());
         return false;
     }
@@ -2058,7 +2058,7 @@ bool ResourcesManager::setHardwarePolicy(NetValueResource &resource,
     resource.hardwarePolicy_ = policy;
     resource.hardwareDefaultPollMs_ = policy.pollMs;
     resource.hardwarePolicyDeclared_ = true;
-    if (advertisementSettingsLoaded_ && !restoreAdvertisementPolicy(resource))
+    if (resourceSettingsLoaded_ && !restoreResourceSettings(resource))
         return false;
     if (!publishManifest())
         LOG_WARNING("RM", "Hardware policy manifest queued for retry");

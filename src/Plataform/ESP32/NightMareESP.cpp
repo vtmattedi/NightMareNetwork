@@ -249,7 +249,7 @@ void startNightMareESP()
 #if NM_ENABLE_RESOURCES
     if (!gResourcesManager.bindEnlisted())
         LOG_ERROR("NM", "One or more declared Resources could not be bound");
-    if (!gResourcesManager.loadAdvertisementSettings())
+    if (!gResourcesManager.loadResourceSettings())
         LOG_ERROR("NM", "Could not load Resource advertisement settings");
     if (!gResourcesManager.loadRemoteSources())
         LOG_ERROR("NM", "Could not load Remote Resource sources");

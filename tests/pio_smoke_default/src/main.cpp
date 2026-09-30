@@ -295,7 +295,7 @@ void setup()
     File legacyFile = LittleFS.open("/resourcesettings.json", "w");
     const bool legacyWritten = legacyFile && serializeJson(legacySettings, legacyFile) != 0;
     legacyFile.close();
-    const bool legacyMigrated = legacyWritten && advertisementManager.loadAdvertisementSettings() &&
+    const bool legacyMigrated = legacyWritten && advertisementManager.loadResourceSettings() &&
         advertisementManager.executeCommand(" advertisement:primary advertise").result == "5000";
     const int beforeInitialState = advertisementPublisher.statePublishes;
     const bool immediateAdvertisement = advertised.setValue(10) &&
@@ -422,7 +422,7 @@ void setup()
     ManagedSensor<int> restoredAdvertisement("advertisement:primary");
     const bool restoredAdvertisementPolicy =
         restoredAdvertisementManager.bindResource(&restoredAdvertisement) &&
-        restoredAdvertisementManager.loadAdvertisementSettings() &&
+        restoredAdvertisementManager.loadResourceSettings() &&
         restoredAdvertisementManager.executeCommand(
             " advertisement:primary advertise").result == "0";
 
@@ -448,6 +448,7 @@ void setup()
     const bool hardwareBound = hardwareManager.bindResource(&plainSensor) &&
         hardwareManager.bindResource(&hardwareSensor) &&
         hardwareManager.bindResource(&noDisableSensor);
+    const bool connectionDefaultsConnected = hardwareSensor.hardwareConnected();
     const bool connectionReporting = hardwareSensor.setHardwareConnected(true) &&
         hardwareSensor.hardwareConnected() && !noDisableSensor.setHardwareConnected(true);
     const ActionResult pollSet = hardwareManager.executeCommand(" hardware_sensor poll 5000");
@@ -455,7 +456,7 @@ void setup()
     ManagedSensor<int> restoredHardware("hardware_sensor");
     restoredHardware.setHardwarePolicy(fullPolicy);
     const bool pollOverrideRestored = restoredHardwareManager.bindResource(&restoredHardware) &&
-        restoredHardwareManager.loadAdvertisementSettings() &&
+        restoredHardwareManager.loadResourceSettings() &&
         restoredHardware.hardwarePollMs() == 5000;
     const ActionResult pollDisable = hardwareManager.executeCommand(" hardware_sensor poll -1");
     const ActionResult disableRejected =
@@ -471,7 +472,8 @@ void setup()
         decodedHardwareManifest["version"].as<int>() == ResourceManifestVersion &&
         decodedHardwareManifest["resources"][1]["hardware"]["note"].as<String>() ==
             "Address: 0x48";
-    const bool hardwarePolicyWorks = hardwareDeclared && hardwareBound && connectionReporting &&
+    const bool hardwarePolicyWorks = hardwareDeclared && hardwareBound &&
+        connectionDefaultsConnected && connectionReporting &&
         pollSet.success && pollOverrideRestored && pollDisable.success &&
         !hardwareSensor.hardwareEnabled() &&
         !disableRejected.success && disableRejected.result == "POLL cannot disable this hardware" &&
