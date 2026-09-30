@@ -69,7 +69,7 @@ bool unsubscribe(const char *filter);
 bool setLastWill(const char *topic, const uint8_t *payload, size_t length,
                  bool retained = false);
 
-// Only while CONNECTED. A message may span up to 16 frames (~3.8 KB).
+// Only while CONNECTED. A message may span up to 255 frames (~61 KB).
 bool publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
 }

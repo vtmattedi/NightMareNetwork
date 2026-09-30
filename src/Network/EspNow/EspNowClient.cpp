@@ -101,9 +101,12 @@ namespace NightMare::EspNowClient
             uint64_t backoffUntilUs = 0;
         } hs;
 
+        // Keyed by cid + messageId: a new session may reuse a messageId, and its
+        // fragments must never join a message left over from the old one.
         struct Reassembly
         {
             bool active = false;
+            uint16_t cid = 0;
             uint16_t messageId = 0;
             uint8_t nextFrame = 0;
             uint8_t totalFrames = 0;
@@ -408,7 +411,7 @@ namespace NightMare::EspNowClient
             if (session == 0 || !gatewayAddress(mac))
                 return false;
             const size_t totalFrames = (raw.size() + MaxFrameDataSize - 1) / MaxFrameDataSize;
-            if (totalFrames == 0 || totalFrames > MaxFramesPerMessage)
+            if (totalFrames == 0 || totalFrames > UINT8_MAX) // the header's fragment fields
                 return false;
             const uint16_t id = newMessageId();
             for (size_t i = 0; i < totalFrames; ++i)
@@ -890,11 +893,12 @@ namespace NightMare::EspNowClient
                 Reassembly &r = reassembly;
                 if (r.active && (nowUs() - r.startedUs) / 1000 > ReassemblyTimeoutMs)
                     r.active = false;
-                if (!r.active || r.messageId != h.messageId)
+                if (!r.active || r.cid != h.cid || r.messageId != h.messageId)
                 {
                     if (h.frameIndex != 0)
                         return; // joined mid-message
                     r.active = true;
+                    r.cid = h.cid;
                     r.messageId = h.messageId;
                     r.nextFrame = 0;
                     r.totalFrames = h.totalFrames;
@@ -1077,6 +1081,17 @@ namespace NightMare::EspNowClient
         if (err != ESP_OK)
         {
             LOG_ERROR(TagLink, "esp_now_init failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        // The network's PMK, the same one the gateway derives from the PSK, not
+        // Espressif's default. Set before any encrypted peer exists.
+        uint8_t pmk[Auth::PmkSize];
+        const bool pmkOk = Auth::networkPmk(Psk, PskLength, pmk) && esp_now_set_pmk(pmk) == ESP_OK;
+        Auth::wipe(pmk, sizeof(pmk));
+        if (!pmkOk)
+        {
+            LOG_ERROR(TagLink, "could not set the ESP-NOW PMK");
+            esp_now_deinit();
             return false;
         }
         esp_now_register_recv_cb(receiveCallback);

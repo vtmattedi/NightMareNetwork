@@ -25,7 +25,7 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
 | 3      | `type`        | `uint8_t`  | `FrameType` |
 | 4      | `cid`         | `uint16_t` | Session id. `0` = no session. |
 | 6      | `frameIndex`  | `uint8_t`  | `0..totalFrames-1` |
-| 7      | `totalFrames` | `uint8_t`  | `1` except for a fragmented MESSAGE (at most 16 are reassembled). |
+| 7      | `totalFrames` | `uint8_t`  | `1` except for a fragmented MESSAGE (up to 255, about 61 KB at V1). |
 | 8      | `length`      | `uint16_t` | Data bytes after the header. |
 
 **Version byte.** `makeVersion(espNow, nm) = (espNow << 4) | nm`.
@@ -65,8 +65,8 @@ echoes AUTH, PONG echoes PING, and ACK/ERROR echo the frame they answer.
 - at least a header, and `length` equal to the bytes that follow it;
 - V1 framing and NM protocol `0`;
 - a known type;
-- `totalFrames ≠ 0`, `frameIndex < totalFrames`, `totalFrames ≤ 16`, and only
-  MESSAGE may be fragmented;
+- `totalFrames ≠ 0`, `frameIndex < totalFrames`, and only MESSAGE may be
+  fragmented;
 - the cid rule for the type: handshake types carry `0`, CONNACK and session
   types carry a non-zero cid, and ERROR may carry either;
 - exact payload size for fixed-size types.
@@ -95,8 +95,19 @@ The client always broadcasts CONNECT. This does two jobs:
 - It reaches a gateway that still holds an encrypted peer for this MAC from a
   session the client has lost, for example because the client rebooted.
 
-A CONNECT from a MAC that has a session ends that session on the gateway
-(without firing its last will) and starts a new handshake.
+**CONNECT replaces an existing session.** When the sender MAC already has a
+session, the gateway:
+
+1. removes the old session, without firing its last will;
+2. turns the peer back to plaintext;
+3. starts the new handshake.
+
+- *Benefit:* a client that rebooted and lost its cid and LMK recovers
+  immediately, without waiting out the session timeout.
+- *Cost:* a CONNECT that spoofs a device's MAC ends that device's session. The
+  device notices within a few missed heartbeats and reconnects.
+
+No reconnect proof or session resumption guards against this before v1.
 
 **Auth proof and session key.** Both are HMAC-SHA256 keyed with the network
 PSK and truncated to 16 bytes. They are computed over:
@@ -113,6 +124,17 @@ label | clientMac(6) | gatewayMac(6) | clientNonce(8, LE) | gatewayNonce(8, LE)
   claims.
 - Nonces come from the hardware RNG and are fresh for each attempt.
 
+**PMK.** Both ends set the ESP-NOW primary key right after `esp_now_init()`,
+before any encrypted peer exists, instead of relying on Espressif's default:
+
+```
+PMK = first16(HMAC-SHA256(PSK, "NM-PMK"))
+```
+
+It is the same on every node of the network and is wiped after
+`esp_now_set_pmk()`. The three labels `NM-AUTH`, `NM-LMK` and `NM-PMK` keep the
+proof and the two keys independent of each other.
+
 **Encryption.** After CONNACK, both ends switch the peer to `encrypt = true`
 with the LMK (`esp_now_mod_peer`). The gateway sends CONNACK first, then
 installs the key. The session becomes CONNECTED on each side only after an
@@ -126,8 +148,13 @@ installed the same key.
 - While a handshake is pending, only CONNECT and AUTH are admitted. Pending
   handshakes time out after 5 s, and at most 3 run at once.
 - Session traffic needs both the sender MAC of the session and its cid.
-  - A known MAC with the wrong cid gets `ERROR INVALID_SESSION` (cid 0).
+  - A MAC that holds a session here but sends another cid gets
+    `ERROR INVALID_SESSION` (cid 0).
+  - A MAC with no session is ignored, whatever cid it sends. The gateway never
+    adds a peer just to answer it.
   - A valid cid from any other MAC is ignored.
+- Fragments are reassembled per sender MAC + cid + messageId. A messageId reused
+  under a new session never joins fragments left over from the old one.
 - Before CONNECTED (SECURING), only PING and DISCONNECT are admitted. Anything
   else gets `ERROR NOT_CONNECTED`. A session that has not secured after 5 s is
   dropped.
@@ -146,9 +173,15 @@ and publishes its last will. A DISCONNECT, or a new CONNECT from the same MAC,
 ends a session without the will.
 
 On `ERROR INVALID_SESSION` or `NOT_CONNECTED` from its gateway, a client in a
-session starts a new handshake at once. This is how it recovers after a gateway
-reboot whenever the error reaches it; otherwise the missed heartbeats do the
-same job.
+session starts a new handshake at once. The gateway sends these only when it
+holds a session for that MAC.
+
+**Gateway reboot.** A rebooted gateway has no sessions and no peers. It ignores
+the client's session traffic and sends no error. It could not decrypt that
+traffic anyway, since it no longer holds the key. The client recovers through
+its heartbeat: after `missedBeforeLost` unanswered PINGs (about 45 s with a
+15 s heartbeat), it drops the session, rediscovers the gateway and runs a full
+new handshake.
 
 ## Resync
 
@@ -172,14 +205,17 @@ Error payloads never carry secret-derived material.
 
 ## Configuration
 
-- `NM_ESPNOW_PSK` is the network key, a string of at least 16 characters. It
-  must be the same on the gateway and every device. It is defined in each
-  project's `creds.h` (gitignored), and a build with `NM_NETWORK_ESPNOW` fails
-  without it.
-- Gateway: `CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM=16`, one encrypted peer per
-  session. The ESP-NOW peer table (20) holds 16 sessions, 3 pending handshakes
-  and the broadcast peer.
-- Both ends use the default ESP-NOW PMK.
+- **Network key.** 16 to 64 bytes, the same on the gateway and every device.
+  - Device: `NM_ESPNOW_PSK` in the project's `creds.h` (gitignored). A build
+    with `NM_NETWORK_ESPNOW` fails without it.
+  - Gateway: the application passes the key in
+    `NightMareGatewayConfig::espnowConfig` to `start_nightmare_gateway()`.
+    Today the gateway's `main` reads it from `NM_ESPNOW_PSK` in its `creds.h`.
+    The gateway copies the key, hands it to `espBroker_init(psk, length)` (which
+    keeps its own copy), and wipes the intermediate one.
+- **Gateway peer limit.** `CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM=16`, one
+  encrypted peer per session. The ESP-NOW peer table (20) holds 16 sessions, 3
+  pending handshakes and the broadcast peer.
 
 ## Known limits
 
@@ -216,8 +252,9 @@ The radio-level behaviour needs a gateway and a device. Checklist:
    last will for the new session without any application action.
 4. **Client reboot.** Reset the device. It reconnects within seconds with a new
    cid, and the gateway logs `reconnects; its previous session ends`.
-5. **Gateway reboot.** Reset the gateway. The device recovers through
-   `INVALID_SESSION` or missed heartbeats, then does a full new handshake with a
+5. **Gateway reboot.** Reset the gateway. It sends the device no error. After
+   about 45 s of missed heartbeats the device logs
+   `gateway silent ... searching again`, then does a full new handshake with a
    new cid.
 6. **Lost device.** Power the device off. After about 60 s the gateway publishes
    its last will.
