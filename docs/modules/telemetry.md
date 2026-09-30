@@ -208,11 +208,14 @@ tx_power_dbm
 connection
 connected
 connection_state
+radio_channel
 mqtt_connected
 broker
+espnow_rtt_ms
 ```
 
 `ip`, `rssi_dbm` and `wifi_channel` are emitted only while WiFi is connected.
+`radio_channel` is emitted whenever the radio runs, AP or not.
 
 If WiFi support is disabled, WiFi-specific fields are omitted.
 
@@ -226,11 +229,10 @@ esp_now
 ```
 
 `auto` is reported only while no concrete connection is active. `connection_state`
-is the integer value of `ConnectionState`. MQTT-specific
-`mqtt_connected` and `broker` fields are included only while the selected
-connection is Local or Remote MQTT. This lets the same network document describe
-an ESP-NOW connection once that driver is implemented without pretending it is
-MQTT.
+is the integer value of `ConnectionState`. `broker` names what carries the
+device's topics: `local` or `remote` for MQTT, `espnow` for the ESP-NOW gateway.
+`mqtt_connected` is false on ESP-NOW. `espnow_rtt_ms` (ESP-NOW only) is the
+round trip of the last answered heartbeat.
 
 ## HEARTBEAT contents
 

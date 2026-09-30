@@ -200,8 +200,8 @@ CONSOLE_SERIAL
 ```
 
 The cooperative deferred-publication processor checks `NmConnection` readiness,
-not MQTT readiness. ESP-NOW-only operation still waits for an ESP-NOW driver,
-but the standard lifecycle no longer has an MQTT-specific check.
+not MQTT readiness, so the standard lifecycle runs the same over MQTT and
+ESP-NOW.
 
 These are current implementation dependencies, not necessarily permanent architectural requirements.
 

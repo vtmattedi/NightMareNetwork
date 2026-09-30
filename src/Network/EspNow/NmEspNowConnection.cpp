@@ -84,9 +84,7 @@ void handle(const Event &event)
 {
     using NightMare::EspNowClient::State;
     if (!event.isMessage)
-        LOG("ESPNOW", "Gateway state: %s",
-            event.state == State::CONNECTED ? "connected"
-            : event.state == State::SEARCHING ? "searching" : "stopped");
+        LOG("ESPNOW", "Gateway state: %s", NightMare::EspNowClient::stateName(event.state));
     if (event.isMessage)
     {
         NmMessageRouter::handleMessage(event.topic, event.payload);

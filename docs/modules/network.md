@@ -53,15 +53,16 @@ enum class ConnectionState : uint8_t
 `MQTT` means the Remote MQTT/TLS connection. `LOCAL_MQTT` means the local
 broker connection.
 
-`ESP_NOW` is represented but has no driver yet. `AUTO` policy is intentionally
-deferred until the concrete connection types are reliable. Selecting either
-currently returns `false` without disrupting an active MQTT connection.
+`AUTO` policy is intentionally deferred until the concrete connection types are
+reliable. Selecting it returns `false` without disrupting an active connection.
 
-A standalone gateway client exists in `Network/EspNow/EspNowClient.*` (built when
-`NM_NETWORK_ESPNOW` is set, ESP-IDF only). It finds the Nightmare Gateway from
-its beacon, keeps its registration alive with an automatic heartbeat, and
-re-sends subscriptions and last will after each reconnect. It is not yet wired
-into `NmConnection`, so `ESP_NOW` selection is still unavailable.
+`ESP_NOW` (built when `NM_NETWORK_ESPNOW` is set, ESP-IDF only) connects to the
+Nightmare Gateway through `Network/EspNow/EspNowClient.*`. It runs a
+PSK-authenticated handshake, gets a gateway-assigned session id, and switches
+the link to ESP-NOW encryption with a per-session key. It keeps the session
+alive with the gateway's heartbeat and re-sends subscriptions and the last will
+after every new session. It needs `NM_ESPNOW_PSK` in `creds.h`. The wire
+contract is in [espnow-protocol.md](espnow-protocol.md).
 
 ## API
 

@@ -33,7 +33,8 @@ A typical deployment looks like:
 ```
 
 Devices may communicate through Local MQTT, Remote MQTT/TLS, or a local
-connection such as ESP-NOW. The ESP-NOW driver is not implemented yet.
+ESP-NOW connection through the Nightmare Gateway (authenticated, encrypted
+sessions; see [modules/espnow-protocol.md](modules/espnow-protocol.md)).
 
 Selected traffic may be bridged to Remote MQTT for backend/global services. The backend belongs on the remote side rather than connecting directly to every local broker.
 

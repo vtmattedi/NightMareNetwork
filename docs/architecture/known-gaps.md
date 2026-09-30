@@ -225,15 +225,20 @@ Network. MQTT is no longer a direct telemetry dependency.
 
 A future design could separate “build/query telemetry JSON” from “automatically publish telemetry,” but that split is not part of the current feature model.
 
-## ESP-NOW connection is declared but not implemented
+## ESP-NOW session security has known limits
 
-**Category:** Deferred design.
+**Category:** Platform limitation / deferred design.
 
-`NmConnection`, lifecycle processing, Resource injection, and network telemetry
-are connection-neutral. `ConnectionType::ESP_NOW` is reserved so callers and
-telemetry do not need another enum change later, but selecting it currently
-returns false without disturbing the active connection. There is deliberately
-no ESP-NOW driver in this architecture pass.
+The ESP-NOW connection authenticates with a PSK and encrypts each session with
+a derived key (see [espnow-protocol.md](../modules/espnow-protocol.md)). Two
+limits remain:
+
+- ESP-IDF does not report whether a received frame was encrypted, so a
+  plaintext frame that spoofs a session's MAC and cid cannot be told apart.
+- An unauthenticated CONNECT ends the session held by its sender MAC.
+
+V2 (1470-byte) framing is reserved but has no runtime, and SUBSCRIBE is not
+retried within a session.
 
 ## WiFi/time/OTA remain ESP-oriented services
 

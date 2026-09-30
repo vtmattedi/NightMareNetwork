@@ -2,6 +2,7 @@
 #if NM_NETWORK_ESPNOW
 
 #include "EspNowClient.h"
+#include "NightMareEspNow/Auth.h"
 #include "NightMareEspNow/Frame.h"
 #include "Core/Logs.h"
 #include <esp_now.h>
@@ -15,29 +16,50 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+#if __has_include(<creds.h>)
+#include <creds.h>
+#endif
+#ifndef NM_ESPNOW_PSK
+#error "NM_NETWORK_ESPNOW needs NM_ESPNOW_PSK (the gateway's ESP-NOW network key) defined in creds.h"
+#endif
+static_assert(sizeof(NM_ESPNOW_PSK) - 1 >= NightMare::EspNowAuth::MinPskLength,
+              "NM_ESPNOW_PSK must be at least 16 characters");
+
 namespace NightMare::EspNowClient
 {
     namespace
     {
+        namespace Auth = NightMare::EspNowAuth;
+
         // NightMare's LOG, not ESP_LOGx: the Arduino core hides ESP_LOG output,
         // which is how every failure in here used to vanish.
-        constexpr char TagLink[] = "ESPNOW";  // search, gateway, connection state
+        constexpr char TagLink[] = "ESPNOW";  // search, handshake, session state
         constexpr char TagTx[] = "ESPNOW-TX"; // outgoing frames
         constexpr char TagRx[] = "ESPNOW-RX"; // incoming frames
-        constexpr size_t FrameHeaderSize = sizeof(FrameHeader);
-        constexpr size_t MaxFramesPerMessage = 16; // what the gateway reassembles
-        constexpr size_t MaxTopicLength = 63;      // 6-bit length in the message encoding
+        constexpr size_t MaxTopicLength = 63; // 6-bit length in the message encoding
         constexpr size_t MaxSubscriptions = 16;
-        constexpr uint32_t SearchIntervalMs = 3000; // probe rate until a gateway answers
-        constexpr uint32_t HopIntervalMs = 300;     // dwell per channel while hopping
+        constexpr uint32_t SearchIntervalMs = 3000;   // probe rate on a fixed/AP channel
+        constexpr uint32_t HopIntervalMs = 300;       // dwell per channel while hopping
+        constexpr uint32_t HandshakeStepMs = 1000;    // CONNECT->CHALLENGE, AUTH->CONNACK
+        constexpr uint32_t SecuringRetryMs = 300;     // between encrypted PINGs while SECURING
+        constexpr uint8_t SecuringPings = 5;          // then the handshake failed
+        constexpr uint8_t HandshakeAttempts = 3;      // on one gateway before searching again
+        constexpr uint32_t RejectedBackoffMs = 10000; // after AUTH_FAILED / UNSUPPORTED_VERSION
+        constexpr uint32_t MinHeartbeatMs = 1000;
+        constexpr uint32_t MaxHeartbeatMs = 120000;
         constexpr uint8_t LastHopChannel = 13;
         constexpr uint32_t SendTimeoutMs = 50;
         constexpr uint32_t ReassemblyTimeoutMs = 5000;
         constexpr uint8_t BroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        constexpr uint8_t Psk[] = NM_ESPNOW_PSK;
+        constexpr size_t PskLength = sizeof(Psk) - 1; // not the terminator
 
-        // `lock` (spinlock, tiny critical sections only) guards the connection fields;
+        // `lock` (spinlock, tiny critical sections only) guards what the API and
+        // the receive callback read: state, gateway, cid, rtt, message ids, callbacks.
         // `listMutex` guards the subscription list and last will; `sendMutex`
         // serialises transmissions, since ESP-NOW allows one in flight.
+        // Everything else about the handshake belongs to the client task alone.
         portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
         SemaphoreHandle_t listMutex = nullptr;
         SemaphoreHandle_t sendMutex = nullptr;
@@ -50,10 +72,7 @@ namespace NightMare::EspNowClient
         State currentState = State::STOPPED;
         bool gatewayKnown = false;
         uint8_t gatewayMac[6] = {};
-        uint8_t missed = 0;
-        bool needResync = false;
-        uint16_t probeId = 0;
-        uint64_t probeSentUs = 0;
+        uint16_t cid = 0;
         uint32_t lastRttMs = 0;
         uint16_t nextMessageId = 1;
         StateCallback stateCallback = nullptr;
@@ -63,15 +82,34 @@ namespace NightMare::EspNowClient
         bool willSet = false;
         std::vector<uint8_t> willRaw;
 
+        // Client-task only.
+        struct Handshake
+        {
+            uint8_t selfMac[6] = {};
+            uint64_t clientNonce = 0;
+            uint64_t gatewayNonce = 0;
+            uint16_t connectId = 0; // CHALLENGE echoes it
+            uint16_t authId = 0;    // CONNACK echoes it
+            uint16_t pingId = 0;    // PONG echoes it
+            uint64_t pingSentUs = 0;
+            uint8_t pingTries = 0;
+            uint8_t missed = 0;
+            uint8_t failures = 0;
+            uint32_t heartbeatMs = 0;
+            bool peerEncrypted = false;
+            uint64_t deadlineUs = 0;
+            uint64_t backoffUntilUs = 0;
+        } hs;
+
         struct Reassembly
         {
             bool active = false;
             uint16_t messageId = 0;
-            uint16_t nextFrame = 0;
-            uint16_t totalFrames = 0;
+            uint8_t nextFrame = 0;
+            uint8_t totalFrames = 0;
             uint64_t startedUs = 0;
             std::vector<uint8_t> buffer;
-        } reassembly;
+        } reassembly; // receive callback only
 
         uint64_t nowUs() { return static_cast<uint64_t>(esp_timer_get_time()); }
 
@@ -100,42 +138,16 @@ namespace NightMare::EspNowClient
             return primary;
         }
 
-        const char *frameTypeName(uint8_t type)
-        {
-            switch (static_cast<FrameType>(type))
-            {
-            case FrameType::BEACON: return "BEACON";
-            case FrameType::AUTH: return "AUTH";
-            case FrameType::SUBSCRIBE: return "SUBSCRIBE";
-            case FrameType::UNSUBSCRIBE: return "UNSUBSCRIBE";
-            case FrameType::MESSAGE: return "MESSAGE";
-            case FrameType::CONTROL: return "CONTROL";
-            case FrameType::ACK: return "ACK";
-            case FrameType::ERROR: return "ERROR";
-            case FrameType::LAST_WILL: return "LAST_WILL";
-            }
-            return "?";
-        }
-
+        // --- Receive-side notes ------------------------------------------------
         // The receive callback runs on the Wi-Fi task, which has no stack to spare for
         // formatting a log line (NMLog + Serial.printf, the same thing that overflowed
         // sys_evt). It only queues plain data here; rxLogTask formats and prints it.
         enum class RxNote : uint8_t
         {
-            BadHeader,      // value: received length
-            WrongVersion,
-            TooLong,
-            BeaconAdopted,
-            BeaconIgnored,  // does not speak our version
-            BeaconKnown,
-            AckForProbe,
-            AckIgnored,     // value: 1 = not our gateway, 0 = not the current probe
-            AckRtt,         // value: rtt ms
-            Connected,      // value: rtt ms
-            GatewayLearned, // value: channel
-            AddPeerFailed,  // value: esp_err_t
-            MessageIgnored,
-            ErrorFrame,
+            BadFrame,       // value: FrameCheck
+            MessageIgnored, // value: 1 = not our gateway, 0 = not our session
+            Ack,
+            QueueFull,
             Unhandled,
         };
 
@@ -143,10 +155,9 @@ namespace NightMare::EspNowClient
         {
             RxNote note;
             uint8_t type;
-            uint8_t version;
             int8_t rssi;
             uint16_t messageId;
-            uint16_t length;
+            uint16_t cid;
             uint8_t mac[6];
             int32_t value;
         };
@@ -167,9 +178,8 @@ namespace NightMare::EspNowClient
             if (header != nullptr)
             {
                 event.type = header->type;
-                event.version = header->version;
                 event.messageId = header->messageId;
-                event.length = header->length;
+                event.cid = header->cid;
             }
             event.rssi = static_cast<int8_t>(rssi);
             event.value = value;
@@ -182,60 +192,23 @@ namespace NightMare::EspNowClient
             const char *type = frameTypeName(e.type);
             switch (e.note)
             {
-            case RxNote::BadHeader:
-                LOG_WARNING(TagRx, "%ld bytes from %s: not a valid frame header",
-                            static_cast<long>(e.value), from.text);
-                break;
-            case RxNote::WrongVersion:
-                LOG_WARNING(TagRx, "%s #%u from %s: version %u, expected %u", type, e.messageId,
-                            from.text, e.version, static_cast<unsigned>(VersionType::ESP_NOW));
-                break;
-            case RxNote::TooLong:
-                LOG_WARNING(TagRx, "%s #%u from %s: %u data bytes exceed a frame", type,
-                            e.messageId, from.text, e.length);
-                break;
-            case RxNote::BeaconAdopted:
-                LOG(TagRx, "BEACON from %s (rssi %d), adopting it as gateway", from.text, e.rssi);
-                break;
-            case RxNote::BeaconIgnored:
-                LOG_WARNING(TagRx, "BEACON from %s (rssi %d) does not list version %u, ignored",
-                            from.text, e.rssi, static_cast<unsigned>(VersionType::ESP_NOW));
-                break;
-            case RxNote::BeaconKnown:
-                LOG_DEBUG(TagRx, "BEACON from %s (rssi %d)", from.text, e.rssi);
-                break;
-            case RxNote::AckForProbe:
-                LOG(TagRx, "ACK #%u from %s (rssi %d) answers our probe", e.messageId, from.text,
-                    e.rssi);
-                break;
-            case RxNote::AckIgnored:
-                LOG_WARNING(TagRx, "ACK #%u from %s ignored: %s", e.messageId, from.text,
-                            e.value != 0 ? "not our gateway" : "not the current probe");
-                break;
-            case RxNote::AckRtt:
-                LOG_DEBUG(TagRx, "ACK #%u, rtt %ld ms", e.messageId, static_cast<long>(e.value));
-                break;
-            case RxNote::Connected:
-                LOG(TagLink, "connected to gateway %s (rtt %ld ms)", from.text,
-                    static_cast<long>(e.value));
-                break;
-            case RxNote::GatewayLearned:
-                LOG(TagLink, "gateway %s on ch %ld", from.text, static_cast<long>(e.value));
-                break;
-            case RxNote::AddPeerFailed:
-                LOG_ERROR(TagLink, "add gateway peer %s failed: %s", from.text,
-                          esp_err_to_name(static_cast<esp_err_t>(e.value)));
+            case RxNote::BadFrame:
+                LOG_DEBUG(TagRx, "frame from %s dropped: %s", from.text,
+                          frameCheckName(static_cast<FrameCheck>(e.value)));
                 break;
             case RxNote::MessageIgnored:
-                LOG_WARNING(TagRx, "MESSAGE #%u from %s ignored: not our gateway", e.messageId,
+                LOG_WARNING(TagRx, "MESSAGE #%u from %s ignored: %s", e.messageId, from.text,
+                            e.value != 0 ? "not our gateway" : "not our session");
+                break;
+            case RxNote::Ack:
+                LOG_DEBUG(TagRx, "ACK #%u", e.messageId);
+                break;
+            case RxNote::QueueFull:
+                LOG_WARNING(TagRx, "%s #%u from %s dropped: client queue full", type, e.messageId,
                             from.text);
                 break;
-            case RxNote::ErrorFrame:
-                LOG_WARNING(TagRx, "ERROR #%u from %s: the gateway rejected that request",
-                            e.messageId, from.text);
-                break;
             case RxNote::Unhandled:
-                LOG_DEBUG(TagRx, "%s #%u from %s: not handled", type, e.messageId, from.text);
+                LOG_DEBUG(TagRx, "%s #%u from %s: not for a client", type, e.messageId, from.text);
                 break;
             }
         }
@@ -261,6 +234,17 @@ namespace NightMare::EspNowClient
                 rxLogTask = nullptr;
             return rxLogTask != nullptr;
         }
+
+        // Handshake and heartbeat replies, handed from the receive callback to the
+        // client task: answering them means sending, and a send blocks on the send
+        // callback, which runs on the very task the receive callback does.
+        struct RxFrame
+        {
+            uint8_t mac[6];
+            Frame frame;
+        };
+        constexpr UBaseType_t ControlDepth = 8;
+        QueueHandle_t controlQueue = nullptr;
 
         class Guard
         {
@@ -311,6 +295,14 @@ namespace NightMare::EspNowClient
                 callback(next);
         }
 
+        uint16_t currentCid()
+        {
+            portENTER_CRITICAL(&lock);
+            const uint16_t value = cid;
+            portEXIT_CRITICAL(&lock);
+            return value;
+        }
+
         void sendCallback(const esp_now_send_info_t *, esp_now_send_status_t status)
         {
             lastSendStatus = status;
@@ -318,19 +310,13 @@ namespace NightMare::EspNowClient
                 xSemaphoreGive(sendDone);
         }
 
+        // Whether it goes out encrypted is the peer's setting, not the frame's.
         bool sendRaw(const uint8_t *mac, const Frame &frame)
         {
-            if (frame.header.length > sizeof(frame.data))
-            {
-                LOG_ERROR(TagTx, "%s #%u: %u data bytes exceed a frame",
-                          frameTypeName(frame.header.type), frame.header.messageId,
-                          frame.header.length);
-                return false;
-            }
             Guard guard(sendMutex);
             xSemaphoreTake(sendDone, 0); // drop a stale completion from a timed-out send
             const esp_err_t err = esp_now_send(mac, reinterpret_cast<const uint8_t *>(&frame),
-                                               FrameHeaderSize + frame.header.length);
+                                               frameSize(frame));
             if (err != ESP_OK)
             {
                 LOG_WARNING(TagTx, "%s #%u to %s on ch %u: esp_now_send failed: %s",
@@ -373,17 +359,27 @@ namespace NightMare::EspNowClient
             return id;
         }
 
-        bool sendControl(FrameType type, const uint8_t *data, size_t length)
+        bool sendTo(const uint8_t *mac, FrameType type, uint16_t messageId, uint16_t frameCid,
+                    const void *data = nullptr, size_t length = 0)
+        {
+            Frame frame{};
+            if (!makeFrame(frame, type, messageId, frameCid, data, length))
+            {
+                LOG_ERROR(TagTx, "%s: %u data bytes exceed a frame", frameTypeName(static_cast<uint8_t>(type)),
+                          static_cast<unsigned>(length));
+                return false;
+            }
+            return sendRaw(mac, frame);
+        }
+
+        // Session traffic to the gateway: needs a session, carries its cid.
+        bool sendSession(FrameType type, const uint8_t *data, size_t length)
         {
             uint8_t mac[6];
-            if (length > MaxFrameDataSize || !gatewayAddress(mac))
+            const uint16_t session = currentCid();
+            if (session == 0 || !gatewayAddress(mac))
                 return false;
-            Frame frame{};
-            frame.header = encodeFrameHeader(newMessageId(), VersionType::ESP_NOW, type, 0, 1,
-                                             static_cast<uint16_t>(length));
-            if (length > 0)
-                memcpy(frame.data, data, length);
-            return sendRaw(mac, frame);
+            return sendTo(mac, type, newMessageId(), session, data, length);
         }
 
         // [retained:1][reserved:1][topicLength:6][topic][payload]
@@ -408,7 +404,8 @@ namespace NightMare::EspNowClient
         bool sendMessageFrames(const std::vector<uint8_t> &raw)
         {
             uint8_t mac[6];
-            if (!gatewayAddress(mac))
+            const uint16_t session = currentCid();
+            if (session == 0 || !gatewayAddress(mac))
                 return false;
             const size_t totalFrames = (raw.size() + MaxFrameDataSize - 1) / MaxFrameDataSize;
             if (totalFrames == 0 || totalFrames > MaxFramesPerMessage)
@@ -420,78 +417,45 @@ namespace NightMare::EspNowClient
                 const size_t chunk = raw.size() - offset < MaxFrameDataSize ? raw.size() - offset
                                                                             : MaxFrameDataSize;
                 Frame frame{};
-                frame.header = encodeFrameHeader(id, VersionType::ESP_NOW, FrameType::MESSAGE,
-                                                 static_cast<uint16_t>(i),
-                                                 static_cast<uint16_t>(totalFrames),
-                                                 static_cast<uint16_t>(chunk));
-                memcpy(frame.data, raw.data() + offset, chunk);
-                if (!sendRaw(mac, frame))
+                if (!makeFrame(frame, FrameType::MESSAGE, id, session, raw.data() + offset, chunk,
+                               static_cast<uint8_t>(i), static_cast<uint8_t>(totalFrames)) ||
+                    !sendRaw(mac, frame))
                     return false;
             }
             return true;
         }
 
-        void sendHeartbeat()
-        {
-            uint8_t mac[6];
-            const bool known = gatewayAddress(mac);
-            const uint16_t id = newMessageId();
-            portENTER_CRITICAL(&lock);
-            probeId = id;
-            probeSentUs = nowUs();
-            if (known)
-                ++missed;
-            portEXIT_CRITICAL(&lock);
-            // Unknown gateway: probe by broadcast. The gateway registers any sender and
-            // answers from its own address, which is how we learn it.
-            if (known)
-                LOG_DEBUG(TagTx, "heartbeat #%u to gateway on ch %u (unanswered so far: %u)", id,
-                          currentChannel(), missed);
-            else
-                LOG(TagTx, "probe #%u broadcast on ch %u", id, currentChannel());
-            sendRaw(known ? mac : BroadcastMac, keepAliveFrame(id));
-        }
+        // --- Peer ---------------------------------------------------------------
 
-        void resync()
-        {
-            std::vector<std::string> filters;
-            std::vector<uint8_t> will;
-            {
-                Guard guard(listMutex);
-                filters = subscriptions;
-                if (willSet)
-                    will = willRaw;
-            }
-            LOG(TagLink, "resync: %u subscription(s)%s", static_cast<unsigned>(filters.size()),
-                will.empty() ? "" : " + last will");
-            for (const std::string &filter : filters)
-                if (!sendControl(FrameType::SUBSCRIBE,
-                                 reinterpret_cast<const uint8_t *>(filter.data()), filter.size()))
-                    LOG_WARNING(TagLink, "resync: could not send SUBSCRIBE '%s'", filter.c_str());
-            if (!will.empty() && !sendControl(FrameType::LAST_WILL, will.data(), will.size()))
-                LOG_WARNING(TagLink, "resync: could not send LAST_WILL");
-        }
-
-        void setGateway(const uint8_t *mac)
+        esp_now_peer_info_t gatewayPeer(const uint8_t *mac)
         {
             esp_now_peer_info_t peer = {};
             memcpy(peer.peer_addr, mac, 6);
             peer.channel = 0; // follow the station's channel
             peer.ifidx = WIFI_IF_STA;
             peer.encrypt = false;
-            const esp_err_t err = esp_now_add_peer(&peer);
-            // Called from the receive callback (the Wi-Fi task): note(), never LOG, here.
-            if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST)
+            return peer;
+        }
+
+        bool setGateway(const uint8_t *mac)
+        {
+            esp_now_peer_info_t peer = gatewayPeer(mac);
+            esp_err_t err = esp_now_add_peer(&peer);
+            if (err == ESP_ERR_ESPNOW_EXIST)
+                err = esp_now_mod_peer(&peer); // back to plaintext for the handshake
+            if (err != ESP_OK)
             {
-                note(RxNote::AddPeerFailed, mac, nullptr, 0, err);
-                return;
+                LOG_ERROR(TagLink, "add gateway peer %s failed: %s", macText(mac).text,
+                          esp_err_to_name(err));
+                return false;
             }
             portENTER_CRITICAL(&lock);
             memcpy(gatewayMac, mac, 6);
             gatewayKnown = true;
-            missed = 0;
             portEXIT_CRITICAL(&lock);
-            note(RxNote::GatewayLearned, mac, nullptr, 0, currentChannel());
+            hs.peerEncrypted = false;
+            LOG(TagLink, "gateway %s on ch %u", macText(mac).text, currentChannel());
+            return true;
         }
 
         void forgetGateway()
@@ -504,7 +468,48 @@ namespace NightMare::EspNowClient
             portENTER_CRITICAL(&lock);
             gatewayKnown = false;
             portEXIT_CRITICAL(&lock);
+            hs.peerEncrypted = false;
         }
+
+        bool installLmk(const uint8_t *lmk)
+        {
+            uint8_t mac[6];
+            if (!gatewayAddress(mac))
+                return false;
+            esp_now_peer_info_t peer = gatewayPeer(mac);
+            peer.encrypt = true;
+            memcpy(peer.lmk, lmk, ESP_NOW_KEY_LEN);
+            const esp_err_t err = esp_now_mod_peer(&peer);
+            Auth::wipe(peer.lmk, sizeof(peer.lmk));
+            if (err != ESP_OK)
+            {
+                LOG_ERROR(TagLink, "installing the session key failed: %s", esp_err_to_name(err));
+                return false;
+            }
+            hs.peerEncrypted = true;
+            return true;
+        }
+
+        // Back to "no session": cid 0 and a plaintext peer, ready for a new handshake.
+        void dropSession()
+        {
+            portENTER_CRITICAL(&lock);
+            cid = 0;
+            portEXIT_CRITICAL(&lock);
+            reassembly.active = false;
+            Auth::wipe(&hs.clientNonce, sizeof(hs.clientNonce));
+            Auth::wipe(&hs.gatewayNonce, sizeof(hs.gatewayNonce));
+            uint8_t mac[6];
+            if (hs.peerEncrypted && gatewayAddress(mac))
+            {
+                esp_now_peer_info_t peer = gatewayPeer(mac);
+                if (esp_now_mod_peer(&peer) != ESP_OK)
+                    LOG_WARNING(TagLink, "could not turn the gateway peer back to plaintext");
+            }
+            hs.peerEncrypted = false;
+        }
+
+        // --- Channel search -----------------------------------------------------
 
         // True only when no IP station owns the channel, so the client may pick it.
         // An associated station is pinned to its AP's channel. One with an AP configured but not
@@ -540,7 +545,7 @@ namespace NightMare::EspNowClient
             if (err != ESP_OK)
                 LOG_WARNING(TagLink, "could not tune to ch %u: %s", channel, esp_err_to_name(err));
             else
-                LOG(TagLink, "searching on ch %u", channel);
+                LOG_DEBUG(TagLink, "searching on ch %u", channel);
         }
 
         void wakeTask()
@@ -549,12 +554,334 @@ namespace NightMare::EspNowClient
                 xTaskNotifyGive(task);
         }
 
+        // --- Handshake (client task) ------------------------------------------
+
+        void setDeadline(uint32_t fromNowMs)
+        {
+            hs.deadlineUs = nowUs() + static_cast<uint64_t>(fromNowMs) * 1000;
+        }
+
+        // Broadcast even to a known gateway: a CONNECT has to get through
+        // whatever state the gateway still holds for us, including an encrypted
+        // peer from a session we lost (e.g. we rebooted). A broadcast also finds
+        // a gateway we do not know yet: its CHALLENGE answers with its address.
+        void sendConnect()
+        {
+            hs.clientNonce = Auth::freshNonce();
+            hs.connectId = newMessageId();
+            const ConnectPayload connect{hs.clientNonce, 0};
+            sendTo(BroadcastMac, FrameType::CONNECT, hs.connectId, 0, &connect, sizeof(connect));
+        }
+
+        void startHandshake()
+        {
+            dropSession();
+            setState(State::CONNECTING);
+            sendConnect();
+            setDeadline(HandshakeStepMs);
+        }
+
+        void enterSearching(uint32_t backoffMs = 0)
+        {
+            dropSession();
+            forgetGateway();
+            hs.failures = 0;
+            setState(State::SEARCHING);
+            hs.backoffUntilUs = nowUs() + static_cast<uint64_t>(backoffMs) * 1000;
+            hs.deadlineUs = hs.backoffUntilUs;
+        }
+
+        void handshakeFailed(const char *why)
+        {
+            ++hs.failures;
+            LOG_WARNING(TagLink, "handshake failed (%s), attempt %u of %u", why, hs.failures,
+                        HandshakeAttempts);
+            if (hs.failures >= HandshakeAttempts)
+                enterSearching();
+            else
+                startHandshake();
+        }
+
+        void sendPing()
+        {
+            uint8_t mac[6];
+            const uint16_t session = currentCid();
+            if (session == 0 || !gatewayAddress(mac))
+                return;
+            hs.pingId = newMessageId();
+            hs.pingSentUs = nowUs();
+            sendTo(mac, FrameType::PING, hs.pingId, session);
+        }
+
+        void resync()
+        {
+            std::vector<std::string> filters;
+            std::vector<uint8_t> will;
+            {
+                Guard guard(listMutex);
+                filters = subscriptions;
+                if (willSet)
+                    will = willRaw;
+            }
+            LOG(TagLink, "resync: %u subscription(s)%s", static_cast<unsigned>(filters.size()),
+                will.empty() ? "" : " + last will");
+            for (const std::string &filter : filters)
+                if (!sendSession(FrameType::SUBSCRIBE,
+                                 reinterpret_cast<const uint8_t *>(filter.data()), filter.size()))
+                    LOG_WARNING(TagLink, "resync: could not send SUBSCRIBE '%s'", filter.c_str());
+            if (!will.empty() && !sendSession(FrameType::LAST_WILL, will.data(), will.size()))
+                LOG_WARNING(TagLink, "resync: could not send LAST_WILL");
+        }
+
+        Auth::HandshakeContext handshakeContext(const uint8_t *gateway)
+        {
+            Auth::HandshakeContext context{};
+            memcpy(context.clientMac, hs.selfMac, 6);
+            memcpy(context.gatewayMac, gateway, 6);
+            context.clientNonce = hs.clientNonce;
+            context.gatewayNonce = hs.gatewayNonce;
+            return context;
+        }
+
+        void onChallenge(const uint8_t *from, const Frame &frame)
+        {
+            const State now = state();
+            if ((now != State::SEARCHING && now != State::CONNECTING) ||
+                frame.header.messageId != hs.connectId)
+                return; // a stale CHALLENGE, or one for another client's CONNECT
+
+            uint8_t known[6];
+            if (gatewayAddress(known))
+            {
+                if (memcmp(known, from, 6) != 0)
+                    return; // another gateway answered our broadcast; we chose this one
+            }
+            else if (!setGateway(from))
+            {
+                return;
+            }
+
+            ChallengePayload challenge;
+            memcpy(&challenge, frame.data, sizeof(challenge));
+            hs.gatewayNonce = challenge.gatewayNonce;
+
+            Auth::HandshakeContext context = handshakeContext(from);
+            AuthPayload auth{};
+            const bool ok = Auth::authProof(Psk, PskLength, context, auth.proof);
+            Auth::wipe(&context, sizeof(context));
+            if (!ok)
+            {
+                LOG_ERROR(TagLink, "could not compute the AUTH proof");
+                handshakeFailed("no proof");
+                return;
+            }
+            hs.authId = newMessageId();
+            setState(State::AUTHENTICATING);
+            sendTo(from, FrameType::AUTH, hs.authId, 0, &auth, sizeof(auth));
+            setDeadline(HandshakeStepMs);
+        }
+
+        void onConnAck(const Frame &frame)
+        {
+            if (state() != State::AUTHENTICATING || frame.header.messageId != hs.authId)
+                return;
+
+            ConnAckPayload ack;
+            memcpy(&ack, frame.data, sizeof(ack));
+            uint32_t heartbeat = ack.heartbeatMs;
+            if (heartbeat < MinHeartbeatMs)
+                heartbeat = MinHeartbeatMs;
+            if (heartbeat > MaxHeartbeatMs)
+                heartbeat = MaxHeartbeatMs;
+            hs.heartbeatMs = heartbeat;
+
+            uint8_t mac[6];
+            if (!gatewayAddress(mac))
+                return;
+            Auth::HandshakeContext context = handshakeContext(mac);
+            uint8_t lmk[Auth::LmkSize];
+            const bool derived = Auth::sessionLmk(Psk, PskLength, context, lmk);
+            Auth::wipe(&context, sizeof(context));
+            Auth::wipe(&hs.clientNonce, sizeof(hs.clientNonce));
+            Auth::wipe(&hs.gatewayNonce, sizeof(hs.gatewayNonce));
+            const bool installed = derived && installLmk(lmk);
+            Auth::wipe(lmk, sizeof(lmk));
+            if (!installed)
+            {
+                handshakeFailed("session key");
+                return;
+            }
+
+            portENTER_CRITICAL(&lock);
+            cid = frame.header.cid;
+            portEXIT_CRITICAL(&lock);
+            LOG(TagLink, "authenticated as session %u, securing", frame.header.cid);
+            setState(State::SECURING);
+            hs.pingTries = 1;
+            sendPing();
+            setDeadline(SecuringRetryMs);
+        }
+
+        void onPong(const Frame &frame)
+        {
+            if (frame.header.cid != currentCid() || frame.header.messageId != hs.pingId)
+                return;
+            const uint32_t rtt = static_cast<uint32_t>((nowUs() - hs.pingSentUs) / 1000);
+            portENTER_CRITICAL(&lock);
+            lastRttMs = rtt;
+            portEXIT_CRITICAL(&lock);
+            hs.missed = 0;
+            if (state() != State::SECURING)
+                return;
+
+            // The PONG came back through the session key: both ends installed the same LMK.
+            hs.failures = 0;
+            uint8_t mac[6];
+            gatewayAddress(mac);
+            LOG(TagLink, "connected to gateway %s, session %u, rtt %lu ms, heartbeat %lu ms",
+                macText(mac).text, frame.header.cid, static_cast<unsigned long>(rtt),
+                static_cast<unsigned long>(hs.heartbeatMs));
+            setState(State::CONNECTED);
+            resync();
+            setDeadline(hs.heartbeatMs);
+        }
+
+        void onError(const Frame &frame)
+        {
+            const ErrorCode code = static_cast<ErrorCode>(frame.data[0]);
+            const State now = state();
+            switch (code)
+            {
+            case ErrorCode::AUTH_FAILED:
+                if (now != State::AUTHENTICATING)
+                    return;
+                LOG_ERROR(TagLink, "gateway rejected our AUTH: NM_ESPNOW_PSK differs from the gateway's");
+                enterSearching(RejectedBackoffMs);
+                return;
+            case ErrorCode::UNSUPPORTED_VERSION:
+                LOG_ERROR(TagLink, "gateway does not speak NM protocol %u", NM_PROTOCOL_VERSION);
+                enterSearching(RejectedBackoffMs);
+                return;
+            case ErrorCode::INVALID_SESSION:
+            case ErrorCode::NOT_CONNECTED:
+                if (now != State::SECURING && now != State::CONNECTED)
+                    return;
+                LOG_WARNING(TagLink, "gateway no longer knows session %u, reconnecting", currentCid());
+                if (now == State::CONNECTED)
+                    setState(State::CONNECTING); // leaves CONNECTED before the new handshake
+                startHandshake();
+                return;
+            case ErrorCode::REJECTED:
+                LOG_WARNING(TagLink, "gateway refused request #%u (subscription table full?)",
+                            frame.header.messageId);
+                return;
+            case ErrorCode::INVALID_FRAME:
+                LOG_WARNING(TagLink, "gateway reports an invalid frame from us");
+                return;
+            }
+        }
+
+        void handleControl(const RxFrame &rx)
+        {
+            uint8_t known[6];
+            const bool haveGateway = gatewayAddress(known);
+            const bool fromGateway = haveGateway && memcmp(known, rx.mac, 6) == 0;
+            switch (static_cast<FrameType>(rx.frame.header.type))
+            {
+            case FrameType::BEACON:
+                if (state() != State::SEARCHING || haveGateway || nowUs() < hs.backoffUntilUs)
+                    return;
+                if (!beaconSupports(rx.frame, EspNowFrameVersion::V1))
+                {
+                    LOG_WARNING(TagRx, "BEACON from %s does not offer V1 framing, ignored",
+                                macText(rx.mac).text);
+                    return;
+                }
+                LOG(TagRx, "BEACON from %s, connecting", macText(rx.mac).text);
+                if (setGateway(rx.mac))
+                    startHandshake();
+                return;
+            case FrameType::CHALLENGE:
+                onChallenge(rx.mac, rx.frame);
+                return;
+            case FrameType::CONNACK:
+                if (fromGateway)
+                    onConnAck(rx.frame);
+                return;
+            case FrameType::PONG:
+                if (fromGateway)
+                    onPong(rx.frame);
+                return;
+            case FrameType::ERROR:
+                if (fromGateway)
+                    onError(rx.frame);
+                return;
+            default:
+                return;
+            }
+        }
+
+        // Due work for the current state, once its deadline has passed.
+        void runTimers()
+        {
+            const uint64_t now = nowUs();
+            if (now < hs.deadlineUs)
+                return;
+            switch (state())
+            {
+            case State::SEARCHING:
+            {
+                if (now < hs.backoffUntilUs)
+                {
+                    hs.deadlineUs = hs.backoffUntilUs;
+                    return;
+                }
+                const bool hopping = hoppingNow();
+                if (hopping)
+                    tuneForSearch(); // tune first, probe second, then a full dwell for the answer
+                sendConnect();
+                setDeadline(hopping ? HopIntervalMs : SearchIntervalMs);
+                return;
+            }
+            case State::CONNECTING:
+                handshakeFailed("no CHALLENGE");
+                return;
+            case State::AUTHENTICATING:
+                handshakeFailed("no CONNACK");
+                return;
+            case State::SECURING:
+                if (hs.pingTries >= SecuringPings)
+                {
+                    handshakeFailed("no PONG to the encrypted PING");
+                    return;
+                }
+                ++hs.pingTries;
+                sendPing();
+                setDeadline(SecuringRetryMs);
+                return;
+            case State::CONNECTED:
+                if (hs.missed >= settings.missedBeforeLost)
+                {
+                    LOG_WARNING(TagLink, "gateway silent for %u heartbeats, searching again",
+                                settings.missedBeforeLost);
+                    enterSearching();
+                    return;
+                }
+                ++hs.missed;
+                LOG_DEBUG(TagTx, "heartbeat (unanswered so far: %u)", hs.missed - 1);
+                sendPing();
+                setDeadline(hs.heartbeatMs);
+                return;
+            case State::STOPPED:
+                return;
+            }
+        }
+
+        // --- Receive callback (Wi-Fi task) --------------------------------------
+
         void handleMessageFrame(const Frame &frame)
         {
             const FrameHeader &h = frame.header;
-            if (h.totalFrames == 0 || h.totalFrames > MaxFramesPerMessage)
-                return;
-
             const uint8_t *data = frame.data;
             size_t length = h.length;
             std::vector<uint8_t> whole;
@@ -611,107 +938,57 @@ namespace NightMare::EspNowClient
             // Runs on the Wi-Fi task: note(), never LOG -- see RxNote.
             const uint8_t *from = info->src_addr;
             const int rssi = info->rx_ctrl != nullptr ? info->rx_ctrl->rssi : 0;
-            FrameHeader header;
-            if (!decodeFrameHeader(header, data, static_cast<size_t>(len)))
+            RxFrame rx;
+            const FrameCheck check = decodeFrame(rx.frame, data, static_cast<size_t>(len));
+            if (check != FrameCheck::OK)
             {
-                note(RxNote::BadHeader, from, nullptr, rssi, len);
+                note(RxNote::BadFrame, from, nullptr, rssi, static_cast<int32_t>(check));
                 return;
             }
-            if (header.version != static_cast<uint8_t>(VersionType::ESP_NOW))
-            {
-                note(RxNote::WrongVersion, from, &header, rssi);
-                return;
-            }
-            Frame frame{};
-            frame.header = header;
-            if (header.length > sizeof(frame.data))
-            {
-                note(RxNote::TooLong, from, &header, rssi);
-                return;
-            }
-            memcpy(frame.data, data + FrameHeaderSize, header.length);
+            const FrameHeader &header = rx.frame.header;
 
             uint8_t gateway[6];
-            const bool known = gatewayAddress(gateway);
-            const bool fromGateway = known && memcmp(gateway, info->src_addr, 6) == 0;
+            const bool fromGateway = gatewayAddress(gateway) && memcmp(gateway, from, 6) == 0;
 
             switch (static_cast<FrameType>(header.type))
             {
-            case FrameType::BEACON:
+            case FrameType::MESSAGE:
             {
-                // data: [count][versions...]; only adopt a gateway that speaks our version.
-                bool speaksUs = false;
-                if (header.length >= 1)
-                    for (size_t i = 0; i < frame.data[0] && i + 1 < header.length; ++i)
-                        speaksUs |= frame.data[1 + i] == static_cast<uint8_t>(VersionType::ESP_NOW);
-                if (known)
-                {
-                    note(RxNote::BeaconKnown, from, &header, rssi);
-                }
-                else if (!speaksUs)
-                {
-                    note(RxNote::BeaconIgnored, from, &header, rssi);
-                }
+                bool ours;
+                portENTER_CRITICAL(&lock);
+                ours = currentState == State::CONNECTED && header.cid == cid;
+                portEXIT_CRITICAL(&lock);
+                if (fromGateway && ours)
+                    handleMessageFrame(rx.frame);
                 else
-                {
-                    note(RxNote::BeaconAdopted, from, &header, rssi);
-                    setGateway(info->src_addr);
-                    wakeTask(); // register right away instead of waiting for the next tick
-                }
-                break;
+                    note(RxNote::MessageIgnored, from, &header, rssi, fromGateway ? 0 : 1);
+                return;
             }
             case FrameType::ACK:
-            {
-                uint16_t expectedProbe;
-                uint64_t sentUs;
-                portENTER_CRITICAL(&lock);
-                expectedProbe = probeId;
-                sentUs = probeSentUs;
-                portEXIT_CRITICAL(&lock);
-                // Learn the gateway from the answer to our broadcast probe, and only that.
-                if (!known && header.messageId == expectedProbe)
-                {
-                    note(RxNote::AckForProbe, from, &header, rssi);
-                    setGateway(info->src_addr);
-                }
-                else if (!fromGateway)
-                {
-                    note(RxNote::AckIgnored, from, &header, rssi, known ? 1 : 0);
-                    break;
-                }
-                portENTER_CRITICAL(&lock);
-                missed = 0;
-                const bool answersProbe = header.messageId == probeId;
-                if (answersProbe)
-                    lastRttMs = static_cast<uint32_t>((nowUs() - sentUs) / 1000);
-                const uint32_t rtt = lastRttMs;
-                const bool wasConnected = currentState == State::CONNECTED;
-                if (!wasConnected)
-                    needResync = true;
-                portEXIT_CRITICAL(&lock);
-                if (answersProbe)
-                    note(RxNote::AckRtt, from, &header, rssi, static_cast<int32_t>(rtt));
-                if (!wasConnected)
-                {
-                    note(RxNote::Connected, from, &header, rssi, static_cast<int32_t>(rtt));
-                    setState(State::CONNECTED);
-                    wakeTask(); // resync subscriptions/will now
-                }
+                note(RxNote::Ack, from, &header, rssi);
+                return;
+            case FrameType::BEACON:
+                // Only a searching client needs one; don't flood the queue otherwise.
+                if (state() != State::SEARCHING)
+                    return;
                 break;
-            }
-            case FrameType::MESSAGE:
-                if (fromGateway)
-                    handleMessageFrame(frame);
-                else
-                    note(RxNote::MessageIgnored, from, &header, rssi);
-                break;
+            case FrameType::CHALLENGE:
+            case FrameType::CONNACK:
+            case FrameType::PONG:
             case FrameType::ERROR:
-                note(RxNote::ErrorFrame, from, &header, rssi);
                 break;
             default:
                 note(RxNote::Unhandled, from, &header, rssi);
-                break;
+                return;
             }
+
+            memcpy(rx.mac, from, 6);
+            if (controlQueue == nullptr || xQueueSend(controlQueue, &rx, 0) != pdTRUE)
+            {
+                note(RxNote::QueueFull, from, &header, rssi);
+                return;
+            }
+            wakeTask();
         }
 
         void clientTask(void *)
@@ -720,11 +997,22 @@ namespace NightMare::EspNowClient
             uint8_t lastMode = 0xFF;
             while (running)
             {
-                // Connected: one heartbeat per interval. Otherwise probe quickly.
-                uint8_t knownMac[6];
-                const bool searching = state() != State::CONNECTED && !gatewayAddress(knownMac);
-                const bool hopping = searching && hoppingNow();
-                const uint8_t mode = !searching ? 0 : hopping ? 1 : 2;
+                const uint64_t now = nowUs();
+                const uint32_t waitMs = hs.deadlineUs > now
+                                            ? static_cast<uint32_t>((hs.deadlineUs - now + 999) / 1000)
+                                            : 0;
+                if (waitMs > 0)
+                    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(waitMs));
+                if (!running)
+                    break;
+
+                RxFrame rx;
+                while (xQueueReceive(controlQueue, &rx, 0) == pdTRUE)
+                    handleControl(rx);
+                runTimers();
+
+                const bool searching = state() == State::SEARCHING;
+                const uint8_t mode = !searching ? 0 : hoppingNow() ? 1 : 2;
                 if (mode != lastMode)
                 {
                     lastMode = mode;
@@ -735,38 +1023,6 @@ namespace NightMare::EspNowClient
                             currentChannel(), static_cast<unsigned long>(SearchIntervalMs),
                             settings.channel != 0 ? "fixed channel" : "channel follows the AP");
                 }
-                const uint32_t waitMs = state() == State::CONNECTED ? settings.heartbeatMs
-                                        : hopping                   ? HopIntervalMs
-                                                                    : SearchIntervalMs;
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(waitMs));
-                if (!running)
-                    break;
-                // Tune first, probe second, then wait a full dwell for the answer on that channel.
-                if (searching)
-                    tuneForSearch();
-
-                bool resyncNow;
-                bool lost;
-                portENTER_CRITICAL(&lock);
-                resyncNow = needResync && currentState == State::CONNECTED;
-                if (resyncNow)
-                    needResync = false;
-                lost = gatewayKnown && missed >= settings.missedBeforeLost;
-                portEXIT_CRITICAL(&lock);
-
-                if (resyncNow)
-                {
-                    resync();
-                    continue; // that wake-up was for a resync, not a heartbeat tick
-                }
-                if (lost)
-                {
-                    LOG_WARNING(TagLink, "gateway silent for %u heartbeats, searching again",
-                                settings.missedBeforeLost);
-                    forgetGateway();
-                    setState(State::SEARCHING);
-                }
-                sendHeartbeat();
             }
             taskExited = true;
             task = nullptr;
@@ -774,21 +1030,44 @@ namespace NightMare::EspNowClient
         }
     }
 
+    const char *stateName(State state)
+    {
+        switch (state)
+        {
+        case State::STOPPED: return "stopped";
+        case State::SEARCHING: return "searching";
+        case State::CONNECTING: return "connecting";
+        case State::AUTHENTICATING: return "authenticating";
+        case State::SECURING: return "securing";
+        case State::CONNECTED: return "connected";
+        }
+        return "?";
+    }
+
     bool begin(const Settings &config)
     {
         if (running)
             return true;
-        if (config.heartbeatMs == 0 || config.missedBeforeLost == 0 || !ensureMutexes())
+        if (config.missedBeforeLost == 0 || !ensureMutexes())
             return false;
         settings = config;
 
-        uint8_t ownMac[6] = {};
-        esp_wifi_get_mac(WIFI_IF_STA, ownMac);
+        if (controlQueue == nullptr)
+            controlQueue = xQueueCreate(ControlDepth, sizeof(RxFrame));
+        if (controlQueue == nullptr)
+        {
+            LOG_ERROR(TagLink, "could not allocate the control queue");
+            return false;
+        }
+        xQueueReset(controlQueue);
+
+        hs = Handshake();
+        esp_wifi_get_mac(WIFI_IF_STA, hs.selfMac);
         wifi_config_t station = {};
         const bool haveApConfig = esp_wifi_get_config(WIFI_IF_STA, &station) == ESP_OK &&
                                   station.sta.ssid[0] != '\0';
-        LOG(TagLink, "starting on %s, ch %u, heartbeat %lu ms, lost after %u, AP: %s", macText(ownMac).text,
-            currentChannel(), static_cast<unsigned long>(config.heartbeatMs), config.missedBeforeLost,
+        LOG(TagLink, "starting on %s, ch %u, protocol %u, lost after %u heartbeats, AP: %s",
+            macText(hs.selfMac).text, currentChannel(), NM_PROTOCOL_VERSION, config.missedBeforeLost,
             haveApConfig ? reinterpret_cast<const char *>(station.sta.ssid) : "(none)");
 
         if (!ensureRxLog())
@@ -804,7 +1083,7 @@ namespace NightMare::EspNowClient
         esp_now_register_send_cb(sendCallback);
 
         // The station default is modem sleep: once associated, the radio only wakes around the
-        // AP's beacons, so the gateway's ESP-NOW beacons and ACKs mostly arrive while it is off.
+        // AP's beacons, so the gateway's ESP-NOW beacons and replies mostly arrive while it is off.
         const esp_err_t ps = esp_wifi_set_ps(WIFI_PS_NONE);
         if (ps != ESP_OK)
             LOG_WARNING(TagLink, "could not disable Wi-Fi power save: %s", esp_err_to_name(ps));
@@ -819,17 +1098,17 @@ namespace NightMare::EspNowClient
 
         portENTER_CRITICAL(&lock);
         gatewayKnown = false;
-        missed = 0;
-        needResync = false;
+        cid = 0;
         lastRttMs = 0;
         portEXIT_CRITICAL(&lock);
         reassembly = Reassembly();
 
         running = true;
         taskExited = false;
-        // 4 KB, not 3: NMLog::write formats into a 256-byte stack buffer and then
-        // Serial.printf formats again, and this task can log from inside sendRaw.
-        if (xTaskCreate(clientTask, "espnow_client", 4096, nullptr, 1, &task) != pdPASS)
+        setState(State::SEARCHING);
+        // 6 KB: NMLog::write formats into a 256-byte stack buffer and then Serial.printf
+        // formats again, sendRaw can log, and the HMAC runs on this task too.
+        if (xTaskCreate(clientTask, "espnow_client", 6144, nullptr, 1, &task) != pdPASS)
         {
             LOG_ERROR(TagLink, "could not create the client task");
             running = false;
@@ -837,9 +1116,9 @@ namespace NightMare::EspNowClient
             esp_now_unregister_recv_cb();
             esp_now_unregister_send_cb();
             esp_now_deinit();
+            setState(State::STOPPED);
             return false;
         }
-        setState(State::SEARCHING);
         return true;
     }
 
@@ -847,16 +1126,21 @@ namespace NightMare::EspNowClient
     {
         if (!running)
             return;
+        // A clean goodbye: the gateway ends the session without firing the last will.
+        if (state() == State::CONNECTED)
+            sendSession(FrameType::DISCONNECT, nullptr, 0);
         running = false;
         wakeTask();
         for (int i = 0; i < 100 && !taskExited; ++i)
             vTaskDelay(pdMS_TO_TICKS(10));
         esp_now_unregister_recv_cb();
         esp_now_unregister_send_cb();
-        esp_now_deinit();
+        esp_now_deinit(); // drops every peer, the session key with them
         portENTER_CRITICAL(&lock);
         gatewayKnown = false;
+        cid = 0;
         portEXIT_CRITICAL(&lock);
+        Auth::wipe(&hs, sizeof(hs));
         setState(State::STOPPED);
     }
 
@@ -874,6 +1158,11 @@ namespace NightMare::EspNowClient
         const uint32_t v = lastRttMs;
         portEXIT_CRITICAL(&lock);
         return v;
+    }
+
+    uint16_t sessionId()
+    {
+        return currentCid();
     }
 
     void onState(StateCallback callback)
@@ -895,6 +1184,7 @@ namespace NightMare::EspNowClient
         if (filter == nullptr || filter[0] == '\0' || strlen(filter) > MaxFrameDataSize ||
             !ensureMutexes())
             return false;
+        bool added = false;
         {
             Guard guard(listMutex);
             bool present = false;
@@ -905,10 +1195,13 @@ namespace NightMare::EspNowClient
                 if (subscriptions.size() >= MaxSubscriptions)
                     return false;
                 subscriptions.emplace_back(filter);
+                added = true;
             }
         }
-        if (state() == State::CONNECTED)
-            sendControl(FrameType::SUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
+        // One already in the list went out with the last resync; sending it again
+        // would only make the gateway replay its retained messages twice.
+        if (added && state() == State::CONNECTED)
+            sendSession(FrameType::SUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
                         strlen(filter));
         return true;
     }
@@ -929,7 +1222,7 @@ namespace NightMare::EspNowClient
                 }
         }
         if (removed && state() == State::CONNECTED)
-            sendControl(FrameType::UNSUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
+            sendSession(FrameType::UNSUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
                         strlen(filter));
         return removed;
     }
@@ -946,7 +1239,7 @@ namespace NightMare::EspNowClient
             willSet = true;
         }
         if (state() == State::CONNECTED)
-            sendControl(FrameType::LAST_WILL, raw.data(), raw.size());
+            sendSession(FrameType::LAST_WILL, raw.data(), raw.size());
         return true;
     }
 
