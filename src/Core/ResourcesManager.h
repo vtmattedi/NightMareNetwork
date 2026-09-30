@@ -178,8 +178,11 @@ private:
     // publication fails; a remote request succeeds only when it was transported.
     bool setValue(NetValueResource &resource, const String &encoded);
     bool setAvailability(NetValueResource &resource, bool available);
-    bool setAdvertisementEnabled(NetValueResource &resource, bool enabled);
-    bool setAdvertisementPeriod(NetValueResource &resource, uint32_t seconds);
+    bool setAdvertisementPolicy(NetValueResource &resource, int32_t milliseconds);
+    bool setHardwarePolicy(NetValueResource &resource, const HardwarePolicy &policy);
+    bool setHardwareConnected(NetValueResource &resource, bool connected);
+    bool setPollOverride(NetValueResource &resource, int32_t milliseconds);
+    bool resetPollOverride(NetValueResource &resource);
     bool invoke(NetActionResource &resource, const String &payload);
     bool configureRemoteSource(NetResource &resource, const String &deviceName,
                                const String &resourceName, bool persist = true);
@@ -195,8 +198,10 @@ private:
     bool saveRemoteSources() const;
     static bool parseSourceAddress(const String &encoded, String &owner, String &resourceName);
     bool restoreAdvertisementPolicy(NetValueResource &resource);
-    bool persistAdvertisementPolicy(const NetValueResource &resource, bool enabled,
-                                    uint32_t periodMs) const;
+    bool persistAdvertisementPolicy(const NetValueResource &resource,
+                                    int32_t periodMs) const;
+    bool persistPollOverride(const NetValueResource &resource, int32_t pollMs) const;
+    bool removePollOverride(const NetValueResource &resource) const;
 
     static bool validSegment(const String &segment);
     static bool validActionSchema(const NetActionResource &action);

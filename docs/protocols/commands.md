@@ -77,8 +77,8 @@ A space after `>` selects a Resource by unique short name:
 > <name> set <payload>
 > <name> invoke [payload]
 > <name> source [OWNER/RESOURCE|CLEAR]
-> <name> enable <true|false>
-> <name> period <seconds>
+> <name> advertise [signed-ms]
+> <name> poll [signed-ms|RESET]
 ```
 
 A bare Value defaults to `get`.
@@ -96,12 +96,18 @@ source. `OWNER/RESOURCE` changes and persists the source; `CLEAR` removes it.
 It also accepts `{"source":"OWNER/RESOURCE"}` or
 `{"owner":"OWNER","resource":"RESOURCE"}`.
 
-`enable` and `period` require a Managed Value. They configure network
-advertisement only, persist through `ResourcesManager`, and do not control
-hardware polling or application logic. `enable false` withdraws retained
-`/state`; `enable true` immediately advertises the current authoritative value
-when available. `period 0` selects event-driven-only publication; periodic
-refresh accepts 5 through 86400 seconds. Values 1 through 4 are invalid.
+`advertise` requires a Managed Value. With no payload it queries the signed
+millisecond policy. Positive values periodically reaffirm state, `0` is
+event-driven, and negative values suppress publication (`-1` is canonical).
+Changing from negative to non-negative immediately advertises current available
+state; changing to negative tombstones retained transport state without changing
+Resource availability.
+
+`poll` requires an opted-in Managed Value hardware policy. With no payload it
+queries the effective interval. Writes require `CONFIGURABLE_POLL`; negative
+writes additionally require `CAN_DISABLE`. `RESET` removes the persisted
+override and restores the firmware-declared default. Hardware connection state
+is firmware-reported and cannot be written remotely.
 
 `ResourcesManager::executeCommand()` returns an unformatted `ActionResult`.
 At the external command-response boundary, unsuccessful Resource commands are
@@ -109,8 +115,8 @@ rendered as `ERROR: <message>`. The shell protocol remains plain text; success
 responses remain specific to the command.
 
 ```text
-ERROR: PERIOD expects 0 or 5..86400 seconds
-ERROR: ENABLE requires a Managed value resource
+ERROR: ADVERTISE expects signed milliseconds
+ERROR: POLL is not configurable
 ERROR: Resource not found
 ERROR: Could not persist advertisement setting
 ```

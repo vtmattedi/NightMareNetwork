@@ -127,14 +127,6 @@ namespace
         return true;
     }
 
-    bool validAdvertisementPeriodSeconds(uint32_t seconds)
-    {
-        return seconds == 0 ||
-               (seconds >= NetResourceMinAdvertisementPeriodSeconds &&
-                seconds <= NetResourceMaxAdvertisementPeriodSeconds);
-    }
-
-
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
 /// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
 /// -- so the setting reads the way the command does.
@@ -497,10 +489,24 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
             // nothing.
             if (entry.size() > 4 && entry[4].is<const char *>())
                 item["depends_on"] = entry[4].as<const char *>();
-            if (entry.size() > 6 && entry[5].is<bool>() && entry[6].is<uint32_t>())
+            if (entry.size() > 5 && entry[5].is<int32_t>())
             {
-                item["advertisement_enabled"] = entry[5].as<bool>();
-                item["advertisement_period"] = entry[6].as<uint32_t>();
+                item["advertise_ms"] = entry[5].as<int32_t>();
+            }
+            if (entry.size() > 6 && entry[6].is<JsonArrayConst>())
+            {
+                JsonArrayConst packedHardware = entry[6].as<JsonArrayConst>();
+                if (packedHardware.size() >= 2 && packedHardware[0].is<int32_t>() &&
+                    packedHardware[1].is<uint8_t>())
+                {
+                    JsonObject hardware = item["hardware"].to<JsonObject>();
+                    hardware["poll_ms"] = packedHardware[0].as<int32_t>();
+                    hardware["flags"] = packedHardware[1].as<uint8_t>();
+                    if (packedHardware.size() > 2 && packedHardware[2].is<bool>())
+                        hardware["connected"] = packedHardware[2].as<bool>();
+                    if (packedHardware.size() > 3 && packedHardware[3].is<const char *>())
+                        hardware["note"] = packedHardware[3].as<const char *>();
+                }
             }
             continue;
         }
@@ -890,8 +896,7 @@ bool ResourcesManager::loadRemoteSources()
 }
 
 bool ResourcesManager::persistAdvertisementPolicy(const NetValueResource &resource,
-                                                  bool enabled,
-                                                  uint32_t periodMs) const
+                                                  int32_t periodMs) const
 {
     if (!beginRemoteResourceStorage())
         return false;
@@ -903,8 +908,39 @@ bool ResourcesManager::persistAdvertisementPolicy(const NetValueResource &resour
     JsonVariant slot = doc[resource.name_];
     JsonObject record = slot.is<JsonObject>() ? slot.as<JsonObject>()
                                                : slot.to<JsonObject>();
-    record["enabled"] = enabled;
-    record["period"] = periodMs / 1000UL;
+    record.remove("enabled");
+    record.remove("period");
+    record["advertise_ms"] = periodMs;
+    return writeResourceSettingsDocument(doc);
+}
+
+bool ResourcesManager::persistPollOverride(const NetValueResource &resource,
+                                           int32_t pollMs) const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+    JsonDocument doc;
+    bool exists = false;
+    if (!readResourceSettingsDocument(doc, exists))
+        return false;
+    JsonVariant slot = doc[resource.name_];
+    JsonObject record = slot.is<JsonObject>() ? slot.as<JsonObject>()
+                                               : slot.to<JsonObject>();
+    record["poll_ms"] = pollMs;
+    return writeResourceSettingsDocument(doc);
+}
+
+bool ResourcesManager::removePollOverride(const NetValueResource &resource) const
+{
+    if (!beginRemoteResourceStorage())
+        return false;
+    JsonDocument doc;
+    bool exists = false;
+    if (!readResourceSettingsDocument(doc, exists))
+        return false;
+    if (!exists || !doc[resource.name_].is<JsonObject>())
+        return true;
+    doc[resource.name_].as<JsonObject>().remove("poll_ms");
     return writeResourceSettingsDocument(doc);
 }
 
@@ -919,25 +955,63 @@ bool ResourcesManager::restoreAdvertisementPolicy(NetValueResource &resource)
     if (!exists || !doc[resource.name_].is<JsonObjectConst>())
         return true;
 
-    JsonObjectConst record = doc[resource.name_].as<JsonObjectConst>();
-    const uint32_t seconds = record["period"].as<uint32_t>();
-    if (!record["enabled"].is<bool>() || !record["period"].is<uint32_t>() ||
-        !validAdvertisementPeriodSeconds(seconds))
+    JsonObject record = doc[resource.name_].as<JsonObject>();
+    bool changed = false;
+    if (record["advertise_ms"].is<int32_t>())
+    {
+        resource.advertisementPeriodMs_ = record["advertise_ms"].as<int32_t>();
+        if (resource.advertisementPeriodMs_ < 0 &&
+            resource.advertisementPeriodMs_ != NetResourceAdvertisementDisabled)
+        {
+            resource.advertisementPeriodMs_ = NetResourceAdvertisementDisabled;
+            record["advertise_ms"] = resource.advertisementPeriodMs_;
+            changed = true;
+        }
+    }
+    else if (record["enabled"].is<bool>() && record["period"].is<uint32_t>() &&
+             record["period"].as<uint32_t>() <= static_cast<uint32_t>(INT32_MAX / 1000))
+    {
+        const uint32_t seconds = record["period"].as<uint32_t>();
+        resource.advertisementPeriodMs_ = record["enabled"].as<bool>()
+            ? static_cast<int32_t>(seconds * 1000UL)
+            : NetResourceAdvertisementDisabled;
+        record.remove("enabled");
+        record.remove("period");
+        record["advertise_ms"] = resource.advertisementPeriodMs_;
+        changed = true;
+    }
+    else
     {
         LOG_WARNING("RM", "Invalid advertisement settings for '%s'; restoring defaults",
                     resource.name_.c_str());
-        resource.advertisementEnabled_ = true;
-        resource.advertisementPeriodMs_ =
-            NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
-        resource.withdrawalPending_ = false;
-        return persistAdvertisementPolicy(resource, resource.advertisementEnabled_,
-                                          resource.advertisementPeriodMs_);
+        resource.advertisementPeriodMs_ = NetResourceDefaultAdvertisementPeriodMs;
+        record.remove("enabled");
+        record.remove("period");
+        record["advertise_ms"] = resource.advertisementPeriodMs_;
+        changed = true;
     }
-    resource.advertisementEnabled_ = record["enabled"].as<bool>();
-    resource.advertisementPeriodMs_ = seconds * 1000UL;
+    if (!record["enabled"].isNull() || !record["period"].isNull())
+    {
+        record.remove("enabled");
+        record.remove("period");
+        changed = true;
+    }
     resource.advertisementPolicyKnown_ = true;
-    resource.withdrawalPending_ = !resource.advertisementEnabled_;
-    return true;
+    resource.withdrawalPending_ = resource.advertisementPeriodMs_ < 0;
+
+    if (resource.hardwarePolicyDeclared_ && record["poll_ms"].is<int32_t>())
+    {
+        const int32_t pollMs = record["poll_ms"].as<int32_t>();
+        if ((resource.hardwarePolicy_.flags & CONFIGURABLE_POLL) != 0 &&
+            (pollMs >= 0 || (resource.hardwarePolicy_.flags & CAN_DISABLE) != 0))
+            resource.hardwarePolicy_.pollMs = pollMs;
+        else
+        {
+            record.remove("poll_ms");
+            changed = true;
+        }
+    }
+    return !changed || writeResourceSettingsDocument(doc);
 }
 
 bool ResourcesManager::loadAdvertisementSettings()
@@ -953,6 +1027,38 @@ bool ResourcesManager::loadAdvertisementSettings()
         return false;
 
     bool changed = false;
+    // Migrate every stored record, including Resources not present in this
+    // firmware build, so a successful load leaves one canonical file shape.
+    for (JsonPair entry : doc.as<JsonObject>())
+    {
+        if (!entry.value().is<JsonObject>())
+            continue;
+        JsonObject record = entry.value().as<JsonObject>();
+        if (!record["advertise_ms"].is<int32_t>() &&
+            record["enabled"].is<bool>() && record["period"].is<uint32_t>() &&
+            record["period"].as<uint32_t>() <= static_cast<uint32_t>(INT32_MAX / 1000))
+        {
+            const uint32_t seconds = record["period"].as<uint32_t>();
+            record["advertise_ms"] = record["enabled"].as<bool>()
+                ? static_cast<int32_t>(seconds * 1000UL)
+                : NetResourceAdvertisementDisabled;
+            changed = true;
+        }
+        if (record["advertise_ms"].is<int32_t>() &&
+            record["advertise_ms"].as<int32_t>() < 0 &&
+            record["advertise_ms"].as<int32_t>() != NetResourceAdvertisementDisabled)
+        {
+            record["advertise_ms"] = NetResourceAdvertisementDisabled;
+            changed = true;
+        }
+        if (record["advertise_ms"].is<int32_t>() &&
+            (!record["enabled"].isNull() || !record["period"].isNull()))
+        {
+            record.remove("enabled");
+            record.remove("period");
+            changed = true;
+        }
+    }
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
@@ -960,32 +1066,75 @@ bool ResourcesManager::loadAdvertisementSettings()
             continue;
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        JsonVariantConst slot = doc[value.name_];
+        JsonVariant slot = doc[value.name_];
         if (slot.isNull())
             continue;
 
-        JsonObjectConst record = slot.as<JsonObjectConst>();
-        const uint32_t seconds = record["period"].as<uint32_t>();
-        if (!slot.is<JsonObjectConst>() || !record["enabled"].is<bool>() ||
-            !record["period"].is<uint32_t>() || !validAdvertisementPeriodSeconds(seconds))
+        if (!slot.is<JsonObject>())
         {
             LOG_WARNING("RM", "Invalid advertisement settings for '%s'; restoring defaults",
                         value.name_.c_str());
-            value.advertisementEnabled_ = true;
-            value.advertisementPeriodMs_ =
-                NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
+            value.advertisementPeriodMs_ = NetResourceDefaultAdvertisementPeriodMs;
             JsonObject replacement = doc[value.name_].to<JsonObject>();
-            replacement["enabled"] = true;
-            replacement["period"] = NetResourceDefaultAdvertisementPeriodSeconds;
+            replacement["advertise_ms"] = value.advertisementPeriodMs_;
             changed = true;
         }
         else
         {
-            value.advertisementEnabled_ = record["enabled"].as<bool>();
-            value.advertisementPeriodMs_ = seconds * 1000UL;
+            JsonObject record = slot.as<JsonObject>();
+            if (record["advertise_ms"].is<int32_t>())
+            {
+                value.advertisementPeriodMs_ = record["advertise_ms"].as<int32_t>();
+                if (value.advertisementPeriodMs_ < 0 &&
+                    value.advertisementPeriodMs_ != NetResourceAdvertisementDisabled)
+                {
+                    value.advertisementPeriodMs_ = NetResourceAdvertisementDisabled;
+                    record["advertise_ms"] = value.advertisementPeriodMs_;
+                    changed = true;
+                }
+            }
+            else if (record["enabled"].is<bool>() && record["period"].is<uint32_t>() &&
+                     record["period"].as<uint32_t>() <=
+                         static_cast<uint32_t>(INT32_MAX / 1000))
+            {
+                const uint32_t seconds = record["period"].as<uint32_t>();
+                value.advertisementPeriodMs_ = record["enabled"].as<bool>()
+                    ? static_cast<int32_t>(seconds * 1000UL)
+                    : NetResourceAdvertisementDisabled;
+                record.remove("enabled");
+                record.remove("period");
+                record["advertise_ms"] = value.advertisementPeriodMs_;
+                changed = true;
+            }
+            else
+            {
+                value.advertisementPeriodMs_ = NetResourceDefaultAdvertisementPeriodMs;
+                record.remove("enabled");
+                record.remove("period");
+                record["advertise_ms"] = value.advertisementPeriodMs_;
+                changed = true;
+            }
+            if (!record["enabled"].isNull() || !record["period"].isNull())
+            {
+                record.remove("enabled");
+                record.remove("period");
+                changed = true;
+            }
+            if (value.hardwarePolicyDeclared_ && record["poll_ms"].is<int32_t>())
+            {
+                const int32_t pollMs = record["poll_ms"].as<int32_t>();
+                if ((value.hardwarePolicy_.flags & CONFIGURABLE_POLL) != 0 &&
+                    (pollMs >= 0 || (value.hardwarePolicy_.flags & CAN_DISABLE) != 0))
+                    value.hardwarePolicy_.pollMs = pollMs;
+                else
+                {
+                    record.remove("poll_ms");
+                    changed = true;
+                }
+            }
         }
         value.advertisementPolicyKnown_ = true;
-        value.withdrawalPending_ = !value.advertisementEnabled_;
+        value.withdrawalPending_ = value.advertisementPeriodMs_ < 0;
     }
 
     if (changed && !writeResourceSettingsDocument(doc))
@@ -1342,8 +1491,17 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
             // so a value that declares no dependency is unchanged on the wire.
             if (value.dependency() != nullptr)
                 item["depends_on"] = value.dependency()->name();
-            item["advertisement_enabled"] = value.advertisementEnabled_;
-            item["advertisement_period"] = value.advertisementPeriodMs_ / 1000UL;
+            item["advertise_ms"] = value.advertisementPeriodMs_;
+            if (value.hardwarePolicyDeclared_)
+            {
+                JsonObject hardware = item["hardware"].to<JsonObject>();
+                hardware["poll_ms"] = value.hardwarePolicy_.pollMs;
+                hardware["flags"] = value.hardwarePolicy_.flags;
+                if ((value.hardwarePolicy_.flags & REPORT_HW_CONNECTION) != 0)
+                    hardware["connected"] = value.hardwareConnected_;
+                if (value.hardwarePolicy_.note.length() != 0)
+                    hardware["note"] = value.hardwarePolicy_.note;
+            }
         }
         else
         {
@@ -1387,14 +1545,27 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
-            // Dependency was appended in version 3. Version 4 keeps its stable
-            // position with null when absent, then appends advertisement policy.
             if (value.dependency() != nullptr)
                 item.add(value.dependency()->name());
             else
                 item.add(nullptr);
-            item.add(value.advertisementEnabled_);
-            item.add(value.advertisementPeriodMs_ / 1000UL);
+            item.add(value.advertisementPeriodMs_);
+            if (!value.hardwarePolicyDeclared_)
+                item.add(nullptr);
+            else
+            {
+                JsonArray hardware = item.add<JsonArray>();
+                hardware.add(value.hardwarePolicy_.pollMs);
+                hardware.add(value.hardwarePolicy_.flags);
+                const bool reportsConnection =
+                    (value.hardwarePolicy_.flags & REPORT_HW_CONNECTION) != 0;
+                if (reportsConnection)
+                    hardware.add(value.hardwareConnected_);
+                else if (value.hardwarePolicy_.note.length() != 0)
+                    hardware.add(nullptr);
+                if (value.hardwarePolicy_.note.length() != 0)
+                    hardware.add(value.hardwarePolicy_.note);
+            }
             continue;
         }
 
@@ -1616,7 +1787,7 @@ bool ResourcesManager::serializeConsumeManifest(String &payload, ManifestFormat 
 bool ResourcesManager::publishState(NetValueResource &resource)
 {
     if (publisher_ == nullptr || !resource.isOwned() || !resource.hasAuthoritativeValue_ ||
-        !resource.available_ || !resource.advertisementEnabled_ ||
+        !resource.available_ || resource.advertisementPeriodMs_ < 0 ||
         !hasResolvedSource(resource))
         return false;
     // The wire format is the codec's own representation: "23.5", "true", raw
@@ -1760,7 +1931,7 @@ bool ResourcesManager::publishResourceStates()
             continue;
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (value.hasAuthoritativeValue_ && value.available_ &&
-            value.advertisementEnabled_ && !publishState(value))
+            value.advertisementPeriodMs_ >= 0 && !publishState(value))
             published = false;
     }
     return published;
@@ -1855,39 +2026,84 @@ bool ResourcesManager::setAvailability(NetValueResource &resource, bool availabl
     return true;
 }
 
-bool ResourcesManager::setAdvertisementEnabled(NetValueResource &resource, bool enabled)
+bool ResourcesManager::setAdvertisementPolicy(NetValueResource &resource,
+                                              int32_t milliseconds)
 {
     if (resource.resourceManager_ != this || !resource.isOwned())
         return false;
-    if (!persistAdvertisementPolicy(resource, enabled, resource.advertisementPeriodMs_))
+    if (!persistAdvertisementPolicy(resource, milliseconds))
         return false;
-    resource.advertisementEnabled_ = enabled;
+    const int32_t previous = resource.advertisementPeriodMs_;
+    resource.advertisementPeriodMs_ = milliseconds;
     resource.advertisementPolicyKnown_ = true;
     if (!publishManifest())
         LOG_WARNING("RM", "Advertisement policy manifest queued for retry");
-    if (!enabled)
+    if (milliseconds < 0)
         withdrawState(resource);
     else
     {
         resource.withdrawalPending_ = false;
-        if (resource.available_ && resource.hasAuthoritativeValue_)
+        if (previous < 0 && resource.available_ && resource.hasAuthoritativeValue_)
             publishState(resource);
     }
     return true;
 }
 
-bool ResourcesManager::setAdvertisementPeriod(NetValueResource &resource, uint32_t seconds)
+bool ResourcesManager::setHardwarePolicy(NetValueResource &resource,
+                                         const HardwarePolicy &policy)
 {
     if (resource.resourceManager_ != this || !resource.isOwned() ||
-        !validAdvertisementPeriodSeconds(seconds))
+        policy.note.length() > NetResourceHardwareNoteMaxLength)
         return false;
-    const uint32_t periodMs = seconds * 1000UL;
-    if (!persistAdvertisementPolicy(resource, resource.advertisementEnabled_, periodMs))
+    resource.hardwarePolicy_ = policy;
+    resource.hardwareDefaultPollMs_ = policy.pollMs;
+    resource.hardwarePolicyDeclared_ = true;
+    if (advertisementSettingsLoaded_ && !restoreAdvertisementPolicy(resource))
         return false;
-    resource.advertisementPeriodMs_ = periodMs;
-    resource.advertisementPolicyKnown_ = true;
     if (!publishManifest())
-        LOG_WARNING("RM", "Advertisement policy manifest queued for retry");
+        LOG_WARNING("RM", "Hardware policy manifest queued for retry");
+    return true;
+}
+
+bool ResourcesManager::setHardwareConnected(NetValueResource &resource, bool connected)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned() ||
+        !resource.hardwarePolicyDeclared_ ||
+        (resource.hardwarePolicy_.flags & REPORT_HW_CONNECTION) == 0)
+        return false;
+    if (resource.hardwareConnected_ == connected)
+        return true;
+    resource.hardwareConnected_ = connected;
+    if (!publishManifest())
+        LOG_WARNING("RM", "Hardware connection manifest queued for retry");
+    return true;
+}
+
+bool ResourcesManager::setPollOverride(NetValueResource &resource, int32_t milliseconds)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned() ||
+        !resource.hardwarePolicyDeclared_ ||
+        (resource.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0 ||
+        (milliseconds < 0 && (resource.hardwarePolicy_.flags & CAN_DISABLE) == 0))
+        return false;
+    if (!persistPollOverride(resource, milliseconds))
+        return false;
+    resource.hardwarePolicy_.pollMs = milliseconds;
+    if (!publishManifest())
+        LOG_WARNING("RM", "Hardware poll manifest queued for retry");
+    return true;
+}
+
+bool ResourcesManager::resetPollOverride(NetValueResource &resource)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned() ||
+        !resource.hardwarePolicyDeclared_ ||
+        (resource.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0 ||
+        !removePollOverride(resource))
+        return false;
+    resource.hardwarePolicy_.pollMs = resource.hardwareDefaultPollMs_;
+    if (!publishManifest())
+        LOG_WARNING("RM", "Hardware poll manifest queued for retry");
     return true;
 }
 
@@ -1920,21 +2136,21 @@ void ResourcesManager::tick()
                 withdrawState(value);
             return;
         }
-        if (publisher_ == nullptr || !value.advertisementEnabled_ || !value.available_ ||
+        if (publisher_ == nullptr || value.advertisementPeriodMs_ < 0 || !value.available_ ||
             !value.hasAuthoritativeValue_ || !retryReady)
             return;
         if (retryScheduled || (value.advertisementPeriodMs_ > 0 &&
             static_cast<uint32_t>(now - value.lastAdvertisementMs_) >=
-                value.advertisementPeriodMs_))
+                static_cast<uint32_t>(value.advertisementPeriodMs_)))
             publishState(value);
         return;
     }
 
     if (value.available_ && value.hasAuthoritativeValue_ &&
-        value.advertisementPolicyKnown_ && value.advertisementEnabled_ &&
+        value.advertisementPolicyKnown_ &&
         value.advertisementPeriodMs_ > 0 &&
         static_cast<uint32_t>(now - value.lastUpdateMs_) >=
-            value.advertisementPeriodMs_ * 2UL)
+            static_cast<uint32_t>(value.advertisementPeriodMs_) * 2UL)
         value.freshness_ = ResourceFreshness::STALE;
 }
 
@@ -2140,7 +2356,7 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     }
 
     if (command.target.length() == 0)
-        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source|enable|period] [payload]")};
+        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source|advertise|poll] [payload]")};
 
     auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult
     {
@@ -2249,35 +2465,56 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         return {true, value.encodedCurrentValue()};
     }
 
-    if (verb == "ENABLE")
+    if (verb == "ADVERTISE")
     {
         if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
-            return {false, String("ENABLE requires a Managed value resource")};
+            return {false, String("ADVERTISE requires a Managed value resource")};
         String payload = command.payload;
         payload.trim();
-        bool enabled = false;
-        if (!NetCodec<bool>::decode(payload, enabled))
-            return {false, String("ENABLE expects true or false")};
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (!setAdvertisementEnabled(value, enabled))
+        if (payload.length() == 0)
+            return {true, String(value.advertisementPeriodMs_)};
+        int32_t milliseconds = 0;
+        if (!NetCodec<int32_t>::decode(payload, milliseconds))
+            return {false, String("ADVERTISE expects signed milliseconds")};
+        if (milliseconds < 0)
+            milliseconds = NetResourceAdvertisementDisabled;
+        if (!setAdvertisementPolicy(value, milliseconds))
             return {false, String("Could not persist advertisement setting")};
-        return {true, enabled ? String("true") : String("false")};
+        return {true, String(milliseconds)};
     }
 
-    if (verb == "PERIOD")
+    if (verb == "POLL")
     {
         if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
-            return {false, String("PERIOD requires a Managed value resource")};
+            return {false, String("POLL requires a Managed value resource")};
+        NetValueResource &value = *static_cast<NetValueResource *>(resource);
+        if (!value.hardwarePolicyDeclared_)
+            return {false, String("POLL requires a hardware policy")};
         String payload = command.payload;
         payload.trim();
-        uint32_t seconds = 0;
-        if (!NetCodec<uint32_t>::decode(payload, seconds) ||
-            !validAdvertisementPeriodSeconds(seconds))
-            return {false, String("PERIOD expects 0 or 5..86400 seconds")};
-        NetValueResource &value = *static_cast<NetValueResource *>(resource);
-        if (!setAdvertisementPeriod(value, seconds))
-            return {false, String("Could not persist advertisement setting")};
-        return {true, String(seconds)};
+        if (payload.length() == 0)
+            return {true, String(value.hardwarePolicy_.pollMs)};
+        String upper = payload;
+        upper.toUpperCase();
+        if (upper == "RESET")
+        {
+            if ((value.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0)
+                return {false, String("POLL is not configurable")};
+            if (!resetPollOverride(value))
+                return {false, String("Could not reset poll override")};
+            return {true, String(value.hardwarePolicy_.pollMs)};
+        }
+        int32_t milliseconds = 0;
+        if (!NetCodec<int32_t>::decode(payload, milliseconds))
+            return {false, String("POLL expects signed milliseconds or RESET")};
+        if ((value.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0)
+            return {false, String("POLL is not configurable")};
+        if (milliseconds < 0 && (value.hardwarePolicy_.flags & CAN_DISABLE) == 0)
+            return {false, String("POLL cannot disable this hardware")};
+        if (!setPollOverride(value, milliseconds))
+            return {false, String("Could not persist poll override")};
+        return {true, String(milliseconds)};
     }
 
     if (verb == "SET")
@@ -2440,21 +2677,12 @@ void ResourcesManager::applyAdvertisementMetadata(const String &deviceName,
         {
             JsonArrayConst entry = element.as<JsonArrayConst>();
             const char *name = entry.size() >= 2 ? entry[1].as<const char *>() : nullptr;
-            if (name == nullptr || value.sourceResourceName_ != name || entry.size() < 7 ||
+            if (name == nullptr || value.sourceResourceName_ != name || entry.size() < 6 ||
                 entry[0].as<uint8_t>() != static_cast<uint8_t>(NetResourceType::VALUE) ||
-                !entry[5].is<bool>() || !entry[6].is<uint32_t>())
+                !entry[5].is<int32_t>())
                 continue;
-            const uint32_t seconds = entry[6].as<uint32_t>();
-            if (!validAdvertisementPeriodSeconds(seconds))
-                continue;
-            value.advertisementEnabled_ = entry[5].as<bool>();
-            value.advertisementPeriodMs_ = seconds * 1000UL;
+            value.advertisementPeriodMs_ = entry[5].as<int32_t>();
             value.advertisementPolicyKnown_ = true;
-            if (!value.advertisementEnabled_ && value.available_)
-            {
-                value.available_ = false;
-                withdrawFromDependents(value);
-            }
             break;
         }
     }

@@ -166,21 +166,17 @@ If connection is unavailable, the local value still changes. Reconnect re-announ
 
 ## Managed advertisement policy
 
-Managed Values advertise changes immediately when enabled and available.
-Non-zero periods also refresh an unchanged retained value. Defaults are enabled
-with a 300-second period.
-
-```cpp
-temperature.setAdvertisementEnabled(true);
-temperature.setAdvertisementPeriod(300); // seconds
-temperature.setAvailable(true);
-```
+Managed Values publish changes immediately when available and their signed
+advertisement interval is non-negative. A positive interval also reaffirms an
+unchanged retained value; `0` is event-driven only and a negative value
+suppresses publication. The default is `300000` ms.
 
 The advertisement policy is persistent under the stable local Resource name in
 `/resourcesettings.json`. It is owned by `ResourcesManager`, not
-`ConfigManager`, and is restored before networking starts. The accepted period
-is `0` for event-driven-only publication or 5 through 86400 seconds for periodic
-refresh. Values 1 through 4 are invalid.
+`ConfigManager`, and is restored before networking starts. Advertisement is a
+manager/protocol concern and is intentionally absent from the Resource object's
+public API. Use the Resource command `ADVERTISE <signed-ms>` to inspect or
+change it.
 
 The period is the maximum intended advertisement interval under normal
 framework servicing, not a hard real-time guarantee. A successful change or
@@ -188,15 +184,35 @@ refresh publication resets its timer. Policy changes persist before their
 runtime commit; failed manifest publication is marked dirty and retried with
 rate limiting by `ResourcesManager::tick()`.
 
-Disabling advertisement withdraws retained `/state` and suppresses future
-state publications. Re-enabling immediately publishes the current
+Setting a negative interval withdraws retained `/state` and suppresses future
+state publications. Returning to a non-negative interval immediately publishes the current
 authoritative value when available. Neither setting controls hardware polling,
 power, acquisition, computation, or a local control loop.
 
 Availability is runtime state. `setAvailable(false)` keeps the Resource bound
 and in the manifest, withdraws retained state, and still permits local
 `setValue()` calls to update last-known data. Returning to available publishes
-the current value immediately when advertisement is enabled.
+the current value immediately when advertisement is non-negative.
+
+## Optional hardware policy
+
+A Managed Value can describe application-owned hardware without asking
+NightMare to poll it:
+
+```cpp
+temperature.setHardwarePolicy({
+    .pollMs = 1000,
+    .flags = REPORT_HW_CONNECTION | CONFIGURABLE_POLL | CAN_DISABLE,
+    .note = "Address: 0x48"
+});
+```
+
+The application performs acquisition and consults `hardwarePollMs()` and
+`hardwareEnabled()`. It may report runtime connectivity with
+`setHardwareConnected()` when `REPORT_HW_CONNECTION` was declared. Notes are
+informational and limited to 64 encoded UTF-8 bytes. `ResourcesManager` may
+persist only a remotely configured `poll_ms` override; flags, notes, connection
+state, and firmware defaults are never persisted.
 
 ## RemoteSensor
 
@@ -391,9 +407,6 @@ resource.available()
 resource.freshness()
 resource.isStale()
 resource.lastUpdateMs()
-resource.advertisementPolicyKnown()
-resource.advertisementEnabled()
-resource.advertisementPeriodSeconds()
 ```
 
 State begins `UNKNOWN`.
@@ -404,11 +417,10 @@ An empty owner `/state` tombstone makes the Resource unavailable without using
 `STALE` as a synonym for withdrawal.
 
 While available, a Remote Value becomes `STALE` after approximately twice a
-non-zero, enabled advertisement period learned from the owner's compact
-manifest. Period `0` is event-driven only and disables time-based aging. Owner
-metadata with advertisement disabled immediately makes the Remote Value
-unavailable; metadata becoming enabled does not make it available without a
-valid owner state. A new valid owner state immediately restores availability
+positive advertisement interval learned from the owner's compact manifest.
+Interval `0` is event-driven only and disables time-based aging. A negative
+interval says only that the owner does not advertise this Value; it does not
+change Resource or hardware availability. A new valid owner state restores availability
 and `FRESH`. The last decoded Value remains readable as last-known data while
 unavailable or stale.
 

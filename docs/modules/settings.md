@@ -347,11 +347,15 @@ restores bound Configs during framework startup, creates missing entries from
 firmware defaults, and replaces invalid entries with those defaults. Application
 code should use `Config<T>` rather than reading or writing these keys directly.
 
-`ResourcesManager` keeps Managed Value advertisement policy in a separate
+`ResourcesManager` keeps Managed Value advertisement policy and remotely
+configurable hardware poll overrides in a separate
 `/resourcesettings.json` document keyed by stable local Resource name. That file
 does not consume `RuntimeState` entries and is not part of `ConfigManager` or
-`PersistentSettings`; application code should use the Managed Value
-advertisement API or Resource commands rather than editing it directly.
+`PersistentSettings`; application code should use Resource commands rather than
+editing it directly. Advertisement is stored as signed `advertise_ms`. The old
+`enabled` plus seconds-based `period` representation is migrated on load.
+Hardware records persist only `poll_ms`, never flags, notes, connection state,
+or firmware defaults.
 
 ## Command access
 

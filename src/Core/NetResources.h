@@ -11,11 +11,25 @@ class NetValue;
 constexpr size_t NetResourceMaxPayloadLength = 2048;
 constexpr size_t NetResourceMaxManifestLength = 16384;
 constexpr size_t NetResourceMaxCommandLength = NetResourceMaxManifestLength + 256;
-constexpr uint32_t NetResourceDefaultAdvertisementPeriodSeconds = 300;
-constexpr uint32_t NetResourceMinAdvertisementPeriodSeconds = 5;
-constexpr uint32_t NetResourceMaxAdvertisementPeriodSeconds = 86400;
+constexpr int32_t NetResourceDefaultAdvertisementPeriodMs = 300000;
+constexpr int32_t NetResourceAdvertisementDisabled = -1;
 constexpr uint32_t NetResourceAdvertisementRetryMs = 1000;
 constexpr uint32_t NetResourceManifestRetryMs = 1000;
+constexpr size_t NetResourceHardwareNoteMaxLength = 64;
+
+enum HardwarePolicyFlag : uint8_t
+{
+    REPORT_HW_CONNECTION = 1 << 0,
+    CONFIGURABLE_POLL = 1 << 1,
+    CAN_DISABLE = 1 << 2,
+};
+
+struct HardwarePolicy
+{
+    int32_t pollMs = 0;
+    uint8_t flags = 0;
+    String note;
+};
 
 enum class NetResourceType : uint8_t
 {
@@ -202,19 +216,20 @@ enum class ManifestFormat : uint8_t
  *   manifest := [ encodingVersion:uint, manifestVersion:uint, resources:array ]
  *
  *   resource := [ 0, name:str, access:uint, type:uint,
- *                 dependsOn:str|null, advertisementEnabled:bool,
- *                 advertisementPeriodSeconds:uint ]                    // VALUE
+ *                 dependsOn:str|null, advertiseMs:int, hardware:array|null ] // VALUE
  *             | [ 1, name:str, arguments:array ]                        // ACTION
+ *
+ *   hardware := [ pollMs:int, flags:uint, connected:bool|null?, note:str? ]
  *
  *   argument := [ name:str, type:uint, required:bool ]
  *
  * `kind` leads each resource so a reader knows the shape before reading the
  * rest. The numbers are NetResourceType, AccessPolicy and NetValueType.
  *
- * `dependsOn` is the LOCAL name of the value this one mirrors. Version 4 adds
- * a null placeholder when there is no dependency so advertisement policy can
- * occupy stable appended positions 5 and 6. Older readers ignore those trailing
- * positions. It is never `<device>/<resource>`: see setDependency().
+ * `dependsOn` is the LOCAL name of the value this one mirrors. Encoding version
+ * 2 replaces the old positions 5 and 6 with the signed millisecond policy and
+ * optional hardware metadata. It is never `<device>/<resource>`: see
+ * setDependency().
  *
  * Positions rather than keys because MessagePack has no string table: it writes
  * every key in full, every time, and on a real 20-resource manifest the repeated
@@ -246,8 +261,8 @@ enum class ManifestFormat : uint8_t
  *     it. That is what makes rule 3 survivable -- a bump degrades old readers to
  *     JSON instead of breaking them.
  * ------------------------------------------------------------------------- */
-constexpr uint8_t ManifestEncodingVersion = 1;
-constexpr uint8_t ResourceManifestVersion = 4;
+constexpr uint8_t ManifestEncodingVersion = 2;
+constexpr uint8_t ResourceManifestVersion = 5;
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
 /// Version 2 appends `remotes` (position 3 of the compact form): every Remote
 /// Resource this device declares, bound or not, so a controller can find and
@@ -314,12 +329,6 @@ public:
     bool available() const { return available_; }
     ResourceFreshness freshness() const { return freshness_; }
     uint32_t lastUpdateMs() const { return lastUpdateMs_; }
-    bool advertisementPolicyKnown() const { return advertisementPolicyKnown_; }
-    bool advertisementEnabled() const { return advertisementEnabled_; }
-    uint32_t advertisementPeriodSeconds() const
-    {
-        return advertisementPeriodMs_ / 1000UL;
-    }
 
     /// @brief The value this one mirrors, or nullptr. See setDependency().
     const NetValueResource *dependency() const { return dependency_; }
@@ -370,8 +379,11 @@ protected:
     bool isStaleImpl() const { return freshness_ == ResourceFreshness::STALE; }
     void useOptimisticSync() { syncStrategy_ = NetSyncStrategy::OPTIMISTIC; }
     bool setManagedAvailability(bool available);
-    bool setManagedAdvertisementEnabled(bool enabled);
-    bool setManagedAdvertisementPeriod(uint32_t seconds);
+    bool setManagedHardwarePolicy(const HardwarePolicy &policy);
+    bool setManagedHardwareConnected(bool connected);
+    int32_t managedHardwarePollMs() const { return hardwarePolicy_.pollMs; }
+    bool managedHardwareEnabled() const { return hardwarePolicy_.pollMs >= 0; }
+    bool managedHardwareConnected() const { return hardwareConnected_; }
 
     // Type-erasure boundary. These are the only value operations the connection
     // layer needs, and all three speak the encoded wire format.
@@ -385,9 +397,11 @@ private:
     ResourceFreshness freshness_ = ResourceFreshness::UNKNOWN;
     bool available_ = true;
     bool advertisementPolicyKnown_ = true;
-    bool advertisementEnabled_ = true;
-    uint32_t advertisementPeriodMs_ =
-        NetResourceDefaultAdvertisementPeriodSeconds * 1000UL;
+    int32_t advertisementPeriodMs_ = NetResourceDefaultAdvertisementPeriodMs;
+    HardwarePolicy hardwarePolicy_;
+    int32_t hardwareDefaultPollMs_ = 0;
+    bool hardwarePolicyDeclared_ = false;
+    bool hardwareConnected_ = false;
     uint32_t lastAdvertisementMs_ = 0;
     uint32_t nextAdvertisementRetryMs_ = 0;
     bool advertisementRetryScheduled_ = false;
@@ -572,14 +586,17 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, false); }
     bool setAvailable(bool available) { return this->setManagedAvailability(available); }
-    bool setAdvertisementEnabled(bool enabled)
+    bool setHardwarePolicy(const HardwarePolicy &policy)
     {
-        return this->setManagedAdvertisementEnabled(enabled);
+        return this->setManagedHardwarePolicy(policy);
     }
-    bool setAdvertisementPeriod(uint32_t seconds)
+    bool setHardwareConnected(bool connected)
     {
-        return this->setManagedAdvertisementPeriod(seconds);
+        return this->setManagedHardwareConnected(connected);
     }
+    int32_t hardwarePollMs() const { return this->managedHardwarePollMs(); }
+    bool hardwareEnabled() const { return this->managedHardwareEnabled(); }
+    bool hardwareConnected() const { return this->managedHardwareConnected(); }
 
     /* dependsOn() is here and nowhere else. A Remote value already mirrors its
      * source, an action has no value to mirror, and ManagedState is waiting on
@@ -641,14 +658,17 @@ public:
     const T &getValue() const { return this->getValueImpl(); }
     bool setValue(const T &value) { return this->setManagedValue(value, true); }
     bool setAvailable(bool available) { return this->setManagedAvailability(available); }
-    bool setAdvertisementEnabled(bool enabled)
+    bool setHardwarePolicy(const HardwarePolicy &policy)
     {
-        return this->setManagedAdvertisementEnabled(enabled);
+        return this->setManagedHardwarePolicy(policy);
     }
-    bool setAdvertisementPeriod(uint32_t seconds)
+    bool setHardwareConnected(bool connected)
     {
-        return this->setManagedAdvertisementPeriod(seconds);
+        return this->setManagedHardwareConnected(connected);
     }
+    int32_t hardwarePollMs() const { return this->managedHardwarePollMs(); }
+    bool hardwareEnabled() const { return this->managedHardwareEnabled(); }
+    bool hardwareConnected() const { return this->managedHardwareConnected(); }
 
     /* No dependsOn() here, deliberately. A mirror of another value is
      * read-only by construction, and this one accepts writes: a /set arriving

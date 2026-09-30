@@ -207,26 +207,31 @@ bool NetValueResource::setManagedAvailability(bool available)
     return true;
 }
 
-bool NetValueResource::setManagedAdvertisementEnabled(bool enabled)
+bool NetValueResource::setManagedHardwarePolicy(const HardwarePolicy &policy)
 {
-    if (!isOwned())
+    if (!isOwned() || policy.note.length() > NetResourceHardwareNoteMaxLength)
         return false;
 #if NM_ENABLE_RESOURCES
     if (resourceManager_ != nullptr)
-        return resourceManager_->setAdvertisementEnabled(*this, enabled);
+        return resourceManager_->setHardwarePolicy(*this, policy);
 #endif
-    return false;
+    hardwarePolicy_ = policy;
+    hardwareDefaultPollMs_ = policy.pollMs;
+    hardwarePolicyDeclared_ = true;
+    return true;
 }
 
-bool NetValueResource::setManagedAdvertisementPeriod(uint32_t seconds)
+bool NetValueResource::setManagedHardwareConnected(bool connected)
 {
-    if (!isOwned())
+    if (!isOwned() || !hardwarePolicyDeclared_ ||
+        (hardwarePolicy_.flags & REPORT_HW_CONNECTION) == 0)
         return false;
 #if NM_ENABLE_RESOURCES
     if (resourceManager_ != nullptr)
-        return resourceManager_->setAdvertisementPeriod(*this, seconds);
+        return resourceManager_->setHardwareConnected(*this, connected);
 #endif
-    return false;
+    hardwareConnected_ = connected;
+    return true;
 }
 
 bool NetValueResource::dispatchLocalWrite(const String &encoded)

@@ -240,11 +240,11 @@ twice a non-zero advertised period. Period `0` is event-driven and does not age
 to `STALE` by time. A retained withdrawal changes availability; it does not use
 `STALE` as a synonym.
 
-The retained Resource manifest supplies advertisement-period metadata but does
-not itself make a Value fresh. Explicit disabled advertisement metadata makes a
-Remote Value unavailable, while enabled metadata alone never makes it
-available. Device presence does not make a Value fresh. Only valid `/state`
-traffic supplies and reaffirms the authoritative Value.
+The retained Resource manifest supplies signed advertisement-interval metadata
+but does not itself make a Value fresh or available. A negative interval means
+the owner does not expose the Value over this transport; it does not describe
+hardware availability. Device presence does not make a Value fresh. Only valid
+`/state` traffic supplies and reaffirms the authoritative Value.
 
 This is one of the project's central rules:
 

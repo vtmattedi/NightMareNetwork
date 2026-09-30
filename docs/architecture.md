@@ -381,7 +381,7 @@ ConfigManager.restore()
     restores bound Config values or persists their firmware defaults
 
 ResourcesManager.loadAdvertisementSettings()
-    restores persistent Managed Value advertisement policy
+    restores Managed Value advertisement policy and hardware poll overrides
 
 ResourcesManager.loadRemoteSources()
     restores Remote Resource source bindings

@@ -83,8 +83,8 @@ publishes. Actions additionally cannot register from their base constructor
 before the leaf schema is fully constructed.
 
 Advertisement refresh does not depend on that refactor. Dynamically bound
-Managed Values restore advertisement policy immediately after the manager's
-startup settings phase.
+Managed Values restore advertisement policy and any applicable hardware poll
+override immediately after the manager's startup settings phase.
 
 ## Projected Remote Value JSON fan-out is not implemented
 

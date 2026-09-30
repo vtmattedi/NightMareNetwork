@@ -252,9 +252,6 @@ NetValueType type() const;
 bool available() const;
 ResourceFreshness freshness() const;
 uint32_t lastUpdateMs() const;
-bool advertisementPolicyKnown() const;
-bool advertisementEnabled() const;
-uint32_t advertisementPeriodSeconds() const;
 const NetValueResource *dependency() const;
 ```
 
@@ -264,25 +261,40 @@ ManagedSensor and ManagedState expose:
 const T &getValue() const;
 bool setValue(const T &value);
 bool setAvailable(bool available);
-bool setAdvertisementEnabled(bool enabled);
-bool setAdvertisementPeriod(uint32_t seconds);
+bool setHardwarePolicy(const HardwarePolicy &policy);
+int32_t hardwarePollMs() const;
+bool hardwareEnabled() const;
+bool setHardwareConnected(bool connected);
+bool hardwareConnected() const;
 ```
 
 RemoteSensor and RemoteState expose `getValue()`, `hasValue()`, and `isStale()`;
 RemoteState also exposes `setValue()`.
 
-Advertisement defaults and limits:
+Hardware declarations and Resource limits:
 
 ```cpp
-NetResourceDefaultAdvertisementPeriodSeconds = 300
-NetResourceMinAdvertisementPeriodSeconds = 5
-NetResourceMaxAdvertisementPeriodSeconds = 86400
+enum HardwarePolicyFlag : uint8_t {
+    REPORT_HW_CONNECTION = 1 << 0,
+    CONFIGURABLE_POLL = 1 << 1,
+    CAN_DISABLE = 1 << 2,
+};
+
+struct HardwarePolicy {
+    int32_t pollMs = 0;
+    uint8_t flags = 0;
+    String note;
+};
+
+NetResourceHardwareNoteMaxLength = 64
+NetResourceDefaultAdvertisementPeriodMs = 300000
+NetResourceAdvertisementDisabled = -1
 NetResourceAdvertisementRetryMs = 1000
 NetResourceManifestRetryMs = 1000
 ```
 
-Advertisement period `0` is also valid and means event-driven only. Values 1
-through 4 are invalid.
+Advertisement policy is manager-owned and intentionally absent from the public
+Resource API.
 
 ## Remote Value source selection
 
@@ -553,8 +565,8 @@ static bool decodeConsumeManifest(
 
 constexpr uint8_t ConsumeManifestEncodingVersion = 1;
 constexpr uint8_t ConsumeManifestVersion = 2;
-constexpr uint8_t ManifestEncodingVersion = 1;
-constexpr uint8_t ResourceManifestVersion = 4;
+constexpr uint8_t ManifestEncodingVersion = 2;
+constexpr uint8_t ResourceManifestVersion = 5;
 
 String resolveResourceConsumeManifestTopic(
     const String &deviceName,
@@ -572,7 +584,7 @@ ActionResult executeCommand(
 //   >manifest [publish] [json|msgpack]
 //   >drop <name|owner/name>
 //   >raw <topic> [payload]
-//   > <name|owner/name> [get|set|invoke|source|enable|period] [payload]
+//   > <name|owner/name> [get|set|invoke|source|advertise|poll] [payload]
 
 bool withdrawIdentity(const String &oldDeviceName);
 ```

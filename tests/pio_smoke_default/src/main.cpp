@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <new>
 #include <utility>
+#include <LittleFS.h>
 
 namespace
 {
@@ -44,6 +45,19 @@ public:
     static constexpr bool value = decltype(test<T>(0))::value;
 };
 
+template <typename T>
+class HasAdvertisementApi
+{
+    template <typename U>
+    static auto test(int) -> decltype(std::declval<U &>().advertisementEnabled(),
+                                     std::true_type());
+    template <typename>
+    static std::false_type test(...);
+
+public:
+    static constexpr bool value = decltype(test<T>(0))::value;
+};
+
 static_assert(HasSetValue<ManagedSensor<int>>::value, "ManagedSensor must be writable locally");
 static_assert(!HasSetValue<RemoteSensor<int>>::value, "RemoteSensor must not expose setValue");
 static_assert(HasSetValue<ManagedState<int>>::value, "ManagedState must expose setValue");
@@ -51,6 +65,8 @@ static_assert(HasSetValue<RemoteState<int>>::value, "RemoteState must expose set
 static_assert(!HasFreshnessField<RemoteSensor<int>>::value,
               "freshness must be exposed through its accessor, not a public field");
 static_assert(!HasEncodedValue<ManagedSensor<int>>::value, "wire encoding is framework-internal");
+static_assert(!HasAdvertisementApi<ManagedSensor<int>>::value,
+              "advertisement policy must remain manager-internal");
 static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
               "NetValue is an implementation base, not an application resource");
 static_assert(static_cast<uint8_t>(NightMare::ConnectionType::AUTO) == 0,
@@ -92,6 +108,10 @@ public:
             if (failManifest)
                 return false;
             ++manifestPublishes;
+            if (topic.endsWith("/manifest/msgpack"))
+                lastManifestPacked = payload;
+            else
+                lastManifestJson = payload;
         }
         if (topic.endsWith("/manifest/consume"))
         {
@@ -115,6 +135,8 @@ public:
     int manifestAttempts = 0;
     int manifestPublishes = 0;
     bool failManifest = false;
+    String lastManifestJson;
+    String lastManifestPacked;
     String lastStateTopic;
     String lastStatePayload;
 };
@@ -241,14 +263,14 @@ void setup()
                                       list.result.indexOf("outside_temperature") >= 0 &&
                                       local.success && local.result == "18" &&
                                       qualified.success && qualified.result == "18";
-    const NightMareResults invalidResourcePeriod =
-        handleNightMareCommand("> managed_sensor period 1");
+    const NightMareResults invalidResourceAdvertisement =
+        handleNightMareCommand("> managed_sensor advertise nope");
     const NightMareResults missingResource =
         handleNightMareCommand("> missing_resource");
     const bool resourceErrorsAreExternal =
-        !invalidResourcePeriod.result &&
-        invalidResourcePeriod.response ==
-            "ERROR: PERIOD expects 0 or 5..86400 seconds" &&
+        !invalidResourceAdvertisement.result &&
+        invalidResourceAdvertisement.response ==
+            "ERROR: ADVERTISE expects signed milliseconds" &&
         !missingResource.result && missingResource.response == "ERROR: Resource not found";
     const bool customResourcesWork = managedTime.type() == NetValueType::TIME &&
                                      managedColour.type() == NetValueType::COLOUR &&
@@ -258,9 +280,7 @@ void setup()
                                      customManifest.result.indexOf("\"type\":\"time\"") >= 0 &&
                                      customManifest.result.indexOf("\"type\":\"colour\"") >= 0 &&
                                      customManifest.result.indexOf(
-                                         "\"advertisement_enabled\":true") >= 0 &&
-                                     customManifest.result.indexOf(
-                                         "\"advertisement_period\":300") >= 0;
+                                         "\"advertise_ms\":300000") >= 0;
 
     ResourcesManager advertisementManager;
     RecordingPublisher advertisementPublisher;
@@ -269,23 +289,29 @@ void setup()
     advertisementManager.setPublisher(&advertisementPublisher);
     const bool advertisementBound = advertisementManager.bindResource(&advertised) &&
                                     advertisementManager.bindResource(&flatAdvertisement);
+    JsonDocument legacySettings;
+    legacySettings["advertisement:primary"]["enabled"] = true;
+    legacySettings["advertisement:primary"]["period"] = 5;
+    File legacyFile = LittleFS.open("/resourcesettings.json", "w");
+    const bool legacyWritten = legacyFile && serializeJson(legacySettings, legacyFile) != 0;
+    legacyFile.close();
+    const bool legacyMigrated = legacyWritten && advertisementManager.loadAdvertisementSettings() &&
+        advertisementManager.executeCommand(" advertisement:primary advertise").result == "5000";
     const int beforeInitialState = advertisementPublisher.statePublishes;
     const bool immediateAdvertisement = advertised.setValue(10) &&
         advertisementPublisher.statePublishes == beforeInitialState + 1 &&
         advertisementPublisher.lastStatePayload == "10";
     const ActionResult periodSet =
-        advertisementManager.executeCommand(" advertisement:primary period 5");
-    const ActionResult invalidPeriod =
-        advertisementManager.executeCommand(" advertisement:primary period 4");
+        advertisementManager.executeCommand(" advertisement:primary advertise 5000");
     const ActionResult disabled =
-        advertisementManager.executeCommand(" advertisement:primary enable false");
+        advertisementManager.executeCommand(" advertisement:primary advertise -1");
     const int afterWithdrawal = advertisementPublisher.statePublishes;
     const bool disabledStillComputes = disabled.success &&
         advertisementPublisher.lastStatePayload.length() == 0 && advertised.setValue(11) &&
         advertised.getValue() == 11 &&
         advertisementPublisher.statePublishes == afterWithdrawal;
     const ActionResult enabled =
-        advertisementManager.executeCommand(" advertisement:primary enable true");
+        advertisementManager.executeCommand(" advertisement:primary advertise 5000");
     const bool enabledAdvertised = enabled.success &&
         advertisementPublisher.lastStatePayload == "11";
     const bool unavailableStillComputes = advertised.setAvailable(false) &&
@@ -305,8 +331,8 @@ void setup()
     ownerValue.add(static_cast<uint8_t>(AccessPolicy::READ));
     ownerValue.add(static_cast<uint8_t>(NetValueType::INTEGER));
     ownerValue.add(nullptr);
-    ownerValue.add(true);
-    ownerValue.add(5);
+    ownerValue.add(5000);
+    ownerValue.add(nullptr);
     String encodedOwnerManifest;
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     ResourcesManager freshnessManager;
@@ -316,9 +342,7 @@ void setup()
                                           encodedOwnerManifest);
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "20");
     const bool remoteFresh = freshnessRemote.available() &&
-        freshnessRemote.freshness() == ResourceFreshness::FRESH &&
-        freshnessRemote.advertisementPolicyKnown() &&
-        freshnessRemote.advertisementPeriodSeconds() == 5;
+        freshnessRemote.freshness() == ResourceFreshness::FRESH;
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "");
     const bool remoteUnavailable = !freshnessRemote.available() &&
         freshnessRemote.freshness() == ResourceFreshness::FRESH;
@@ -331,29 +355,27 @@ void setup()
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "22");
     const bool remoteRefreshed = freshnessRemote.freshness() == ResourceFreshness::FRESH;
 
-    ownerValue[5] = false;
+    ownerValue[5] = -1;
     encodedOwnerManifest = "";
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
                                           encodedOwnerManifest);
-    const bool metadataDisableMakesUnavailable = !freshnessRemote.available();
-    ownerValue[5] = true;
+    const bool metadataDisablePreservesAvailability = freshnessRemote.available();
+    ownerValue[5] = 5000;
     encodedOwnerManifest = "";
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
                                           encodedOwnerManifest);
-    const bool metadataEnableWaitsForState = !freshnessRemote.available();
+    const bool metadataEnablePreservesAvailability = freshnessRemote.available();
     freshnessManager.handleIngressMessage("freshness-node/resource/temperature/state", "23");
-    ownerValue[6] = 0;
+    ownerValue[5] = 0;
     encodedOwnerManifest = "";
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     freshnessManager.handleIngressMessage("freshness-node/manifest/msgpack",
                                           encodedOwnerManifest);
-    const bool eventDrivenPolicyKnown = freshnessRemote.available() &&
-        freshnessRemote.advertisementPolicyKnown() &&
-        freshnessRemote.advertisementPeriodSeconds() == 0;
+    const bool eventDrivenPolicyApplied = freshnessRemote.available();
 
-    flatAdvertisement.setAdvertisementPeriod(5);
+    advertisementManager.executeCommand(" flat_advertisement advertise 5000");
     flatAdvertisement.setValue(1);
     const int beforeBoundedTick = advertisementPublisher.stateAttempts;
     advertisementManager.tick();
@@ -386,7 +408,7 @@ void setup()
     advertisementPublisher.failManifest = true;
     const int beforeManifestFailure = advertisementPublisher.manifestAttempts;
     const ActionResult eventDrivenSet =
-        advertisementManager.executeCommand(" advertisement:primary period 0");
+        advertisementManager.executeCommand(" advertisement:primary advertise 0");
     const bool manifestFailureRecorded = eventDrivenSet.success &&
         advertisementPublisher.manifestAttempts == beforeManifestFailure + 1;
     advertisementPublisher.failManifest = false;
@@ -401,20 +423,77 @@ void setup()
     const bool restoredAdvertisementPolicy =
         restoredAdvertisementManager.bindResource(&restoredAdvertisement) &&
         restoredAdvertisementManager.loadAdvertisementSettings() &&
-        restoredAdvertisement.advertisementEnabled() &&
-        restoredAdvertisement.advertisementPeriodSeconds() == 0;
+        restoredAdvertisementManager.executeCommand(
+            " advertisement:primary advertise").result == "0";
+
+    ResourcesManager hardwareManager;
+    RecordingPublisher hardwarePublisher;
+    ManagedSensor<int> plainSensor("plain_sensor");
+    ManagedSensor<int> hardwareSensor("hardware_sensor");
+    ManagedSensor<int> noDisableSensor("no_disable_sensor");
+    HardwarePolicy fullPolicy;
+    fullPolicy.pollMs = 1000;
+    fullPolicy.flags = REPORT_HW_CONNECTION | CONFIGURABLE_POLL | CAN_DISABLE;
+    fullPolicy.note = "Address: 0x48";
+    HardwarePolicy noDisablePolicy;
+    noDisablePolicy.pollMs = 2000;
+    noDisablePolicy.flags = CONFIGURABLE_POLL;
+    HardwarePolicy longNotePolicy;
+    for (size_t i = 0; i <= NetResourceHardwareNoteMaxLength; ++i)
+        longNotePolicy.note += 'x';
+    const bool hardwareDeclared = hardwareSensor.setHardwarePolicy(fullPolicy) &&
+        noDisableSensor.setHardwarePolicy(noDisablePolicy) &&
+        !plainSensor.setHardwarePolicy(longNotePolicy);
+    hardwareManager.setPublisher(&hardwarePublisher);
+    const bool hardwareBound = hardwareManager.bindResource(&plainSensor) &&
+        hardwareManager.bindResource(&hardwareSensor) &&
+        hardwareManager.bindResource(&noDisableSensor);
+    const bool connectionReporting = hardwareSensor.setHardwareConnected(true) &&
+        hardwareSensor.hardwareConnected() && !noDisableSensor.setHardwareConnected(true);
+    const ActionResult pollSet = hardwareManager.executeCommand(" hardware_sensor poll 5000");
+    ResourcesManager restoredHardwareManager;
+    ManagedSensor<int> restoredHardware("hardware_sensor");
+    restoredHardware.setHardwarePolicy(fullPolicy);
+    const bool pollOverrideRestored = restoredHardwareManager.bindResource(&restoredHardware) &&
+        restoredHardwareManager.loadAdvertisementSettings() &&
+        restoredHardware.hardwarePollMs() == 5000;
+    const ActionResult pollDisable = hardwareManager.executeCommand(" hardware_sensor poll -1");
+    const ActionResult disableRejected =
+        hardwareManager.executeCommand(" no_disable_sensor poll -1");
+    const ActionResult pollReset = hardwareManager.executeCommand(" hardware_sensor poll reset");
+    const ActionResult hardwareManifest = hardwareManager.executeCommand("manifest json");
+    const ActionResult packedHardwareManifest =
+        hardwareManager.executeCommand("manifest msgpack");
+    JsonDocument decodedHardwareManifest;
+    const bool packedHardwareDecoded = packedHardwareManifest.success &&
+        ResourcesManager::decodeManifest(hardwarePublisher.lastManifestPacked,
+                                         decodedHardwareManifest) &&
+        decodedHardwareManifest["version"].as<int>() == ResourceManifestVersion &&
+        decodedHardwareManifest["resources"][1]["hardware"]["note"].as<String>() ==
+            "Address: 0x48";
+    const bool hardwarePolicyWorks = hardwareDeclared && hardwareBound && connectionReporting &&
+        pollSet.success && pollOverrideRestored && pollDisable.success &&
+        !hardwareSensor.hardwareEnabled() &&
+        !disableRejected.success && disableRejected.result == "POLL cannot disable this hardware" &&
+        pollReset.success && hardwareSensor.hardwareEnabled() &&
+        hardwareSensor.hardwarePollMs() == 1000 &&
+        hardwareManifest.success && packedHardwareDecoded &&
+        hardwareManifest.result.indexOf("\"poll_ms\":1000") >= 0 &&
+        hardwareManifest.result.indexOf("\"flags\":7") >= 0 &&
+        hardwareManifest.result.indexOf("\"connected\":true") >= 0 &&
+        hardwareManifest.result.indexOf("\"note\":\"Address: 0x48\"") >= 0 &&
+        hardwareManifest.result.indexOf("\"name\":\"plain_sensor\",\"kind\":\"value\",\"access\":\"read\",\"type\":\"integer\",\"advertise_ms\":300000,\"hardware\"") < 0;
 
     const bool advertisementLifecycle = advertisementBound && immediateAdvertisement &&
-        periodSet.success && !invalidPeriod.success &&
-        invalidPeriod.result == "PERIOD expects 0 or 5..86400 seconds" &&
+        legacyMigrated && periodSet.success &&
         disabledStillComputes && enabledAdvertised &&
         unavailableStillComputes && availabilityRecovered && freshnessBound &&
         remoteFresh && remoteUnavailable && remoteAged && remoteRefreshed &&
-        metadataDisableMakesUnavailable && metadataEnableWaitsForState &&
-        eventDrivenPolicyKnown && eventDrivenDoesNotAge &&
+        metadataDisablePreservesAvailability && metadataEnablePreservesAvailability &&
+        eventDrivenPolicyApplied && eventDrivenDoesNotAge &&
         boundedTick && normalPublicationResetTimer && refreshRateLimited &&
         failedRefreshRetried && manifestFailureRecorded && dirtyManifestRetried &&
-        restoredAdvertisementPolicy &&
+        restoredAdvertisementPolicy && hardwarePolicyWorks &&
         advertisementPublisher.stateWasRetained;
     smokeState.setFlag("resource_api", localStateUsesWritePolicy &&
                                             managedSensor.name() == "managed_sensor" &&

@@ -30,7 +30,7 @@ The central rule is:
 The current Resource manifest version is:
 
 ```text
-4
+5
 ```
 
 The version appears in the retained manifest document.
@@ -67,23 +67,27 @@ A representative manifest is:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "resources": [
     {
       "name": "temperature",
       "kind": "value",
       "access": "read",
       "type": "float",
-      "advertisement_enabled": true,
-      "advertisement_period": 300
+      "advertise_ms": 300000,
+      "hardware": {
+        "poll_ms": 1000,
+        "flags": 7,
+        "connected": true,
+        "note": "Address: 0x48"
+      }
     },
     {
       "name": "power",
       "kind": "value",
       "access": "read_write",
       "type": "boolean",
-      "advertisement_enabled": true,
-      "advertisement_period": 300
+      "advertise_ms": 300000
     },
     {
       "name": "ac_door",
@@ -91,8 +95,7 @@ A representative manifest is:
       "access": "read",
       "type": "boolean",
       "depends_on": "door",
-      "advertisement_enabled": true,
-      "advertisement_period": 300
+      "advertise_ms": 300000
     },
     {
       "name": "set_timer",
@@ -131,17 +134,18 @@ Its positional schema is:
 [encodingVersion, manifestVersion, resources[]]
 
 value  = [0, name, accessEnum, typeEnum, dependsOn|null,
-          advertisementEnabled, advertisementPeriodSeconds]
+          advertiseMs, hardware|null]
+hardware = [pollMs, flags, connected?, note?]
 action = [1, name, arguments[]]
 arg    = [name, typeEnum, required]
 ```
 
-`dependsOn` is a single local Resource name. Version 4 writes `null` when it is
-absent, then appends advertisement policy at positions 5 and 6. Older readers
-ignore the trailing policy fields. Actions have no advertisement policy.
+`dependsOn` is a single local Resource name. Hardware trailing elements are
+omitted; when a note exists without connection reporting, the connection slot
+is `null`. Actions have no advertisement or hardware policy.
 
-Encoding version `1` remains current because fields were appended rather than
-reordered. Array positions and numeric enums are
+Encoding version `2` is current because the former enabled/seconds positions
+were replaced. Array positions and numeric enums are
 append-only. Readers that do not recognize the encoding version use the JSON
 manifest at `<device>/manifest`.
 
@@ -522,16 +526,15 @@ enum values, so the compact manifest encoding version remains unchanged.
 
 ## Advertisement policy and availability
 
-Every Managed Value declares `advertisement_enabled` and an
-`advertisement_period` in seconds. Enabled, available Values publish changes
-immediately. Period `0` is event-driven only and performs no periodic
-reaffirmation. Periods from 5 through 86400 periodically reaffirm unchanged
-retained state by the declared maximum intended interval under normal framework
-servicing; it is not a hard real-time guarantee. Values 1 through 4 are invalid.
+Every Managed Value declares one signed `advertise_ms` interval. Available
+Values with a non-negative interval publish changes immediately. `0` is
+event-driven only. A positive interval periodically reaffirms unchanged retained
+state under normal framework servicing; it is not a hard real-time guarantee.
+A negative interval suppresses publication; `-1` is the canonical disabled value.
 Each successful publication resets the refresh timer.
 
-Disabling advertisement withdraws retained `/state` with an empty retained
-payload and suppresses later advertisements. Re-enabling immediately publishes
+Changing to a negative interval withdraws retained `/state` with an empty retained
+payload and suppresses later advertisements. Returning to a non-negative value publishes
 the authoritative value when one exists and the Resource is available.
 Policy changes are persisted before their runtime commit. A failed provider
 manifest publication remains dirty and is retried with rate limiting. Both the
@@ -540,8 +543,17 @@ cleared, because Remote freshness consumes the compact metadata.
 
 Availability is not added to ordinary payloads. A Managed owner represents
 temporary unavailability by withdrawing retained state while leaving the
-Resource bound and declared. Advertisement enable/period do not define polling,
+Resource bound and declared. Advertisement policy does not define polling,
 power, acquisition, or control-loop behavior.
+
+## Hardware policy
+
+Managed Values may opt into a `hardware` manifest object. `poll_ms > 0` is the
+desired interval, `0` means firmware/system default behavior, and `< 0` disables
+acquisition. Flags are capabilities: `1` reports connection state, `2` permits
+remote poll changes, and `4` permits remote disabling. `connected` is emitted
+only with flag `1`; `note` is optional informational UTF-8 limited to 64 bytes.
+NightMare does not perform polling. Only a remote `poll_ms` override is persisted.
 
 ## State freshness
 
@@ -557,7 +569,7 @@ An empty `/state` payload means the retained state was deleted and makes the
 Remote Value unavailable. It does not itself set freshness to `STALE`.
 
 While a Remote Value is available and its owner's advertisement policy is
-known, enabled, and has a non-zero period, housekeeping compares `lastUpdateMs`
+known and positive, housekeeping compares `lastUpdateMs`
 with the advertised period. At approximately twice that period without a valid
 reaffirmation it becomes:
 
@@ -565,9 +577,9 @@ reaffirmation it becomes:
 STALE
 ```
 
-Period `0` disables time-based aging. Owner metadata with advertisement
-disabled immediately makes the matching Remote Value unavailable. Metadata
-becoming enabled does not make it available; only a valid `/state` does.
+Interval `0` disables time-based aging. A negative interval pauses policy-based
+aging and declares transport withdrawal only; it does not change Resource or
+hardware availability. Only `/state` traffic changes Value availability.
 
 The last decoded value remains stored and readable through `getValue()`, but
 `available()` and `hasValue()` report that it is not current while unavailable.

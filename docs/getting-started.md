@@ -652,18 +652,20 @@ No space after `>` selects a ResourceManager operation such as `list` or `raw`.
 A space after `>` selects a bound Resource by its unique local name. A bare
 Value reads its effective current Value; a bare Action invokes an empty
 payload. Explicit Resource verbs are `get`, `set`, `invoke`, `source`,
-`enable`, and `period`. The last two configure persistent Managed Value
-advertisement policy:
+`advertise`, and `poll`. The last two configure manager-owned advertisement
+policy and opted-in hardware polling metadata:
 
 ```text
-> temperature enable false
-> temperature period 300
+> temperature advertise -1
+> temperature advertise 300000
+> temperature poll 1000
+> temperature poll reset
 ```
 
-The period is in seconds. `0` selects event-driven-only publication; periodic
-refresh accepts 5 through 86400 seconds, while 1 through 4 are invalid.
-Disabling advertisement withdraws retained state; it does not stop local sensor
-polling or state computation.
+Advertisement is signed milliseconds: positive periodically reaffirms, `0` is
+event-driven, and negative suppresses publication. Suppression withdraws
+retained transport state without changing Resource availability or stopping
+local acquisition. `poll` requires the corresponding hardware capability flags.
 
 `>raw` feeds an MQTT-shaped topic/payload through the Resource ingress path. For example:
 

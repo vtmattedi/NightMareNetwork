@@ -103,22 +103,23 @@ transaction is not general automatic failover.
 
 **Decision:** Resource manifests are descriptive and diagnostic. Valid Value
 updates come from `/state`; manifest advertisement metadata supplies the
-expected refresh window and may explicitly withdraw availability when
-advertisement is disabled. It never supplies a Value or makes one fresh.
+expected refresh window. A negative interval declares transport withdrawal but
+does not change Resource or hardware availability. It never supplies a Value or
+makes one fresh.
 
 **Reason:** discovery metadata and runtime state have different lifecycles. Coupling them would make Value validity depend on an unrelated metadata document arriving first or remaining current.
 
 **Consequence:** a missing, incompatible, withdrawn, or malformed manifest does
-not automatically invalidate a Value state message. Explicit disabled metadata
-makes the matching Remote Value unavailable; enabled metadata does not make it
-available again. Without known enabled non-zero advertisement metadata,
+not automatically invalidate a Value state message. Advertisement metadata does
+not change availability. Without a known positive advertisement interval,
 time-based aging pauses rather than guessing a timeout.
 
 ## Availability, freshness, and advertisement are separate
 
 **Decision:** binding is structural, availability records whether a Value can
-currently be advertised, freshness records age, and Managed advertisement
-policy controls retained publication only.
+currently be advertised, freshness records age, Managed advertisement policy
+controls retained publication, and optional hardware policy describes
+application-owned acquisition capabilities and state.
 
 **Reason:** temporary hardware loss should not rewrite declarations, and a
 network publication setting must not silently become sensor polling, power, or
@@ -128,8 +129,10 @@ control-loop policy.
 retained state marks Remote availability false rather than setting freshness to
 `STALE`. Managed policy is persisted by `ResourcesManager`; successful
 publications refresh their timer, while cooperative round-robin housekeeping
-refreshes or retries at most one Resource per framework tick. Period `0` is
-event-driven only. Failed policy-manifest publication stays dirty and is
+refreshes or retries at most one Resource per framework tick. Interval `0` is
+event-driven only; negative intervals suppress transport publication without
+changing availability. Hardware polling remains application-owned and only a
+remotely configured poll override persists. Failed policy-manifest publication stays dirty and is
 retried with rate limiting before normal Resource housekeeping.
 
 ## Resource ownership is explicit
