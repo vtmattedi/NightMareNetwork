@@ -1084,6 +1084,32 @@ bool ResourcesManager::bindResource(NetResource *resource)
     return true;
 }
 
+bool ResourcesManager::bindEnlisted()
+{
+    // The list is newest-first; reverse it so binding follows declaration order.
+    NetResource *reversed = nullptr;
+    for (NetResource *node = NetResource::enlistedHead(); node != nullptr;)
+    {
+        NetResource *next = node->nextEnlisted_;
+        node->nextEnlisted_ = reversed;
+        reversed = node;
+        node = next;
+    }
+    NetResource::enlistedHead() = nullptr;
+
+    bool ok = true;
+    for (NetResource *node = reversed; node != nullptr;)
+    {
+        NetResource *next = node->nextEnlisted_;
+        node->nextEnlisted_ = nullptr;
+        node->enlisted_ = false;
+        if (node->resourceManager_ == nullptr && !bindResource(node))
+            ok = false;
+        node = next;
+    }
+    return ok;
+}
+
 void ResourcesManager::unbindResource(NetResource *resource)
 {
     if (resource == nullptr)

@@ -112,8 +112,11 @@ protected:
           role_(resourceRole),
           sourceResourceName_(resourceRole == ResourceRole::REMOTE && identity.length() != 0
                                   ? resourceName
-                                  : String()) {};
-    virtual ~NetResource() = default;
+                                  : String())
+    {
+        enlistForBinding();
+    }
+    virtual ~NetResource() { delistFromBinding(); }
     /// @brief Points a REMOTE resource at a different source. Updates and
     /// persists the target only; the local name and role never change.
     bool setRemoteSource(const String &deviceName, const String &resourceName);
@@ -129,6 +132,16 @@ private:
     const ResourceRole role_;
     String sourceResourceName_;
     ResourcesManager *resourceManager_ = nullptr; // Non-owning; set by bindResource().
+
+    // Every resource is enlisted when constructed (safe during static
+    // initialization: no manager or virtual call is involved) and bound by
+    // startNightMareESP() through ResourcesManager::bindEnlisted(). One that
+    // is already bound, or destroyed first, is skipped.
+    NetResource *nextEnlisted_ = nullptr;
+    bool enlisted_ = false;
+    void enlistForBinding();
+    void delistFromBinding();
+    static NetResource *&enlistedHead();
 
     bool isOwned() const { return role_ == ResourceRole::MANAGED; }
 

@@ -238,6 +238,8 @@ void startNightMareESP()
     if (!configManager().restore())
         LOG_ERROR("NM", "Could not restore persistent Config values");
 #if NM_ENABLE_RESOURCES
+    if (!gResourcesManager.bindEnlisted())
+        LOG_ERROR("NM", "One or more declared Resources could not be bound");
     if (!gResourcesManager.loadAdvertisementSettings())
         LOG_ERROR("NM", "Could not load Resource advertisement settings");
     if (!gResourcesManager.loadRemoteSources())

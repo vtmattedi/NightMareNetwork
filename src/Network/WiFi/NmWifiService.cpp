@@ -54,6 +54,16 @@ void startFrameworkServices()
 
 void onWiFiState(NightMare::WiFiState state)
 {
+    if (state == NightMare::WiFiState::CONNECTED)
+    {
+        const NightMare::WiFiInfo info = WiFi_info();
+        LOG("WiFi", "Connected to '%s' on channel %u, ip %s, rssi %d", info.ssid.c_str(),
+            info.channel, info.ip.c_str(), info.rssi);
+    }
+    else
+        LOG("WiFi", "State: %s", state == NightMare::WiFiState::CONNECTING ? "connecting"
+                                 : state == NightMare::WiFiState::DISCONNECTED ? "disconnected"
+                                                                              : "stopped");
 #if NM_ENABLE_NETWORK
     // Availability only; NmConnection decides what to do with it.
     NightMare::OnLinkAvailabilityIngress(state == NightMare::WiFiState::CONNECTED);

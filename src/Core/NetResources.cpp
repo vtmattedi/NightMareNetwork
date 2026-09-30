@@ -82,6 +82,34 @@ String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation 
                                 operation);
 }
 
+NetResource *&NetResource::enlistedHead()
+{
+    static NetResource *head = nullptr; // function-local: constructed on first use
+    return head;
+}
+
+void NetResource::enlistForBinding()
+{
+    nextEnlisted_ = enlistedHead();
+    enlistedHead() = this;
+    enlisted_ = true;
+}
+
+void NetResource::delistFromBinding()
+{
+    if (!enlisted_)
+        return;
+    for (NetResource **link = &enlistedHead(); *link != nullptr; link = &(*link)->nextEnlisted_)
+    {
+        if (*link == this)
+        {
+            *link = nextEnlisted_;
+            break;
+        }
+    }
+    enlisted_ = false;
+}
+
 // Retargets a REMOTE resource. The role is fixed at declaration, so ownership
 // is deliberately not recalculated from the new device name: what this object
 // is and what it currently points at are separate questions.

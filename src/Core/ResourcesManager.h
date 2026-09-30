@@ -64,6 +64,10 @@ public:
     // binding. A Remote resource may be bound before it has a source; it is
     // registered now and subscribed when setSource() supplies one.
     bool bindResource(NetResource *resource);
+    // Binds every resource constructed so far that is not bound yet, in
+    // declaration order. Called by startNightMareESP(); calling bindResource()
+    // by hand is no longer required. Returns false if any of them was refused.
+    bool bindEnlisted();
     void unbindResource(NetResource *resource);
 
     // Restore persisted Remote bindings after the application has bound all

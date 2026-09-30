@@ -4,22 +4,25 @@
 #include "EspNowClient.h"
 #include "NightMareEspNow/Frame.h"
 #include "Core/Logs.h"
-#include <esp_log.h>
 #include <esp_now.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
-#define TAG "\x1b[32mESP-NOW\x1b[0m"
 namespace NightMare::EspNowClient
 {
     namespace
     {
-        constexpr char Tag[] = "\x1b[32mESP-NOW\x1b[0m";
+        // NightMare's LOG, not ESP_LOGx: the Arduino core hides ESP_LOG output,
+        // which is how every failure in here used to vanish.
+        constexpr char TagLink[] = "ESPNOW";  // search, gateway, connection state
+        constexpr char TagTx[] = "ESPNOW-TX"; // outgoing frames
+        constexpr char TagRx[] = "ESPNOW-RX"; // incoming frames
         constexpr size_t FrameHeaderSize = sizeof(FrameHeader);
         constexpr size_t MaxFramesPerMessage = 16; // what the gateway reassembles
         constexpr size_t MaxTopicLength = 63;      // 6-bit length in the message encoding
@@ -71,6 +74,48 @@ namespace NightMare::EspNowClient
 
         uint64_t nowUs() { return static_cast<uint64_t>(esp_timer_get_time()); }
 
+        // Set by the send callback, read after sendDone: whether the peer
+        // MAC-acknowledged the last unicast (a broadcast always reports success).
+        volatile esp_now_send_status_t lastSendStatus = ESP_NOW_SEND_SUCCESS;
+
+        struct MacText
+        {
+            char text[18];
+        };
+
+        MacText macText(const uint8_t *mac)
+        {
+            MacText out;
+            snprintf(out.text, sizeof(out.text), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1],
+                     mac[2], mac[3], mac[4], mac[5]);
+            return out;
+        }
+
+        uint8_t currentChannel()
+        {
+            uint8_t primary = 0;
+            wifi_second_chan_t second;
+            esp_wifi_get_channel(&primary, &second);
+            return primary;
+        }
+
+        const char *frameTypeName(uint8_t type)
+        {
+            switch (static_cast<FrameType>(type))
+            {
+            case FrameType::BEACON: return "BEACON";
+            case FrameType::AUTH: return "AUTH";
+            case FrameType::SUBSCRIBE: return "SUBSCRIBE";
+            case FrameType::UNSUBSCRIBE: return "UNSUBSCRIBE";
+            case FrameType::MESSAGE: return "MESSAGE";
+            case FrameType::CONTROL: return "CONTROL";
+            case FrameType::ACK: return "ACK";
+            case FrameType::ERROR: return "ERROR";
+            case FrameType::LAST_WILL: return "LAST_WILL";
+            }
+            return "?";
+        }
+
         class Guard
         {
         public:
@@ -120,8 +165,9 @@ namespace NightMare::EspNowClient
                 callback(next);
         }
 
-        void sendCallback(const esp_now_send_info_t *, esp_now_send_status_t)
+        void sendCallback(const esp_now_send_info_t *, esp_now_send_status_t status)
         {
+            lastSendStatus = status;
             if (sendDone != nullptr)
                 xSemaphoreGive(sendDone);
         }
@@ -129,17 +175,36 @@ namespace NightMare::EspNowClient
         bool sendRaw(const uint8_t *mac, const Frame &frame)
         {
             if (frame.header.length > sizeof(frame.data))
+            {
+                LOG_ERROR(TagTx, "%s #%u: %u data bytes exceed a frame",
+                          frameTypeName(frame.header.type), frame.header.messageId,
+                          frame.header.length);
                 return false;
+            }
             Guard guard(sendMutex);
             xSemaphoreTake(sendDone, 0); // drop a stale completion from a timed-out send
             const esp_err_t err = esp_now_send(mac, reinterpret_cast<const uint8_t *>(&frame),
                                                FrameHeaderSize + frame.header.length);
             if (err != ESP_OK)
             {
-                ESP_LOGW(Tag, "send failed: %s", esp_err_to_name(err));
+                LOG_WARNING(TagTx, "%s #%u to %s on ch %u: esp_now_send failed: %s",
+                            frameTypeName(frame.header.type), frame.header.messageId,
+                            macText(mac).text, currentChannel(), esp_err_to_name(err));
                 return false;
             }
-            return xSemaphoreTake(sendDone, pdMS_TO_TICKS(SendTimeoutMs)) == pdTRUE;
+            if (xSemaphoreTake(sendDone, pdMS_TO_TICKS(SendTimeoutMs)) != pdTRUE)
+            {
+                LOG_WARNING(TagTx, "%s #%u to %s: no send completion within %lu ms",
+                            frameTypeName(frame.header.type), frame.header.messageId,
+                            macText(mac).text, static_cast<unsigned long>(SendTimeoutMs));
+                return false;
+            }
+            // Reported, not acted on: the return value keeps meaning "the radio took it".
+            if (lastSendStatus != ESP_NOW_SEND_SUCCESS)
+                LOG_WARNING(TagTx, "%s #%u to %s: not acknowledged by the peer",
+                            frameTypeName(frame.header.type), frame.header.messageId,
+                            macText(mac).text);
+            return true;
         }
 
         bool gatewayAddress(uint8_t out[6])
@@ -233,6 +298,11 @@ namespace NightMare::EspNowClient
             portEXIT_CRITICAL(&lock);
             // Unknown gateway: probe by broadcast. The gateway registers any sender and
             // answers from its own address, which is how we learn it.
+            if (known)
+                LOG_DEBUG(TagTx, "heartbeat #%u to gateway on ch %u (unanswered so far: %u)", id,
+                          currentChannel(), missed);
+            else
+                LOG(TagTx, "probe #%u broadcast on ch %u", id, currentChannel());
             sendRaw(known ? mac : BroadcastMac, keepAliveFrame(id));
         }
 
@@ -246,11 +316,14 @@ namespace NightMare::EspNowClient
                 if (willSet)
                     will = willRaw;
             }
+            LOG(TagLink, "resync: %u subscription(s)%s", static_cast<unsigned>(filters.size()),
+                will.empty() ? "" : " + last will");
             for (const std::string &filter : filters)
-                sendControl(FrameType::SUBSCRIBE, reinterpret_cast<const uint8_t *>(filter.data()),
-                            filter.size());
-            if (!will.empty())
-                sendControl(FrameType::LAST_WILL, will.data(), will.size());
+                if (!sendControl(FrameType::SUBSCRIBE,
+                                 reinterpret_cast<const uint8_t *>(filter.data()), filter.size()))
+                    LOG_WARNING(TagLink, "resync: could not send SUBSCRIBE '%s'", filter.c_str());
+            if (!will.empty() && !sendControl(FrameType::LAST_WILL, will.data(), will.size()))
+                LOG_WARNING(TagLink, "resync: could not send LAST_WILL");
         }
 
         void setGateway(const uint8_t *mac)
@@ -263,7 +336,8 @@ namespace NightMare::EspNowClient
             const esp_err_t err = esp_now_add_peer(&peer);
             if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST)
             {
-                ESP_LOGE(Tag, "add gateway peer failed: %s", esp_err_to_name(err));
+                LOG_ERROR(TagLink, "add gateway peer %s failed: %s", macText(mac).text,
+                          esp_err_to_name(err));
                 return;
             }
             portENTER_CRITICAL(&lock);
@@ -271,11 +345,7 @@ namespace NightMare::EspNowClient
             gatewayKnown = true;
             missed = 0;
             portEXIT_CRITICAL(&lock);
-            uint8_t primary = 0;
-            wifi_second_chan_t second;
-            esp_wifi_get_channel(&primary, &second);
-            ESP_LOGI(Tag, "gateway on channel %u %02X:%02X:%02X:%02X:%02X:%02X", primary, mac[0],
-                     mac[1], mac[2], mac[3], mac[4], mac[5]);
+            LOG(TagLink, "gateway %s on ch %u", macText(mac).text, currentChannel());
         }
 
         void forgetGateway()
@@ -283,15 +353,24 @@ namespace NightMare::EspNowClient
             uint8_t mac[6];
             if (!gatewayAddress(mac))
                 return;
+            LOG(TagLink, "forgetting gateway %s", macText(mac).text);
             esp_now_del_peer(mac);
             portENTER_CRITICAL(&lock);
             gatewayKnown = false;
             portEXIT_CRITICAL(&lock);
         }
 
-        // True when the station has no AP to follow, so the client may pick the channel.
+        // True only when the station has no AP to follow, so the client may pick the channel.
+        // An associated station is pinned to its AP's channel. One with an AP configured but not
+        // associated yet is mid-handshake (or retrying): retuning the radio under it every hop
+        // breaks the join, the Wi-Fi service retries, the next hop breaks that too, and neither
+        // ever finishes. Leave the channel to the AP in both cases -- the gateway is expected on
+        // the same one.
         bool freeToTune()
         {
+            wifi_config_t config = {};
+            if (esp_wifi_get_config(WIFI_IF_STA, &config) == ESP_OK && config.sta.ssid[0] != '\0')
+                return false;
             wifi_ap_record_t ap;
             return esp_wifi_sta_get_ap_info(&ap) != ESP_OK;
         }
@@ -310,8 +389,11 @@ namespace NightMare::EspNowClient
             static uint8_t channel = 0;
             channel = settings.channel != 0 ? settings.channel
                                             : (channel >= LastHopChannel ? 1 : channel + 1);
-            LOG(TAG, "searching on channel %u", channel);
-            esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+            const esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+            if (err != ESP_OK)
+                LOG_WARNING(TagLink, "could not tune to ch %u: %s", channel, esp_err_to_name(err));
+            else
+                LOG(TagLink, "searching on ch %u", channel);
         }
 
         void wakeTask()
@@ -503,11 +585,15 @@ namespace NightMare::EspNowClient
         const esp_err_t err = esp_now_init();
         if (err != ESP_OK)
         {
-            ESP_LOGE(Tag, "esp_now_init failed: %s", esp_err_to_name(err));
+            LOG_WARNING(Tag, "esp_now_init failed: %s", esp_err_to_name(err));
             return false;
         }
         esp_now_register_recv_cb(receiveCallback);
         esp_now_register_send_cb(sendCallback);
+
+        // The station default is modem sleep: once associated, the radio only wakes around the
+        // AP's beacons, so the gateway's ESP-NOW beacons and ACKs mostly arrive while it is off.
+        esp_wifi_set_ps(WIFI_PS_NONE);
 
         esp_now_peer_info_t broadcast = {};
         memcpy(broadcast.peer_addr, BroadcastMac, 6);

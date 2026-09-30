@@ -3,6 +3,7 @@
 
 #include "NmWifiEsp.h"
 
+#include <Core/Logs.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -143,7 +144,7 @@ void notifyConnected()
         ssid = activeProfile.ssid;
         ip = currentIp;
     }
-    ESP_LOGI(Tag, "Connected to %s, IP: %s", ssid.c_str(), ip.c_str());
+    LOG(Tag, "Connected to %s, IP: %s", ssid.c_str(), ip.c_str());
     publishState(NightMare::WiFiState::CONNECTED);
 }
 
@@ -162,15 +163,25 @@ void handleIpEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     notifyConnected();
 }
 
-void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *)
+void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
 {
     if (eventId == WIFI_EVENT_STA_START)
     {
+        LOG(Tag, "Station started");
         setStatus(NightMare::WiFiState::CONNECTING);
         esp_wifi_connect();
     }
+    else if (eventId == WIFI_EVENT_STA_CONNECTED)
+    {
+        const auto *event = static_cast<const wifi_event_sta_connected_t *>(eventData);
+        LOG(Tag, "Associated on channel %u, waiting for IP", event != nullptr ? event->channel : 0);
+    }
     else if (eventId == WIFI_EVENT_STA_DISCONNECTED)
     {
+        // The reason code is the fastest way to tell a wrong password (15/204),
+        // an AP that isn't there (201) and a plain drop apart.
+        const auto *event = static_cast<const wifi_event_sta_disconnected_t *>(eventData);
+        LOG_WARNING(Tag, "Disconnected, reason %u", event != nullptr ? event->reason : 0);
         {
             Lock lock;
             currentIp.clear();
@@ -237,8 +248,16 @@ bool initializeDriver()
 
 bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
 {
-    if (!initializeDriver() || !WiFi_isValidTxPower(profile.txPower))
+    if (!initializeDriver())
+    {
+        LOG_ERROR(Tag, "Driver init failed");
         return false;
+    }
+    if (!WiFi_isValidTxPower(profile.txPower))
+    {
+        LOG_ERROR(Tag, "Invalid stored TX power %d", profile.txPower);
+        return false;
+    }
     {
         Lock lock;
         activeProfile = profile;
@@ -253,14 +272,33 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
     if (!name.empty())
         esp_netif_set_hostname(stationNetif, name.c_str());
     esp_wifi_disconnect();
-    if (!configureStation(profile) || !applyTxPower(profile.txPower))
+    if (!configureStation(profile))
+    {
+        LOG_ERROR(Tag, "Could not configure station for '%s'", profile.ssid.c_str());
         return false;
+    }
     setStatus(NightMare::WiFiState::CONNECTING);
     const esp_err_t started = esp_wifi_start();
     if (started != ESP_OK && started != ESP_ERR_WIFI_CONN)
+    {
+        LOG_ERROR(Tag, "esp_wifi_start failed: %s", esp_err_to_name(started));
         return false;
+    }
+    // After esp_wifi_start, not before: esp_wifi_set_max_tx_power returns
+    // ESP_ERR_WIFI_NOT_STARTED otherwise. With a non-AUTO power saved to NVS
+    // (the service persists a fallback power), applying it first failed every
+    // boot before the radio ever started. A power that still won't apply is
+    // not worth refusing to connect over: the driver default is used instead.
+    if (!applyTxPower(profile.txPower))
+        LOG_WARNING(Tag, "Could not apply TX power %d, using the driver default", profile.txPower);
+    LOG(Tag, "Connecting to '%s'", profile.ssid.c_str());
     const esp_err_t connected = esp_wifi_connect();
-    return connected == ESP_OK || connected == ESP_ERR_WIFI_CONN;
+    if (connected != ESP_OK && connected != ESP_ERR_WIFI_CONN)
+    {
+        LOG_ERROR(Tag, "esp_wifi_connect failed: %s", esp_err_to_name(connected));
+        return false;
+    }
+    return true;
 }
 
 void monitorTask(void *)
