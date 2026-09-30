@@ -11,8 +11,11 @@
 #if NM_ENABLE_TELEMETRY
 #include <Core/Telemetry.h>
 #endif
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadioService.h>
+#endif
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiService.h>
+#include <Network/WiFiIP/NmWifiService.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>
@@ -260,12 +263,18 @@ void startNightMareESP()
     if (!Telemetry.start())
         LOG_ERROR("NM", "Could not schedule periodic telemetry");
 #endif
+#if NM_ENABLE_WIFI_RADIO
+    // The radio first: ESP-NOW needs nothing more and starts from its ingress.
+    if (!NightMare::WiFiRadioBegin())
+        LOG_ERROR("NM", "Wi-Fi radio did not start; ESP-NOW and the IP station cannot run");
+#endif
 #if NM_ENABLE_WIFI && NM_WIFI_AUTO
+    // Then the IP station on top of it -- only if this build joins an AP at all.
     if (!NightMare::WiFiBegin())
-        LOG_ERROR("NM", "Wi-Fi did not start; ESP-NOW has no radio to use");
+        LOG_ERROR("NM", "Wi-Fi station did not start");
 #endif
 #if NM_ENABLE_NETWORK
-    // ESP-NOW needs the Wi-Fi radio started, not an association, so it does not wait for the link.
+    // Starts whatever can already run; the rest waits for its radio/IP-link ingress.
     NightMare::ConnectionBegin();
 #endif
 }

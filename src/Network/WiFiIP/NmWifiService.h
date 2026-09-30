@@ -4,10 +4,11 @@
 
 #include "NmWifiEsp.h"
 
-// NightMare-side WiFi integration: stored profile, device hostname and the
-// services that follow the first connection. The ESP-IDF driver in NmWifiEsp
-// knows none of this.
-// Runs after the framework's first-connection services, on the ESP event task.
+// NightMare-side IP station integration: stored profile, device hostname, the
+// IP-link report to NmConnection and the services that follow the first
+// connection (OTA, SNTP). The ESP-IDF driver in NmWifiEsp knows none of this.
+// Runs after the framework's first-connection services, on the station's
+// monitor task (not the ESP event task).
 using WiFiConnectedCallback = void (*)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 

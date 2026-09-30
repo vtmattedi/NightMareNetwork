@@ -10,8 +10,10 @@
 // probe), keeps the registration alive with an automatic heartbeat, and
 // re-sends its subscriptions and last will whenever it (re)connects.
 //
-// Requirements: esp_wifi is initialised and started in STA mode, and this node
-// is on the gateway's channel (e.g. associated to the same AP).
+// Requirements: the Wi-Fi radio is running (Network/WiFiRadio) -- an AP and IP
+// are not needed. With no AP configured the client hops channels until it hears
+// the gateway; with one configured it stays on the AP's channel, so the gateway
+// must share that AP.
 #include <cstddef>
 #include <cstdint>
 

@@ -3,6 +3,7 @@
 
 #include "NmWifiService.h"
 
+#include <Network/WiFiRadio/NmWifiRadioService.h>
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
 #include <Core/PersistentKeys.h>
@@ -55,8 +56,10 @@ void startFrameworkServices()
 void onWiFiState(NightMare::WiFiState state)
 {
 #if NM_ENABLE_NETWORK
-    // Availability only; NmConnection decides what to do with it.
-    NightMare::OnLinkAvailabilityIngress(state == NightMare::WiFiState::CONNECTED);
+    // The IP link, not the radio: MQTT needs this, ESP-NOW does not (it was
+    // already told about the radio by NmWifiRadioService). Availability only;
+    // NmConnection decides what to do with it.
+    NightMare::OnIpLinkAvailabilityIngress(state == NightMare::WiFiState::CONNECTED);
 #endif
     if (state != NightMare::WiFiState::CONNECTED)
         return;
@@ -94,6 +97,10 @@ WiFiProfile WiFiStoredProfile()
 bool WiFiBegin()
 {
     gDeviceIdentity.lockAddress();
+    // Through the radio service, not straight to the driver, so the radio is
+    // reported (ESP-NOW starts on it) even when the station is what woke it.
+    if (!WiFiRadioBegin())
+        return false;
     WiFi_onState(onWiFiState);
     return WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str());
 }

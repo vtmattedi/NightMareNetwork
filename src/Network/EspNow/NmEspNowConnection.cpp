@@ -142,7 +142,7 @@ bool begin()
     }
     if (!NightMare::EspNowClient::begin())
     {
-        LOG_ERROR("ESPNOW", "esp_now_init failed (is Wi-Fi started?)");
+        LOG_ERROR("ESPNOW", "Client did not start (see the ESPNOW log above)");
         end();
         return false;
     }

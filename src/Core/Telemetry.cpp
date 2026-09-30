@@ -11,7 +11,7 @@
 #include <Network/NmConnectionInternal.h>
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiEsp.h>
+#include <Network/WiFiIP/NmWifiEsp.h>
 #endif
 
 namespace

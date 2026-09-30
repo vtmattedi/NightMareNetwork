@@ -59,7 +59,9 @@ Subscription subscriptions[MaxSubscriptions];
 SemaphoreHandle_t subscriptionMutex = nullptr;
 bool frameworkSubscriptionsRegistered = false;
 bool resourceConnectionAttached = false;
-bool linkAvailable = false;
+// What the drivers below have reported; see NmConnectionInternal.h.
+bool radioAvailable = false;
+bool ipLinkAvailable = false;
 ConnectionType rollbackConnection = ConnectionType::AUTO;
 bool rollbackAvailable = false;
 
@@ -83,6 +85,29 @@ bool connectionEnabled(ConnectionType connection)
         return false;
     }
     return false;
+}
+
+// Whether what a connection runs on is there yet:
+//   MQTT, LOCAL_MQTT   radio + an IP link (a joined AP with an address)
+//   ESP_NOW            the radio alone -- no AP, no IP
+bool requirementsMet(ConnectionType connection)
+{
+    switch (connection)
+    {
+    case ConnectionType::MQTT:
+    case ConnectionType::LOCAL_MQTT:
+        return ipLinkAvailable;
+    case ConnectionType::ESP_NOW:
+        return radioAvailable;
+    case ConnectionType::AUTO:
+        return false;
+    }
+    return false;
+}
+
+const char *requirementName(ConnectionType connection)
+{
+    return connection == ConnectionType::ESP_NOW ? "the Wi-Fi radio" : "an IP link";
 }
 
 bool validTopicFilter(const char *topicFilter)
@@ -221,6 +246,13 @@ bool startEspNow()
         (connectionState == ConnectionState::CONNECTING ||
          connectionState == ConnectionState::CONNECTED))
         return true;
+    // esp_now_init needs a started driver. Without it, wait: the radio
+    // ingress starts ESP-NOW as soon as it comes up.
+    if (!radioAvailable)
+    {
+        LOG("NET", "ESP-NOW waits for the Wi-Fi radio");
+        return false;
+    }
 
     attachResourceConnection();
     registerFrameworkSubscriptions();
@@ -294,14 +326,31 @@ bool startConnection(ConnectionType connection)
 }
 
 // Start policy: the persisted preference first, then the build's default
-// profile. Used when the link comes up and nothing is running.
+// profile. Used whenever the radio or the IP link comes up and nothing runs.
+//
+// A preference this build supports but can't run *yet* is waited for, not
+// skipped: with MQTT preferred and ESP-NOW also compiled in, the radio comes
+// up before the IP link, and falling back then would leave ESP-NOW running
+// and MQTT never started. The fallback is for a preference this build lacks
+// (e.g. one persisted by older firmware) or one that failed to start.
 bool startPreferredConnection()
 {
     const ConnectionType preferred = static_cast<ConnectionType>(preferredConnection.value());
-    if (connectionEnabled(preferred) && startConnection(preferred))
-        return true;
+    if (connectionEnabled(preferred))
+    {
+        if (!requirementsMet(preferred))
+            return false;
+        if (startConnection(preferred))
+            return true;
+    }
     const ConnectionType fallback = defaultConnection();
-    return fallback != preferred && connectionEnabled(fallback) && startConnection(fallback);
+    return fallback != preferred && connectionEnabled(fallback) && requirementsMet(fallback) &&
+           startConnection(fallback);
+}
+
+bool nothingRunning()
+{
+    return connectionState == ConnectionState::STOPPED || connectionState == ConnectionState::ERROR;
 }
 
 bool changePreferredConnection(Config<int> &, const int &requested)
@@ -489,25 +538,50 @@ void OnConnectionFailedIngress(ConnectionType connection)
 
 bool ConnectionBegin()
 {
-    if (connectionState != ConnectionState::STOPPED && connectionState != ConnectionState::ERROR)
+    if (!nothingRunning())
+        return true;
+    // Whatever can run now starts now. Anything still waiting on the radio or
+    // an IP link starts from the matching ingress when that arrives.
+    if (startPreferredConnection())
         return true;
     ConnectionType wanted = static_cast<ConnectionType>(preferredConnection.value());
     if (!connectionEnabled(wanted))
         wanted = defaultConnection();
-    if (wanted != ConnectionType::ESP_NOW || !connectionEnabled(wanted))
-        return false;
-    const bool started = startConnection(wanted);
-    if (!started)
-        LOG_ERROR("NET", "Could not start ESP-NOW");
-    return started;
+    if (connectionEnabled(wanted) && !requirementsMet(wanted))
+        LOG("NET", "Connection %u waits for %s", static_cast<unsigned>(wanted),
+            requirementName(wanted));
+    return false;
 }
 
-void OnLinkAvailabilityIngress(bool available)
+void OnRadioAvailabilityIngress(bool available)
 {
-    linkAvailable = available;
+    radioAvailable = available;
+    if (!available)
+    {
+#if NM_NETWORK_ESPNOW
+        // ESP-NOW runs on the radio. The radio reports going down before it
+        // stops, so this ends ESP-NOW while the driver still works, and back
+        // to STOPPED lets the next radio-up start it again.
+        if (selectedConnection == ConnectionType::ESP_NOW && NmEspNowConnection::running())
+        {
+            NmEspNowConnection::end();
+            connectionState = ConnectionState::STOPPED;
+        }
+#endif
+        return;
+    }
+    if (nothingRunning())
+        startPreferredConnection();
+}
+
+void OnIpLinkAvailabilityIngress(bool available)
+{
+    ipLinkAvailable = available;
     if (!available)
         return;
-    if (connectionState != ConnectionState::STOPPED && connectionState != ConnectionState::ERROR)
+    // An IP link implies a running radio, whatever did or didn't report it.
+    radioAvailable = true;
+    if (!nothingRunning())
         return;
     // No enabled profile means there is nothing to start, which is not an error.
     if (!startPreferredConnection() && defaultConnection() != ConnectionType::AUTO)

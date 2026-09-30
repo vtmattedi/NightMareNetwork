@@ -506,12 +506,13 @@ namespace NightMare::EspNowClient
             portEXIT_CRITICAL(&lock);
         }
 
-        // True only when the station has no AP to follow, so the client may pick the channel.
+        // True only when no IP station owns the channel, so the client may pick it.
         // An associated station is pinned to its AP's channel. One with an AP configured but not
         // associated yet is mid-handshake (or retrying): retuning the radio under it every hop
-        // breaks the join, the Wi-Fi service retries, the next hop breaks that too, and neither
-        // ever finishes. Leave the channel to the AP in both cases -- the gateway is expected on
-        // the same one.
+        // breaks the join, the station retries, the next hop breaks that too, and neither ever
+        // finishes. Leave the channel to the AP in both cases -- the gateway is expected on the
+        // same one. A radio-only device has no station config at all, and WiFi_stop() clears it,
+        // so both hop.
         bool freeToTune()
         {
             wifi_config_t config = {};

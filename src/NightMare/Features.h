@@ -21,6 +21,8 @@
 #ifndef NM_ENABLE_CONSOLE
 #define NM_ENABLE_CONSOLE 1
 #endif
+// The Wi-Fi IP station (Network/WiFiIP): join an AP and get an IP. Needed by
+// MQTT/LOCAL_MQTT, SNTP and OTA -- not by ESP-NOW, which only needs the radio.
 #ifndef NM_ENABLE_WIFI
 #define NM_ENABLE_WIFI 1
 #endif
@@ -38,6 +40,13 @@
 #endif
 #ifndef NM_NETWORK_ESPNOW
 #define NM_NETWORK_ESPNOW 0
+#endif
+// The Wi-Fi radio (Network/WiFiRadio): driver initialised and started in STA
+// mode, with no association. Shared by the IP station, which joins an AP on
+// top of it, and ESP-NOW, which needs nothing more. Derived, not a choice: it
+// is on whenever something needs it.
+#ifndef NM_ENABLE_WIFI_RADIO
+#define NM_ENABLE_WIFI_RADIO (NM_ENABLE_WIFI || NM_NETWORK_ESPNOW)
 #endif
 #ifndef NM_ENABLE_TELEMETRY
 #define NM_ENABLE_TELEMETRY 1
@@ -157,8 +166,9 @@
 #define NM_CONSOLE_SERIAL 0
 #endif
 
-// Whether NightMare::WiFiBegin() is called from startNightMareESP(). If not, the application must call it itself.
-// If NM_ENABLE_WIFI is 0, this has no effect.
+// Whether NightMare::WiFiBegin() (the IP station) is called from startNightMareESP(). If not,
+// the application must call it itself. The radio starts regardless whenever
+// NM_ENABLE_WIFI_RADIO is on, so an ESP-NOW device can leave this off and never join an AP.
 #ifndef NM_WIFI_AUTO
 #define NM_WIFI_AUTO NM_ENABLE_WIFI
 #endif
@@ -225,4 +235,10 @@
 #endif
 #if NM_WIFI_AUTO && !NM_ENABLE_WIFI
 #error "NM_WIFI_AUTO requires NM_ENABLE_WIFI"
+#endif
+#if NM_ENABLE_WIFI && !NM_ENABLE_WIFI_RADIO
+#error "NM_ENABLE_WIFI requires NM_ENABLE_WIFI_RADIO: the IP station runs on the radio"
+#endif
+#if NM_NETWORK_ESPNOW && !NM_ENABLE_WIFI_RADIO
+#error "NM_NETWORK_ESPNOW requires NM_ENABLE_WIFI_RADIO: ESP-NOW runs on the Wi-Fi radio"
 #endif

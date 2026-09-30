@@ -31,8 +31,11 @@
 #if NM_ENABLE_TELEMETRY
 #include <Core/Telemetry.h>
 #endif
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadioService.h>
+#endif
 #if NM_ENABLE_WIFI
-#include <Network/WiFi/NmWifiService.h>
+#include <Network/WiFiIP/NmWifiService.h>
 #endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>

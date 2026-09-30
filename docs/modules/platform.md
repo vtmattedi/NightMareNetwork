@@ -374,10 +374,15 @@ The project, not the NightMare library, owns this credential file.
 NightMare::WiFiBegin();
 ```
 
-loads the stored profile and starts the ESP-IDF driver in `Network/WiFi/NmWifiEsp.*`,
+starts the radio (`Network/WiFiRadio/`, via `WiFiRadioBegin()`), loads the stored
+profile and starts the ESP-IDF station driver in `Network/WiFiIP/NmWifiEsp.*`,
 which uses `esp_wifi`, `esp_netif`, and ESP events directly and has no Arduino,
 PersistentSettings or identity dependency. Storage, the hostname and the
-first-connection services live in `Network/WiFi/NmWifiService.*`.
+first-connection services live in `Network/WiFiIP/NmWifiService.*`.
+
+`startNightMareESP()` starts the radio on its own whenever `NM_ENABLE_WIFI_RADIO`
+is on, before (and independently of) `WiFiBegin()`, so an ESP-NOW device with
+`NM_ENABLE_WIFI 0` gets a running radio and never joins an AP.
 
 `WiFiBegin()` initializes PersistentSettings.
 
@@ -416,8 +421,8 @@ This is one reason a later adoption may wait for reboot rather than changing the
 
 ## Async WiFi monitor
 
-The driver uses ESP events for connection state and a small monitor task for
-timed retries and transmit-power fallback:
+The driver uses ESP events for connection state and a monitor task for timed
+retries and transmit-power fallback:
 
 ```text
 wifi_monitor
@@ -426,10 +431,17 @@ wifi_monitor
 with:
 
 ```text
-stack:     4096 bytes
+stack:     6144 bytes
 priority:  1
 core:      tskNO_AFFINITY
 ```
+
+The event handlers run on the ESP default event loop task (`sys_evt`), whose
+stack has no room for a formatted log line or the connected chain. They only
+record what happened; the monitor task logs it (start, association channel,
+disconnect reason) and delivers the state callback -- which is why it needs the
+larger stack: on `CONNECTED` that callback starts OTA, SNTP and the network
+connection and saves to NVS.
 
 Using no fixed core allows the same code to run on single-core ESP variants such as C3/C6/H2/S2.
 
@@ -447,8 +459,9 @@ OTA
 SNTP time synchronization
 ```
 
-in that order. Wi-Fi also reports link availability to `NmConnection`, which
-starts the preferred connection itself; that is not a Wi-Fi service.
+in that order. Wi-Fi also reports IP-link availability to `NmConnection`
+(the radio reports its own availability separately), which starts the preferred
+connection itself; that is not a Wi-Fi service.
 
 Specifically:
 

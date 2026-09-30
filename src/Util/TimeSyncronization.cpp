@@ -6,7 +6,7 @@
 #include <Core/Logs.h>
 #include <Core/SystemState.h>
 #include <Core/Time.h>
-#include <Network/WiFi/NmWifiEsp.h>
+#include <Network/WiFiIP/NmWifiEsp.h>
 #include <atomic>
 #include <esp_sntp.h>
 

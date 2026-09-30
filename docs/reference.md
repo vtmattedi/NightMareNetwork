@@ -1192,12 +1192,37 @@ incoming MQTT payload:      32768 bytes
 MQTT QoS:                   0
 ```
 
-## WiFi
+## WiFi radio
 
-When enabled:
+When `NM_ENABLE_WIFI_RADIO` (derived: `NM_ENABLE_WIFI || NM_NETWORK_ESPNOW`):
 
 ```cpp
-// ESP-IDF driver (Network/WiFi/NmWifiEsp.h): no Arduino, storage or identity.
+// ESP-IDF driver (Network/WiFiRadio/NmWifiRadio.h): the radio and nothing above it.
+bool WiFiRadio_start();   // driver init, STA mode, esp_wifi_start; no AP. Idempotent.
+void WiFiRadio_stop();    // stop + deinit; the station and ESP-NOW stop with it
+bool WiFiRadio_running();
+esp_netif_t *WiFiRadio_stationNetif();  // nullptr unless NM_ENABLE_WIFI
+uint8_t WiFiRadio_channel();            // 0 while not running
+typedef void (*WiFiRadioStateCallback)(bool running);
+void WiFiRadio_onState(WiFiRadioStateCallback callback);
+
+// NightMare integration (Network/WiFiRadio/NmWifiRadioService.h)
+bool NightMare::WiFiRadioBegin();  // start + report; startNightMareESP() calls it
+void NightMare::WiFiRadioEnd();    // stops the station (if any), then the radio
+```
+
+The radio is what ESP-NOW needs; it never configures or joins an AP. It is
+reported to `NmConnection` as radio availability (`OnRadioAvailabilityIngress`),
+which is what starts an ESP-NOW connection. The station netif is created with
+the driver, before `esp_wifi_start`, because it follows the driver's STA events
+and one created later misses `STA_START`.
+
+## WiFi IP station
+
+When `NM_ENABLE_WIFI`:
+
+```cpp
+// ESP-IDF driver (Network/WiFiIP/NmWifiEsp.h): no Arduino, storage or identity.
 bool WiFi_start(const NightMare::WiFiProfile &profile, const char *hostname = nullptr);
 bool WiFi_changeProfile(const NightMare::WiFiProfile &profile);
 void WiFi_stop();
@@ -1216,7 +1241,7 @@ const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
 const char *WiFi_stateName(NightMare::WiFiState state);
 bool WiFi_isValidTxPower(int quarterDbm);
 
-// NightMare integration (Network/WiFi/NmWifiService.h)
+// NightMare integration (Network/WiFiIP/NmWifiService.h)
 typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 NightMare::WiFiProfile NightMare::WiFiStoredProfile();
@@ -1224,33 +1249,37 @@ bool NightMare::WiFiBegin();
 bool NightMare::WiFiApplyProfile(const NightMare::WiFiProfile &profile);
 ```
 
-The driver is ESP-IDF only and has three actions and a state.
+The station is ESP-IDF only, runs on the radio without owning it, and has
+three actions and a state.
 
-- `WiFi_start()` starts the stack with the profile it is given and keeps a
-  recovery task running: it retries every 15 seconds while cycling through the
-  ESP32 driver's supported transmit-power levels.
+- `WiFi_start()` starts the radio if needed, then joins the AP in the profile it
+  is given and keeps a recovery task running: it retries every 15 seconds while
+  cycling through the ESP32 driver's supported transmit-power levels.
 - `WiFi_changeProfile()` connects to a new network or applies a TX power. It
   tries the profile for up to 15 seconds and restores the previous one on
   failure. It persists nothing and fails while stopped.
-- `WiFi_stop()` disconnects and tears down the WiFi driver, netif, event
-  handlers and recovery task.
+- `WiFi_stop()` stops the station only: it disconnects, clears the station
+  config (so ESP-NOW may hop channels again) and ends the recovery task. The
+  radio stays up; `WiFiRadio_stop()` turns it off.
 - `WiFi_state()` is `STOPPED`, or running as `CONNECTING`, `CONNECTED` or
   `DISCONNECTED`. `WiFi_info()` adds SSID, IP, TX power (including a fallback
   level the driver settled on), RSSI and channel. `WiFi_onState()` fires on
-  every change. `WiFi_startScan()` fails while stopped.
+  every change, from the caller or the station's monitor task -- never the ESP
+  event task. `WiFi_startScan()` needs the radio, not a station.
 
 Storage, hostname and first-connection services live in `NmWifiService`:
-`WiFiBegin()` loads the stored profile (defaulting to `creds.h`), uses the device
-name as hostname, starts the stack, and on connection starts OTA and SNTP once,
+`WiFiBegin()` starts the radio through `WiFiRadioBegin()` (so it is reported),
+loads the stored profile (defaulting to `creds.h`), uses the device name as
+hostname, starts the station, and on connection starts OTA and SNTP once,
 persists a fallback TX power and then calls the `WiFi_onConnected()` callback.
-Every Wi-Fi state change is reported to `NmConnection` as link availability
-(`OnLinkAvailabilityIngress`); Wi-Fi does not start or select connections.
-`NmConnection` starts the preferred connection (then the build's default profile)
-when the link comes up and nothing is running.
-`WiFiApplyProfile()` changes the running stack and persists on success, or only
-persists while stopped.
+Every station state change is reported to `NmConnection` as IP-link
+availability (`OnIpLinkAvailabilityIngress`); Wi-Fi does not start or select
+connections. `NmConnection` starts the preferred connection (then the build's
+default profile) once what it runs on is available and nothing is running.
+`WiFiApplyProfile()` changes the running station and persists on success, or
+only persists while stopped.
 
-The implementation is under `Network/WiFi/` and uses `esp_wifi` directly.
+The implementation is under `Network/WiFiIP/` and uses `esp_wifi` directly.
 
 ## ESP lifecycle
 

@@ -150,21 +150,36 @@ All subscription intent is stored in one fixed 256-entry registry owned by
 subscriptions all enter through `Subscribe()`. The active implementation only
 executes the broker operation requested by `NmConnection`.
 
-## Direct ESP WiFi
+## Direct ESP WiFi: radio and IP station
 
-The active WiFi implementation is under:
+Wi-Fi is two layers, because "the radio is started" and "the station has an IP"
+are different capabilities -- ESP-NOW needs the first and not the second:
 
 ```text
-src/Network/WiFi/NmWifiEsp.h       ESP-IDF driver, no Arduino
-src/Network/WiFi/NmWifiEsp.cpp
-src/Network/WiFi/NmWifiService.*   storage, hostname, first-connection services
+src/Network/WiFiRadio/NmWifiRadio.*         ESP-IDF: driver init, STA mode, esp_wifi_start
+src/Network/WiFiRadio/NmWifiRadioService.*  reports the radio; stops the station with it
+src/Network/WiFiIP/NmWifiEsp.*              ESP-IDF: join an AP, get an IP, reconnect, scan
+src/Network/WiFiIP/NmWifiService.*          storage, hostname, first-connection services
 ```
 
-It uses `esp_wifi`, `esp_netif`, and ESP events directly.
+`NM_ENABLE_WIFI_RADIO` is derived (`NM_ENABLE_WIFI || NM_NETWORK_ESPNOW`); a
+radio-only ESP-NOW build sets `NM_ENABLE_WIFI 0` and never joins an AP. The
+radio initialises the driver without driver NVS (`nvs_enable = 0`), so a stale
+saved SSID cannot make it look like a station owns the channel.
+
+Both use `esp_wifi`, `esp_netif`, and ESP events directly.
 While associated, `WiFi_info()` reports the AP signal (`rssi`, dBm) and primary
-`channel`; both are 0 when not connected. The driver's mutable state (state, IP,
+`channel`; both are 0 when not connected. The station's mutable state (state, IP,
 active profile, TX power, scan results) is guarded by one mutex.
 
-Wi-Fi reports availability to `NmConnection` (`OnLinkAvailabilityIngress`) and
-nothing more. `NmConnection` owns starting the preferred connection when the
-link comes up, selecting connections and failing over.
+Each layer reports availability to `NmConnection` and nothing more:
+
+```text
+OnRadioAvailabilityIngress    radio started/stopped    ESP_NOW needs this
+OnIpLinkAvailabilityIngress   station has an IP / not  MQTT, LOCAL_MQTT need this
+```
+
+`NmConnection` owns starting the preferred connection once what it runs on is
+available, selecting connections and failing over. A preferred connection that
+is supported but not ready yet is waited for rather than skipped, so with MQTT
+preferred the radio coming up first does not start the ESP-NOW fallback.

@@ -4,8 +4,8 @@
 #include "NmWifiEsp.h"
 
 #include <Core/Logs.h>
+#include <Network/WiFiRadio/NmWifiRadio.h>
 #include <esp_event.h>
-#include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -26,7 +26,6 @@ constexpr size_t TxPowerLevelCount = sizeof(TxPowerLevels) / sizeof(TxPowerLevel
 
 SemaphoreHandle_t stateMutex = nullptr;
 TaskHandle_t monitorTaskHandle = nullptr;
-esp_netif_t *stationNetif = nullptr;
 esp_event_handler_instance_t wifiEvents = nullptr;
 esp_event_handler_instance_t ipEvents = nullptr;
 NightMare::WiFiState currentState = NightMare::WiFiState::STOPPED;
@@ -35,7 +34,7 @@ std::string hostname;
 NightMare::WiFiScanResult scanResults[MaxScanResults];
 size_t scanResultCount = 0;
 bool scanRunning = false;
-bool driverInitialized = false;
+bool handlersRegistered = false;
 bool keepMonitoring = false;
 std::string currentIp;
 WiFiStateCallback stateCallback = nullptr;
@@ -188,6 +187,10 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
 {
     if (eventId == WIFI_EVENT_STA_START)
     {
+        // STA_START is the radio starting, which no longer implies a station:
+        // a radio-only (ESP-NOW) device must not start joining an AP here.
+        if (!keepMonitoring)
+            return;
         portENTER_CRITICAL(&pendingLock);
         pendingStarted = true;
         portEXIT_CRITICAL(&pendingLock);
@@ -244,42 +247,41 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     }
 }
 
-bool initializeDriver()
+// Hooks this layer's handlers onto the default event loop, once. They stay for
+// the life of the process: the loop outlives any radio stop/start.
+bool registerHandlers()
 {
-    if (driverInitialized)
+    if (handlersRegistered)
         return true;
-    esp_err_t result = esp_netif_init();
-    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE)
-        return false;
-    result = esp_event_loop_create_default();
-    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE)
-        return false;
-    stationNetif = esp_netif_create_default_wifi_sta();
-    if (stationNetif == nullptr)
-        return false;
-    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
-    if (esp_wifi_init(&config) != ESP_OK ||
-        esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK ||
-        esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK)
-        return false;
     if (esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                             handleWiFiEvent, nullptr,
                                             &wifiEvents) != ESP_OK ||
         esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                             handleIpEvent, nullptr,
                                             &ipEvents) != ESP_OK)
+    {
+        LOG_ERROR(Tag, "Could not register the station event handlers");
         return false;
-    driverInitialized = true;
+    }
+    handlersRegistered = true;
     return true;
+}
+
+// The station runs on the radio but doesn't own it (Network/WiFiRadio does).
+bool ensureRadioReady()
+{
+    if (!WiFiRadio_start())
+    {
+        LOG_ERROR(Tag, "The Wi-Fi radio is not running");
+        return false;
+    }
+    return registerHandlers();
 }
 
 bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
 {
-    if (!initializeDriver())
-    {
-        LOG_ERROR(Tag, "Driver init failed");
+    if (!ensureRadioReady())
         return false;
-    }
     if (!WiFi_isValidTxPower(profile.txPower))
     {
         LOG_ERROR(Tag, "Invalid stored TX power %d", profile.txPower);
@@ -296,8 +298,8 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
         Lock lock;
         name = hostname;
     }
-    if (!name.empty())
-        esp_netif_set_hostname(stationNetif, name.c_str());
+    if (!name.empty() && WiFiRadio_stationNetif() != nullptr)
+        esp_netif_set_hostname(WiFiRadio_stationNetif(), name.c_str());
     esp_wifi_disconnect();
     if (!configureStation(profile))
     {
@@ -305,17 +307,11 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
         return false;
     }
     setStatus(NightMare::WiFiState::CONNECTING);
-    const esp_err_t started = esp_wifi_start();
-    if (started != ESP_OK && started != ESP_ERR_WIFI_CONN)
-    {
-        LOG_ERROR(Tag, "esp_wifi_start failed: %s", esp_err_to_name(started));
-        return false;
-    }
-    // After esp_wifi_start, not before: esp_wifi_set_max_tx_power returns
-    // ESP_ERR_WIFI_NOT_STARTED otherwise. With a non-AUTO power saved to NVS
-    // (the service persists a fallback power), applying it first failed every
-    // boot before the radio ever started. A power that still won't apply is
-    // not worth refusing to connect over: the driver default is used instead.
+    // The radio is already running (ensureRadioReady), which is also what
+    // esp_wifi_set_max_tx_power needs: before esp_wifi_start it returns
+    // ESP_ERR_WIFI_NOT_STARTED, and a non-AUTO power saved to NVS used to fail
+    // every boot right here. A power that still won't apply is not worth
+    // refusing to connect over: the driver default is used instead.
     if (!applyTxPower(profile.txPower))
         LOG_WARNING(Tag, "Could not apply TX power %d, using the driver default", profile.txPower);
     LOG(Tag, "Connecting to '%s'", profile.ssid.c_str());
@@ -458,18 +454,15 @@ void WiFi_stop()
     keepMonitoring = false;
     setStatus(NightMare::WiFiState::STOPPED);
     stopMonitor();
-    if (!driverInitialized)
-        return;
-    esp_wifi_disconnect();
-    esp_wifi_stop();
-    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifiEvents);
-    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ipEvents);
-    wifiEvents = nullptr;
-    ipEvents = nullptr;
-    esp_wifi_deinit();
-    esp_netif_destroy_default_wifi(stationNetif);
-    stationNetif = nullptr;
-    driverInitialized = false;
+    if (WiFiRadio_running())
+    {
+        esp_wifi_disconnect();
+        // Forget the AP. An empty station config is also what tells ESP-NOW
+        // (EspNowClient::freeToTune) that no station owns the channel any more,
+        // so it may hop again. The radio itself stays up for it.
+        wifi_config_t none = {};
+        esp_wifi_set_config(WIFI_IF_STA, &none);
+    }
     Lock lock;
     currentIp.clear();
     scanResultCount = 0;
@@ -531,7 +524,7 @@ NightMare::WiFiInfo WiFi_info()
         info.txPower = activeProfile.txPower;
         info.ip = currentIp;
     }
-    if (info.state == NightMare::WiFiState::STOPPED)
+    if (info.state == NightMare::WiFiState::STOPPED || !WiFiRadio_running())
         return info;
     int8_t power = 0;
     if (esp_wifi_get_max_tx_power(&power) == ESP_OK)
@@ -548,7 +541,11 @@ NightMare::WiFiInfo WiFi_info()
 
 bool WiFi_startScan()
 {
-    if (WiFi_state() == NightMare::WiFiState::STOPPED)
+    // A scan needs the radio, not a station: it works on a radio-only device
+    // too. It does not start the radio -- that is WiFiRadioBegin()'s call. On
+    // a hopping ESP-NOW device the scan and the hop briefly fight over the
+    // channel; the next hop sorts it out.
+    if (!WiFiRadio_running() || !registerHandlers())
         return false;
     {
         Lock lock;

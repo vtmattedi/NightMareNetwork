@@ -35,8 +35,9 @@ bool Unsubscribe(const char *topicFilter);
 
 bool SelectConnection(ConnectionType connection);
 
-// Starts the preferred connection if it does not depend on a Wi-Fi link
-// (ESP-NOW). Broker connections keep waiting for the link. Called by
+// Starts the preferred connection if what it runs on is already available:
+// ESP-NOW needs the Wi-Fi radio, MQTT/LOCAL_MQTT an IP link. Otherwise it
+// waits and starts from the radio/IP-link ingress. Called by
 // startNightMareESP(); safe to call again.
 bool ConnectionBegin();
 

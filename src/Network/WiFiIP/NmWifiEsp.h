@@ -4,6 +4,11 @@
 
 // ESP-IDF only: no Arduino, PersistentSettings or NightMare identity here.
 // Persistence, hostname and follow-up services belong to the caller.
+//
+// The IP station: joining an AP and getting an address. It runs on the Wi-Fi
+// radio but does not own it -- Network/WiFiRadio does. Starting the station
+// starts the radio if needed; stopping it leaves the radio up, since ESP-NOW
+// may be using it.
 #include <esp_wifi.h>
 #include <cstddef>
 #include <cstdint>
@@ -53,14 +58,17 @@ struct WiFiScanResult
 
 using WiFiStateCallback = void (*)(NightMare::WiFiState state);
 
-// Runs on the ESP event task on every state change.
+// Runs on every state change, from the caller of WiFi_start/WiFi_stop or from
+// the station's monitor task -- never the ESP event task, so it may do real
+// work (the connected chain starts OTA, SNTP and the network connection).
 void WiFi_onState(WiFiStateCallback callback);
 
 // Starts the station with the given profile and keeps it connected, cycling
-// TX power levels on repeated failure. Idempotent while connecting/connected.
+// TX power levels on repeated failure. Starts the radio if it is not running.
+// Idempotent while connecting/connected.
 bool WiFi_start(const NightMare::WiFiProfile &profile, const char *hostname = nullptr);
-// Tears the whole WiFi stack down (driver, netif, events, recovery task).
-// WiFi_start() brings it back.
+// Stops the station: disconnects, forgets the AP and ends the recovery task.
+// The radio stays up (ESP-NOW may be on it); WiFiRadio_stop() turns it off.
 void WiFi_stop();
 // Tries the profile synchronously (up to 15 s). On failure the previous profile
 // is restored and false returned. Nothing is persisted; false while stopped.
