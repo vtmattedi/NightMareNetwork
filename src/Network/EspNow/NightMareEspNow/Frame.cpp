@@ -1,8 +1,8 @@
 #include "Frame.h"
 #include <string.h>
-#include "esp_log.h"
+#include "Core/Logs.h"
 
-static const char *TAG = "Frame";
+static const char *TAG = "ESPNOW-FRAME";
 
 namespace NightMare
 {
@@ -41,7 +41,7 @@ namespace NightMare
         const size_t length = (size_t)versionCount + 1; // +1 for the count prefix byte
         if (length > MaxFrameDataSize)
         {
-            ESP_LOGE(TAG, "Beacon frame too large: %zu bytes, max is %zu", length, MaxFrameDataSize);
+            LOG_ERROR(TAG, "Beacon frame too large: %u bytes, max is %u", (unsigned)length, (unsigned)MaxFrameDataSize);
             return Frame{};
         }
 

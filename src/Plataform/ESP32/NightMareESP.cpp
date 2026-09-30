@@ -261,7 +261,8 @@ void startNightMareESP()
         LOG_ERROR("NM", "Could not schedule periodic telemetry");
 #endif
 #if NM_ENABLE_WIFI && NM_WIFI_AUTO
-    NightMare::WiFiBegin();
+    if (!NightMare::WiFiBegin())
+        LOG_ERROR("NM", "Wi-Fi did not start; ESP-NOW has no radio to use");
 #endif
 #if NM_ENABLE_NETWORK
     // ESP-NOW needs the Wi-Fi radio started, not an association, so it does not wait for the link.

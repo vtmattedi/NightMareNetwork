@@ -8,6 +8,7 @@
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <cstdio>
@@ -114,6 +115,151 @@ namespace NightMare::EspNowClient
             case FrameType::LAST_WILL: return "LAST_WILL";
             }
             return "?";
+        }
+
+        // The receive callback runs on the Wi-Fi task, which has no stack to spare for
+        // formatting a log line (NMLog + Serial.printf, the same thing that overflowed
+        // sys_evt). It only queues plain data here; rxLogTask formats and prints it.
+        enum class RxNote : uint8_t
+        {
+            BadHeader,      // value: received length
+            WrongVersion,
+            TooLong,
+            BeaconAdopted,
+            BeaconIgnored,  // does not speak our version
+            BeaconKnown,
+            AckForProbe,
+            AckIgnored,     // value: 1 = not our gateway, 0 = not the current probe
+            AckRtt,         // value: rtt ms
+            Connected,      // value: rtt ms
+            GatewayLearned, // value: channel
+            AddPeerFailed,  // value: esp_err_t
+            MessageIgnored,
+            ErrorFrame,
+            Unhandled,
+        };
+
+        struct RxEvent
+        {
+            RxNote note;
+            uint8_t type;
+            uint8_t version;
+            int8_t rssi;
+            uint16_t messageId;
+            uint16_t length;
+            uint8_t mac[6];
+            int32_t value;
+        };
+
+        constexpr UBaseType_t RxLogDepth = 16;
+        QueueHandle_t rxLogQueue = nullptr;
+        TaskHandle_t rxLogTask = nullptr;
+
+        void note(RxNote what, const uint8_t *mac, const FrameHeader *header = nullptr,
+                  int rssi = 0, int32_t value = 0)
+        {
+            if (rxLogQueue == nullptr)
+                return;
+            RxEvent event{};
+            event.note = what;
+            if (mac != nullptr)
+                memcpy(event.mac, mac, 6);
+            if (header != nullptr)
+            {
+                event.type = header->type;
+                event.version = header->version;
+                event.messageId = header->messageId;
+                event.length = header->length;
+            }
+            event.rssi = static_cast<int8_t>(rssi);
+            event.value = value;
+            xQueueSend(rxLogQueue, &event, 0); // full: drop the note, never stall the Wi-Fi task
+        }
+
+        void printRxEvent(const RxEvent &e)
+        {
+            const MacText from = macText(e.mac);
+            const char *type = frameTypeName(e.type);
+            switch (e.note)
+            {
+            case RxNote::BadHeader:
+                LOG_WARNING(TagRx, "%ld bytes from %s: not a valid frame header",
+                            static_cast<long>(e.value), from.text);
+                break;
+            case RxNote::WrongVersion:
+                LOG_WARNING(TagRx, "%s #%u from %s: version %u, expected %u", type, e.messageId,
+                            from.text, e.version, static_cast<unsigned>(VersionType::ESP_NOW));
+                break;
+            case RxNote::TooLong:
+                LOG_WARNING(TagRx, "%s #%u from %s: %u data bytes exceed a frame", type,
+                            e.messageId, from.text, e.length);
+                break;
+            case RxNote::BeaconAdopted:
+                LOG(TagRx, "BEACON from %s (rssi %d), adopting it as gateway", from.text, e.rssi);
+                break;
+            case RxNote::BeaconIgnored:
+                LOG_WARNING(TagRx, "BEACON from %s (rssi %d) does not list version %u, ignored",
+                            from.text, e.rssi, static_cast<unsigned>(VersionType::ESP_NOW));
+                break;
+            case RxNote::BeaconKnown:
+                LOG_DEBUG(TagRx, "BEACON from %s (rssi %d)", from.text, e.rssi);
+                break;
+            case RxNote::AckForProbe:
+                LOG(TagRx, "ACK #%u from %s (rssi %d) answers our probe", e.messageId, from.text,
+                    e.rssi);
+                break;
+            case RxNote::AckIgnored:
+                LOG_WARNING(TagRx, "ACK #%u from %s ignored: %s", e.messageId, from.text,
+                            e.value != 0 ? "not our gateway" : "not the current probe");
+                break;
+            case RxNote::AckRtt:
+                LOG_DEBUG(TagRx, "ACK #%u, rtt %ld ms", e.messageId, static_cast<long>(e.value));
+                break;
+            case RxNote::Connected:
+                LOG(TagLink, "connected to gateway %s (rtt %ld ms)", from.text,
+                    static_cast<long>(e.value));
+                break;
+            case RxNote::GatewayLearned:
+                LOG(TagLink, "gateway %s on ch %ld", from.text, static_cast<long>(e.value));
+                break;
+            case RxNote::AddPeerFailed:
+                LOG_ERROR(TagLink, "add gateway peer %s failed: %s", from.text,
+                          esp_err_to_name(static_cast<esp_err_t>(e.value)));
+                break;
+            case RxNote::MessageIgnored:
+                LOG_WARNING(TagRx, "MESSAGE #%u from %s ignored: not our gateway", e.messageId,
+                            from.text);
+                break;
+            case RxNote::ErrorFrame:
+                LOG_WARNING(TagRx, "ERROR #%u from %s: the gateway rejected that request",
+                            e.messageId, from.text);
+                break;
+            case RxNote::Unhandled:
+                LOG_DEBUG(TagRx, "%s #%u from %s: not handled", type, e.messageId, from.text);
+                break;
+            }
+        }
+
+        // Created once and never torn down: it only blocks on its queue, and keeping it
+        // alive avoids a race with a quick end()/begin() leaving no printer running.
+        void rxLogTaskMain(void *)
+        {
+            RxEvent event;
+            for (;;)
+                if (xQueueReceive(rxLogQueue, &event, portMAX_DELAY) == pdTRUE)
+                    printRxEvent(event);
+        }
+
+        bool ensureRxLog()
+        {
+            if (rxLogQueue == nullptr)
+                rxLogQueue = xQueueCreate(RxLogDepth, sizeof(RxEvent));
+            if (rxLogQueue == nullptr)
+                return false;
+            if (rxLogTask == nullptr &&
+                xTaskCreate(rxLogTaskMain, "espnow_rxlog", 3584, nullptr, 1, &rxLogTask) != pdPASS)
+                rxLogTask = nullptr;
+            return rxLogTask != nullptr;
         }
 
         class Guard
@@ -334,10 +480,10 @@ namespace NightMare::EspNowClient
             peer.ifidx = WIFI_IF_STA;
             peer.encrypt = false;
             const esp_err_t err = esp_now_add_peer(&peer);
+            // Called from the receive callback (the Wi-Fi task): note(), never LOG, here.
             if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST)
             {
-                LOG_ERROR(TagLink, "add gateway peer %s failed: %s", macText(mac).text,
-                          esp_err_to_name(err));
+                note(RxNote::AddPeerFailed, mac, nullptr, 0, err);
                 return;
             }
             portENTER_CRITICAL(&lock);
@@ -345,7 +491,7 @@ namespace NightMare::EspNowClient
             gatewayKnown = true;
             missed = 0;
             portEXIT_CRITICAL(&lock);
-            LOG(TagLink, "gateway %s on ch %u", macText(mac).text, currentChannel());
+            note(RxNote::GatewayLearned, mac, nullptr, 0, currentChannel());
         }
 
         void forgetGateway()
@@ -461,14 +607,27 @@ namespace NightMare::EspNowClient
         {
             if (!running || info == nullptr || data == nullptr || len <= 0)
                 return;
+            // Runs on the Wi-Fi task: note(), never LOG -- see RxNote.
+            const uint8_t *from = info->src_addr;
+            const int rssi = info->rx_ctrl != nullptr ? info->rx_ctrl->rssi : 0;
             FrameHeader header;
-            if (!decodeFrameHeader(header, data, static_cast<size_t>(len)) ||
-                header.version != static_cast<uint8_t>(VersionType::ESP_NOW))
+            if (!decodeFrameHeader(header, data, static_cast<size_t>(len)))
+            {
+                note(RxNote::BadHeader, from, nullptr, rssi, len);
                 return;
+            }
+            if (header.version != static_cast<uint8_t>(VersionType::ESP_NOW))
+            {
+                note(RxNote::WrongVersion, from, &header, rssi);
+                return;
+            }
             Frame frame{};
             frame.header = header;
             if (header.length > sizeof(frame.data))
+            {
+                note(RxNote::TooLong, from, &header, rssi);
                 return;
+            }
             memcpy(frame.data, data + FrameHeaderSize, header.length);
 
             uint8_t gateway[6];
@@ -484,8 +643,17 @@ namespace NightMare::EspNowClient
                 if (header.length >= 1)
                     for (size_t i = 0; i < frame.data[0] && i + 1 < header.length; ++i)
                         speaksUs |= frame.data[1 + i] == static_cast<uint8_t>(VersionType::ESP_NOW);
-                if (!known && speaksUs)
+                if (known)
                 {
+                    note(RxNote::BeaconKnown, from, &header, rssi);
+                }
+                else if (!speaksUs)
+                {
+                    note(RxNote::BeaconIgnored, from, &header, rssi);
+                }
+                else
+                {
+                    note(RxNote::BeaconAdopted, from, &header, rssi);
                     setGateway(info->src_addr);
                     wakeTask(); // register right away instead of waiting for the next tick
                 }
@@ -501,19 +669,30 @@ namespace NightMare::EspNowClient
                 portEXIT_CRITICAL(&lock);
                 // Learn the gateway from the answer to our broadcast probe, and only that.
                 if (!known && header.messageId == expectedProbe)
+                {
+                    note(RxNote::AckForProbe, from, &header, rssi);
                     setGateway(info->src_addr);
+                }
                 else if (!fromGateway)
+                {
+                    note(RxNote::AckIgnored, from, &header, rssi, known ? 1 : 0);
                     break;
+                }
                 portENTER_CRITICAL(&lock);
                 missed = 0;
-                if (header.messageId == probeId)
+                const bool answersProbe = header.messageId == probeId;
+                if (answersProbe)
                     lastRttMs = static_cast<uint32_t>((nowUs() - sentUs) / 1000);
+                const uint32_t rtt = lastRttMs;
                 const bool wasConnected = currentState == State::CONNECTED;
                 if (!wasConnected)
                     needResync = true;
                 portEXIT_CRITICAL(&lock);
+                if (answersProbe)
+                    note(RxNote::AckRtt, from, &header, rssi, static_cast<int32_t>(rtt));
                 if (!wasConnected)
                 {
+                    note(RxNote::Connected, from, &header, rssi, static_cast<int32_t>(rtt));
                     setState(State::CONNECTED);
                     wakeTask(); // resync subscriptions/will now
                 }
@@ -522,20 +701,39 @@ namespace NightMare::EspNowClient
             case FrameType::MESSAGE:
                 if (fromGateway)
                     handleMessageFrame(frame);
+                else
+                    note(RxNote::MessageIgnored, from, &header, rssi);
+                break;
+            case FrameType::ERROR:
+                note(RxNote::ErrorFrame, from, &header, rssi);
                 break;
             default:
+                note(RxNote::Unhandled, from, &header, rssi);
                 break;
             }
         }
 
         void clientTask(void *)
         {
+            // 0 = not searching, 1 = hopping channels, 2 = held on the AP's (or the fixed) channel
+            uint8_t lastMode = 0xFF;
             while (running)
             {
                 // Connected: one heartbeat per interval. Otherwise probe quickly.
                 uint8_t knownMac[6];
                 const bool searching = state() != State::CONNECTED && !gatewayAddress(knownMac);
                 const bool hopping = searching && hoppingNow();
+                const uint8_t mode = !searching ? 0 : hopping ? 1 : 2;
+                if (mode != lastMode)
+                {
+                    lastMode = mode;
+                    if (mode == 1)
+                        LOG(TagLink, "searching: hopping ch 1..%u (no AP configured)", LastHopChannel);
+                    else if (mode == 2)
+                        LOG(TagLink, "searching: probing on ch %u every %lu ms (%s)",
+                            currentChannel(), static_cast<unsigned long>(SearchIntervalMs),
+                            settings.channel != 0 ? "fixed channel" : "channel follows the AP");
+                }
                 const uint32_t waitMs = state() == State::CONNECTED ? settings.heartbeatMs
                                         : hopping                   ? HopIntervalMs
                                                                     : SearchIntervalMs;
@@ -562,7 +760,8 @@ namespace NightMare::EspNowClient
                 }
                 if (lost)
                 {
-                    ESP_LOGW(Tag, "gateway silent, searching again");
+                    LOG_WARNING(TagLink, "gateway silent for %u heartbeats, searching again",
+                                settings.missedBeforeLost);
                     forgetGateway();
                     setState(State::SEARCHING);
                 }
@@ -582,10 +781,22 @@ namespace NightMare::EspNowClient
             return false;
         settings = config;
 
+        uint8_t ownMac[6] = {};
+        esp_wifi_get_mac(WIFI_IF_STA, ownMac);
+        wifi_config_t station = {};
+        const bool haveApConfig = esp_wifi_get_config(WIFI_IF_STA, &station) == ESP_OK &&
+                                  station.sta.ssid[0] != '\0';
+        LOG(TagLink, "starting on %s, ch %u, heartbeat %lu ms, lost after %u, AP: %s", macText(ownMac).text,
+            currentChannel(), static_cast<unsigned long>(config.heartbeatMs), config.missedBeforeLost,
+            haveApConfig ? reinterpret_cast<const char *>(station.sta.ssid) : "(none)");
+
+        if (!ensureRxLog())
+            LOG_WARNING(TagLink, "no receive-side logging: could not start its task");
+
         const esp_err_t err = esp_now_init();
         if (err != ESP_OK)
         {
-            LOG_WARNING(Tag, "esp_now_init failed: %s", esp_err_to_name(err));
+            LOG_ERROR(TagLink, "esp_now_init failed: %s", esp_err_to_name(err));
             return false;
         }
         esp_now_register_recv_cb(receiveCallback);
@@ -593,13 +804,17 @@ namespace NightMare::EspNowClient
 
         // The station default is modem sleep: once associated, the radio only wakes around the
         // AP's beacons, so the gateway's ESP-NOW beacons and ACKs mostly arrive while it is off.
-        esp_wifi_set_ps(WIFI_PS_NONE);
+        const esp_err_t ps = esp_wifi_set_ps(WIFI_PS_NONE);
+        if (ps != ESP_OK)
+            LOG_WARNING(TagLink, "could not disable Wi-Fi power save: %s", esp_err_to_name(ps));
 
         esp_now_peer_info_t broadcast = {};
         memcpy(broadcast.peer_addr, BroadcastMac, 6);
         broadcast.ifidx = WIFI_IF_STA;
         broadcast.encrypt = false;
-        esp_now_add_peer(&broadcast);
+        const esp_err_t peer = esp_now_add_peer(&broadcast);
+        if (peer != ESP_OK && peer != ESP_ERR_ESPNOW_EXIST)
+            LOG_ERROR(TagLink, "adding the broadcast peer failed: %s", esp_err_to_name(peer));
 
         portENTER_CRITICAL(&lock);
         gatewayKnown = false;
@@ -611,8 +826,11 @@ namespace NightMare::EspNowClient
 
         running = true;
         taskExited = false;
-        if (xTaskCreate(clientTask, "espnow_client", 3072, nullptr, 1, &task) != pdPASS)
+        // 4 KB, not 3: NMLog::write formats into a 256-byte stack buffer and then
+        // Serial.printf formats again, and this task can log from inside sendRaw.
+        if (xTaskCreate(clientTask, "espnow_client", 4096, nullptr, 1, &task) != pdPASS)
         {
+            LOG_ERROR(TagLink, "could not create the client task");
             running = false;
             taskExited = true;
             esp_now_unregister_recv_cb();

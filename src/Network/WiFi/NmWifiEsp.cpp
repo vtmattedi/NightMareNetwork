@@ -87,12 +87,26 @@ bool isConnected() { return WiFi_state() == NightMare::WiFiState::CONNECTED; }
 
 uint32_t nowMs() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+// The Wi-Fi/IP event handlers run on the default event loop task (sys_evt), whose
+// stack has room for neither a formatted log line nor the connected-callback
+// chain (OTA, SNTP, NVS, starting the connection) -- doing either there overflows
+// it. The handlers only record what happened; monitorTask logs it and delivers the
+// state callback, on a stack sized for that.
+portMUX_TYPE pendingLock = portMUX_INITIALIZER_UNLOCKED;
+bool pendingStarted = false;
+uint8_t pendingChannel = 0; // associated on this channel; 0 = nothing to report
+uint8_t pendingDisconnects = 0;
+uint8_t pendingReason = 0;
+volatile NightMare::WiFiState lastPublished = NightMare::WiFiState::STOPPED;
+
 void publishState(NightMare::WiFiState status)
 {
+    lastPublished = status;
     if (stateCallback != nullptr)
         stateCallback(status);
 }
 
+// For callers on an ordinary task: records and publishes right away.
 void setStatus(NightMare::WiFiState status)
 {
     bool changed;
@@ -103,6 +117,13 @@ void setStatus(NightMare::WiFiState status)
     }
     if (changed)
         publishState(status);
+}
+
+// For the event handlers: records only. monitorTask publishes it.
+void recordStatus(NightMare::WiFiState status)
+{
+    Lock lock;
+    currentState = status;
 }
 
 size_t nextPowerIndex(int power)
@@ -160,34 +181,40 @@ void handleIpEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
         currentIp = address;
         currentState = NightMare::WiFiState::CONNECTED;
     }
-    notifyConnected();
+    // notifyConnected() runs from monitorTask; see pendingLock.
 }
 
 void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
 {
     if (eventId == WIFI_EVENT_STA_START)
     {
-        LOG(Tag, "Station started");
-        setStatus(NightMare::WiFiState::CONNECTING);
+        portENTER_CRITICAL(&pendingLock);
+        pendingStarted = true;
+        portEXIT_CRITICAL(&pendingLock);
+        recordStatus(NightMare::WiFiState::CONNECTING);
         esp_wifi_connect();
     }
     else if (eventId == WIFI_EVENT_STA_CONNECTED)
     {
         const auto *event = static_cast<const wifi_event_sta_connected_t *>(eventData);
-        LOG(Tag, "Associated on channel %u, waiting for IP", event != nullptr ? event->channel : 0);
+        portENTER_CRITICAL(&pendingLock);
+        pendingChannel = event != nullptr ? event->channel : 0;
+        portEXIT_CRITICAL(&pendingLock);
     }
     else if (eventId == WIFI_EVENT_STA_DISCONNECTED)
     {
-        // The reason code is the fastest way to tell a wrong password (15/204),
-        // an AP that isn't there (201) and a plain drop apart.
         const auto *event = static_cast<const wifi_event_sta_disconnected_t *>(eventData);
-        LOG_WARNING(Tag, "Disconnected, reason %u", event != nullptr ? event->reason : 0);
+        portENTER_CRITICAL(&pendingLock);
+        if (pendingDisconnects < UINT8_MAX)
+            ++pendingDisconnects;
+        pendingReason = event != nullptr ? event->reason : 0;
+        portEXIT_CRITICAL(&pendingLock);
         {
             Lock lock;
             currentIp.clear();
         }
         if (WiFi_state() != NightMare::WiFiState::STOPPED)
-            setStatus(NightMare::WiFiState::DISCONNECTED);
+            recordStatus(NightMare::WiFiState::DISCONNECTED);
         if (keepMonitoring)
             esp_wifi_connect();
     }
@@ -301,6 +328,43 @@ bool beginConnection(const NightMare::WiFiProfile &profile, bool monitor)
     return true;
 }
 
+// Logs what the event handlers recorded and publishes a state they changed.
+void reportPendingEvents()
+{
+    bool started;
+    uint8_t channel;
+    uint8_t disconnects;
+    uint8_t reason;
+    portENTER_CRITICAL(&pendingLock);
+    started = pendingStarted;
+    channel = pendingChannel;
+    disconnects = pendingDisconnects;
+    reason = pendingReason;
+    pendingStarted = false;
+    pendingChannel = 0;
+    pendingDisconnects = 0;
+    portEXIT_CRITICAL(&pendingLock);
+
+    if (started)
+        LOG(Tag, "Station started");
+    // The reason code is the quickest way to tell a wrong password (15, 202,
+    // 204), an AP that isn't there (201) and a plain drop apart.
+    if (disconnects == 1)
+        LOG_WARNING(Tag, "Disconnected, reason %u", reason);
+    else if (disconnects > 1)
+        LOG_WARNING(Tag, "Disconnected %u times, last reason %u", disconnects, reason);
+    if (channel != 0)
+        LOG(Tag, "Associated on channel %u, waiting for IP", channel);
+
+    const NightMare::WiFiState state = WiFi_state();
+    if (state == lastPublished)
+        return;
+    if (state == NightMare::WiFiState::CONNECTED)
+        notifyConnected();
+    else
+        publishState(state);
+}
+
 void monitorTask(void *)
 {
     uint32_t attemptStarted = nowMs();
@@ -311,6 +375,7 @@ void monitorTask(void *)
     }
     while (keepMonitoring)
     {
+        reportPendingEvents();
         if (isConnected())
         {
             attemptStarted = nowMs();
@@ -344,7 +409,9 @@ bool startMonitor()
     keepMonitoring = true;
     if (monitorTaskHandle != nullptr)
         return true;
-    return xTaskCreate(monitorTask, "wifi_monitor", 4096, nullptr, 1,
+    // 6 KB: the state callback runs here, and on CONNECTED that starts OTA,
+    // SNTP and the network connection, and saves to NVS.
+    return xTaskCreate(monitorTask, "wifi_monitor", 6144, nullptr, 1,
                        &monitorTaskHandle) == pdPASS;
 }
 
