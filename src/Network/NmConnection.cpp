@@ -18,6 +18,7 @@
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <atomic>
 
 namespace NightMare
 {
@@ -64,6 +65,7 @@ bool radioAvailable = false;
 bool ipLinkAvailable = false;
 ConnectionType rollbackConnection = ConnectionType::AUTO;
 bool rollbackAvailable = false;
+std::atomic<MessageHandler> applicationMessageHandler{nullptr};
 
 // PublishTextWhenConnected() backlog, flushed on every connect whatever the
 // connection. Guarded by deferredMutex.
@@ -520,6 +522,11 @@ bool Unsubscribe(const char *topicFilter)
     return true;
 }
 
+void OnMessage(MessageHandler handler)
+{
+    applicationMessageHandler.store(handler);
+}
+
 bool SelectConnection(ConnectionType connection)
 {
     if (!connectionEnabled(connection))
@@ -631,6 +638,16 @@ void OnIpLinkAvailabilityIngress(bool available)
     // No enabled profile means there is nothing to start, which is not an error.
     if (!startPreferredConnection() && defaultConnection() != ConnectionType::AUTO)
         LOG_ERROR("NET", "Could not start the preferred connection");
+}
+
+bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,
+                                size_t length, bool retained)
+{
+    MessageHandler handler = applicationMessageHandler.load();
+    if (handler == nullptr)
+        return false;
+    handler(topic, payload, length, retained);
+    return true;
 }
 
 bool PublishText(const String &topic, const String &payload, bool retained)

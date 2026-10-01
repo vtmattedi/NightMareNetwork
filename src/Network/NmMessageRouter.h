@@ -7,6 +7,6 @@
 namespace NmMessageRouter
 {
 void onConnected();
-bool handleMessage(const String &topic, const String &payload);
+bool handleMessage(const String &topic, const String &payload, bool retained = false);
 }
 #endif // NM_ENABLE_NETWORK

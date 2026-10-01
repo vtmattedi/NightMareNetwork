@@ -6,7 +6,7 @@
 // ESP MQTT client and broker lifecycle. Topics arrive unmodified.
 namespace NmMqttEsp
 {
-using MessageHandler = void (*)(const String &topic, const String &payload);
+using MessageHandler = void (*)(const String &topic, const String &payload, bool retained);
 using ConnectedHandler = void (*)(bool lanBroker);
 using DisconnectedHandler = void (*)(bool lanBroker);
 using ErrorHandler = void (*)(bool lanBroker);

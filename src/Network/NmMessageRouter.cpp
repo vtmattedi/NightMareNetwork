@@ -107,7 +107,7 @@ void onConnected()
 #endif
 }
 
-bool handleMessage(const String &fullTopic, const String &payload)
+bool handleMessage(const String &fullTopic, const String &payload, bool retained)
 {
     // The resource manager accepts owned /set and /invoke requests, as well as
     // manifests and states from other devices. It sees full topics in both cases.
@@ -141,7 +141,9 @@ bool handleMessage(const String &fullTopic, const String &payload)
         return true;
     }
 #endif
-    return false;
+    return NightMare::DispatchApplicationMessage(
+        fullTopic.c_str(), reinterpret_cast<const uint8_t *>(payload.c_str()),
+        payload.length(), retained);
 }
 }
 #endif // NM_ENABLE_NETWORK

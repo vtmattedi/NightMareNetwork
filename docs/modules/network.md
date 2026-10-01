@@ -73,6 +73,14 @@ bool NightMare::Publish(
     size_t length,
     bool retained = false);
 
+using MessageHandler =
+    void (*)(const char *topic,
+             const uint8_t *payload,
+             size_t length,
+             bool retained);
+
+void NightMare::OnMessage(MessageHandler handler);
+
 bool NightMare::Subscribe(const char *topicFilter);
 bool NightMare::Unsubscribe(const char *topicFilter);
 
@@ -83,8 +91,32 @@ NightMare::ConnectionState NightMare::GetConnectionState();
 ```
 
 The generic payload boundary is byte pointer plus explicit length. Embedded
-zero bytes are therefore preserved when adapted to MQTT, and a future ESP-NOW
-driver is not constrained to text payloads.
+zero bytes are therefore preserved by both MQTT and ESP-NOW.
+
+`OnMessage()` installs one application handler, replacing the previous handler;
+passing `nullptr` removes it. After Resource, time, console, and other enabled
+framework routes decline a message, the router invokes this handler with the
+full topic and the retained flag supplied by the active connection. Framework
+messages do not also reach the application handler.
+
+The callback runs synchronously on the active connection's ingress context.
+The topic and payload pointers are valid only for the callback duration, so the
+application must copy data it needs afterward and should keep the callback
+short.
+
+```cpp
+void onMessage(const char *topic, const uint8_t *payload,
+               size_t length, bool retained)
+{
+    // Handle custom subscribed traffic.
+}
+
+void setup()
+{
+    NightMare::OnMessage(onMessage);
+    NightMare::Subscribe("test/+");
+}
+```
 
 ## Persisted selection
 

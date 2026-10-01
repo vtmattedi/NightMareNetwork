@@ -9,3 +9,4 @@
 #define MQTT_USER "smoke-test"
 #define MQTT_PASSWD "smoke-test"
 #define ROOT_CA ""
+#define NM_ESPNOW_PSK "smoke-test-espnow-psk"

@@ -295,8 +295,10 @@ NightMare::Subscribe(...);
 NightMare::Unsubscribe(...);
 ```
 
-Subscriptions are remembered in RAM by `NmTransport` and restored once on
-reconnect alongside framework and Resource subscriptions.
+Subscriptions are remembered in RAM by `NmConnection` and restored once on
+reconnect alongside framework and Resource subscriptions. Messages that are
+not consumed by a framework route are delivered to the handler registered with
+`NightMare::OnMessage()`.
 
 The current limits are:
 

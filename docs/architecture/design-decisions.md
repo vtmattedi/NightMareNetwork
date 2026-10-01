@@ -99,6 +99,21 @@ type; only `NmConnection` may do that. A failed explicit remote/local switch may
 be rolled back by `NmConnection` to the last connected profile; that safety
 transaction is not general automatic failover.
 
+## Generic application ingress runs after framework routing
+
+**Decision:** applications register one binary-safe message handler through
+`NightMare::OnMessage`. `NmMessageRouter` invokes it only when Resource, time,
+console, and other enabled framework routes decline the message.
+
+**Reason:** applications need custom subscribed topics without depending on an
+MQTT driver or on the internal router, while framework protocol messages must
+have one owner and must not leak into unrelated application handling.
+
+**Consequence:** recognized framework traffic is consumed even when its
+operation is malformed or rejected. The application handler sees only
+unconsumed traffic, receives the active connection's retained flag, and
+replaces any previously registered handler.
+
 ## A manifest describes; `/state` tells the truth
 
 **Decision:** Resource manifests are descriptive and diagnostic. Valid Value

@@ -1,4 +1,5 @@
 #include <NightMareNetwork.h>
+#include <Network/NmMessageRouter.h>
 
 #include <type_traits>
 #include <new>
@@ -76,6 +77,12 @@ static_assert(static_cast<uint8_t>(NightMare::ConnectionType::MQTT) == 1,
 static_assert(std::is_same<decltype(&NightMare::Publish),
                            bool (*)(const char *, const uint8_t *, size_t, bool)>::value,
               "The generic connection publication boundary must remain binary-safe");
+static_assert(std::is_same<NightMare::MessageHandler,
+                           void (*)(const char *, const uint8_t *, size_t, bool)>::value,
+              "The generic message callback boundary must remain binary-safe");
+static_assert(std::is_same<decltype(&NightMare::OnMessage),
+                           void (*)(NightMare::MessageHandler)>::value,
+              "OnMessage must remain part of the public connection API");
 
 ManagedSensor<int> managedSensor("managed_sensor");
 ManagedSensor<TimeType> managedTime("managed_time");
@@ -142,6 +149,23 @@ public:
 };
 
 int writeCalls = 0;
+int applicationMessageCalls = 0;
+String applicationMessageTopic;
+uint8_t applicationMessagePayload[3] = {};
+size_t applicationMessageLength = 0;
+bool applicationMessageRetained = false;
+
+void recordApplicationMessage(const char *topic, const uint8_t *payload,
+                              size_t length, bool retained)
+{
+    ++applicationMessageCalls;
+    applicationMessageTopic = topic;
+    applicationMessageLength = length;
+    applicationMessageRetained = retained;
+    for (size_t i = 0; i < length && i < sizeof(applicationMessagePayload); ++i)
+        applicationMessagePayload[i] = payload[i];
+}
+
 bool acceptStateWrite(ManagedState<int> &, const int &)
 {
     ++writeCalls;
@@ -210,8 +234,26 @@ void setup()
     gResourcesManager.bindResource(&remoteState);
     gResourcesManager.bindResource(&managedAction);
     gResourcesManager.bindResource(&remoteAction);
-    gResourcesManager.handleIngressMessage("outside-node/resource/temperature/state", "18");
-    gResourcesManager.handleIngressMessage("inside-node/resource/temperature/state", "24");
+    NightMare::OnMessage(recordApplicationMessage);
+    String binaryPayload;
+    binaryPayload.concat("A\0B", 3);
+    const bool applicationMessageRouted =
+        NmMessageRouter::handleMessage("application/binary", binaryPayload, true);
+    const int callsBeforeFrameworkMessage = applicationMessageCalls;
+    const bool remoteStateRouted = NmMessageRouter::handleMessage(
+        "outside-node/resource/temperature/state", "18", true);
+    const bool otherStateRouted = NmMessageRouter::handleMessage(
+        "inside-node/resource/temperature/state", "24", true);
+    NightMare::OnMessage(nullptr);
+    const bool noHandlerDeclines =
+        !NmMessageRouter::handleMessage("application/unhandled", "value", false);
+    const bool genericMessageIngress = applicationMessageRouted && remoteStateRouted &&
+        otherStateRouted && noHandlerDeclines && applicationMessageCalls == 1 &&
+        callsBeforeFrameworkMessage == 1 && applicationMessageTopic == "application/binary" &&
+        applicationMessageLength == 3 && applicationMessagePayload[0] == 'A' &&
+        applicationMessagePayload[1] == 0 && applicationMessagePayload[2] == 'B' &&
+        applicationMessageRetained;
+    smokeState.setFlag("generic_message_ingress", genericMessageIngress);
 
     JsonDocument consumePacked;
     JsonArray consumeRoot = consumePacked.to<JsonArray>();

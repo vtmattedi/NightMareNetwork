@@ -161,8 +161,10 @@ protocol drivers.
 ### NmConnection
 
 `NmConnection` owns connection-type selection, binary-safe generic publication,
-connection subscriptions, and Resource connection injection. It is the boundary
-used by Resources and connection-neutral framework publishers.
+connection subscriptions, application message-handler registration, and
+Resource connection injection. It is the boundary used by Resources,
+connection-neutral framework publishers, and applications that need custom
+transport topics.
 
 ### NmMqttConnection
 
@@ -195,8 +197,9 @@ It works with full MQTT topics and does not perform Resource semantics.
 
 Resource traffic is offered to `ResourcesManager` first. Other framework-owned traffic such as time synchronization and console commands is handled there as enabled.
 
-Traffic not consumed internally is ignored; connection ingress does not expose
-a parallel MQTT-specific application routing API.
+Traffic not consumed internally is offered to the generic application
+`NightMare::OnMessage` handler. The callback belongs to the connection boundary,
+so applications do not depend on the router or an MQTT-specific ingress API.
 
 ## Retained state model
 
@@ -259,6 +262,28 @@ application onUpdate callback
 The Resource Manager consumes recognized Resource traffic even if the specific
 operation fails. A malformed or rejected message for a known Resource does not
 escape into another application ingress path.
+
+## Message flow: custom application traffic
+
+For a topic subscribed through `NightMare::Subscribe()` that is not owned by a
+framework handler:
+
+```text
+connection message
+    │
+    ▼
+NmMessageRouter
+    │
+    ├── Resources / time / console consume it -> stop
+    │
+    └── otherwise
+          │
+          ▼
+    NightMare::OnMessage handler
+```
+
+The callback receives the full topic, binary payload plus explicit length, and
+the retained flag reported by the active connection.
 
 ## Message flow: write to a ManagedState
 

@@ -1176,12 +1176,19 @@ enum class ConnectionState : uint8_t
 
 extern Config<int> preferredConnection;
 
+using MessageHandler =
+    void (*)(const char *topic,
+             const uint8_t *payload,
+             size_t length,
+             bool retained);
+
 bool Publish(const char *topic,
              const uint8_t *payload,
              size_t length,
              bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
+void OnMessage(MessageHandler handler);
 
 bool SelectConnection(ConnectionType connection);
 ConnectionType GetSelectedConnection();
@@ -1190,9 +1197,13 @@ ConnectionState GetConnectionState();
 ```
 
 `MQTT` means Remote MQTT/TLS. The payload pointer and explicit length make the
-generic boundary binary-safe. `ESP_NOW` and `AUTO` are represented but not yet
-implemented; selecting either returns `false` without interrupting the working
-MQTT connection.
+generic boundary binary-safe. `ESP_NOW` is available when built with
+`NM_NETWORK_ESPNOW`; `AUTO` policy remains deferred.
+
+`OnMessage()` replaces the single application message handler, or unregisters
+it when passed `nullptr`. The handler receives only messages left unconsumed by
+enabled framework routes. Its topic and payload pointers remain valid for the
+duration of the callback.
 
 ## MQTT implementation limits
 

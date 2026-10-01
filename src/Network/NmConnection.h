@@ -28,10 +28,16 @@ enum class ConnectionState : uint8_t
 
 extern Config<int> preferredConnection;
 
+using MessageHandler = void (*)(const char *topic,
+                                const uint8_t *payload,
+                                size_t length,
+                                bool retained);
+
 bool Publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
+void OnMessage(MessageHandler handler);
 
 bool SelectConnection(ConnectionType connection);
 

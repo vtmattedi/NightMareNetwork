@@ -60,8 +60,9 @@ is applied immediately and the manager takes no reboot action.
 
 **Category:** Deferred design.
 
-The current MQTT ingress path performs automatic routing through
-`NmMessageRouter` and `ResourcesManager` directly from the MQTT callback path.
+The current connection ingress path performs automatic routing through
+`NmMessageRouter` and `ResourcesManager`, then optional application
+`OnMessage` dispatch, directly from a connection-owned callback or worker path.
 Reconnect publication is narrower: it uses typed `SystemRequest` bits and the
 cooperative ESP tick to spread framework re-announcement across ticks.
 

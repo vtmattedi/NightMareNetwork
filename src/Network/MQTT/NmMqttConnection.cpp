@@ -82,9 +82,9 @@ void flushQueuedMessages()
     }
 }
 
-void messageReceived(const String &topic, const String &payload)
+void messageReceived(const String &topic, const String &payload, bool retained)
 {
-    NmMessageRouter::handleMessage(topic, payload);
+    NmMessageRouter::handleMessage(topic, payload, retained);
 }
 
 void connected(bool isLocalBroker)

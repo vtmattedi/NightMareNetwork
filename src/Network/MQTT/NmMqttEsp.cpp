@@ -37,6 +37,7 @@ volatile int8_t connectionState = -1;
 bool lanBroker = false;
 String incomingTopic;
 String incomingPayload;
+bool incomingRetained = false;
 bool receiving = false;
 bool shuttingDown = false;
 bool stopRequested = false;
@@ -91,6 +92,7 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
                 break;
             incomingTopic = String(event->topic, event->topic_len);
             incomingPayload = String();
+            incomingRetained = event->retain;
             if (event->total_data_len > 0 && !incomingPayload.reserve(event->total_data_len))
             {
                 receiving = false;
@@ -112,7 +114,7 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
         {
             receiving = false;
             if (onMessage != nullptr)
-                onMessage(incomingTopic, incomingPayload);
+                onMessage(incomingTopic, incomingPayload, incomingRetained);
         }
         break;
     case MQTT_EVENT_ERROR:

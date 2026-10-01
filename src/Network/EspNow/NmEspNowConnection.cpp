@@ -26,6 +26,7 @@ struct Event
     NightMare::EspNowClient::State state = NightMare::EspNowClient::State::STOPPED;
     String topic;
     String payload;
+    bool retained = false;
 };
 
 QueueHandle_t events = nullptr;
@@ -47,11 +48,12 @@ void onState(NightMare::EspNowClient::State state)
     post(event);
 }
 
-void onMessage(const char *topic, const uint8_t *payload, size_t length, bool)
+void onMessage(const char *topic, const uint8_t *payload, size_t length, bool retained)
 {
     Event *event = new Event();
     event->isMessage = true;
     event->topic = topic;
+    event->retained = retained;
     event->payload.reserve(length);
     for (size_t i = 0; i < length; ++i)
         event->payload += static_cast<char>(payload[i]);
@@ -87,7 +89,7 @@ void handle(const Event &event)
         LOG("ESPNOW", "Gateway state: %s", NightMare::EspNowClient::stateName(event.state));
     if (event.isMessage)
     {
-        NmMessageRouter::handleMessage(event.topic, event.payload);
+        NmMessageRouter::handleMessage(event.topic, event.payload, event.retained);
         return;
     }
     if (event.state == State::CONNECTED)
