@@ -95,19 +95,38 @@ The client always broadcasts CONNECT. This does two jobs:
 - It reaches a gateway that still holds an encrypted peer for this MAC from a
   session the client has lost, for example because the client rebooted.
 
-**CONNECT replaces an existing session.** When the sender MAC already has a
-session, the gateway:
+**An existing session survives the handshake; only a verified AUTH replaces
+it.** A CONNECT proves nothing — anyone in radio range can send one — so it
+never costs a session anything. When the sender MAC already has a session, the
+gateway:
 
-1. removes the old session, without firing its last will;
-2. turns the peer back to plaintext;
-3. starts the new handshake.
+1. keeps the session, with its cid, subscriptions and last will;
+2. turns the peer back to plaintext, because the device asking for a handshake
+   cannot hold the current session's key, and **suspends** the session for the
+   duration: nothing is delivered to it, and nothing claiming to be it is
+   accepted (silently — an error here would tell the real device to tear down a
+   session it is about to get back);
+3. runs CHALLENGE and AUTH in plaintext.
 
-- *Benefit:* a client that rebooted and lost its cid and LMK recovers
-  immediately, without waiting out the session timeout.
-- *Cost:* a CONNECT that spoofs a device's MAC ends that device's session. The
-  device notices within a few missed heartbeats and reconnects.
+Then one of two things happens:
 
-No reconnect proof or session resumption guards against this before v1.
+- **AUTH verifies.** The sender holds the network key, so it is the device.
+  Only now is the old session dropped, without firing its last will, and
+  replaced by a new one with a fresh cid. The client resyncs its subscriptions
+  and will. Replacing needs no room in the session table, so a device can
+  always reconnect even when the gateway is full.
+- **AUTH fails, or the handshake times out (5 s).** The session resumes exactly
+  as it was, its key put back on the peer. Nothing was lost.
+
+- *Benefit:* a client that rebooted and lost its cid and LMK recovers as soon
+  as it proves itself, without waiting out the session timeout.
+- *Cost:* a CONNECT that spoofs a device's MAC pauses that device's delivery
+  for up to 5 s, and the device's own traffic is dropped meanwhile. Repeated,
+  it is a denial of service against delivery, but the session itself is never
+  lost and the device does not notice (5 s is well inside its heartbeat
+  tolerance).
+
+No reconnect proof or session resumption guards against the pause before v1.
 
 **Auth proof and session key.** Both are HMAC-SHA256 keyed with the network
 PSK and truncated to 16 bytes. They are computed over:
@@ -158,6 +177,9 @@ installed the same key.
 - Before CONNECTED (SECURING), only PING and DISCONNECT are admitted. Anything
   else gets `ERROR NOT_CONNECTED`. A session that has not secured after 5 s is
   dropped.
+- A session suspended for a handshake accepts nothing at all and is answered
+  with nothing. It cannot time out from silence either, since it is not allowed
+  to speak; the 5 s handshake timeout decides its fate.
 - The gateway allocates cids: non-zero, unique among live sessions, never
   persisted. A gateway reboot invalidates every cid.
 
@@ -225,10 +247,10 @@ Error payloads never carry secret-derived material.
   plaintext CONNACK and is not a credential. The protection that holds is on
   the other side: session traffic, including everything the gateway relays to
   the device, is encrypted, and only PSK holders can open a session.
-- **A spoofed CONNECT can end a session.** A CONNECT is unauthenticated by
-  design, and it ends any session held by its sender MAC. Anyone in radio range
-  can do this, as they could by jamming. The device reconnects on its next
-  heartbeat.
+- **A spoofed CONNECT can pause a session.** A CONNECT is unauthenticated by
+  design, and it suspends any session held by its sender MAC until the
+  handshake is proven or times out (5 s). It can no longer end one: that takes
+  a verified AUTH. Repeated, it withholds delivery, much as jamming would.
 - **V2 framing** is reserved but has no runtime.
 - **SUBSCRIBE is not retried.** A SUBSCRIBE lost on the air after a resync is
   not re-sent until the next session.
@@ -250,8 +272,13 @@ The radio-level behaviour needs a gateway and a device. Checklist:
    no session appears in the gateway's device list.
 3. **Resync.** After connecting, the gateway logs every subscription and the
    last will for the new session without any application action.
-4. **Client reboot.** Reset the device. It reconnects within seconds with a new
-   cid, and the gateway logs `reconnects; its previous session ends`.
+4. **Client reboot.** Reset the device. The gateway logs
+   `session N paused until it is proven`, then `proved itself; session N
+   replaced`, and the device reconnects within seconds with a new cid.
+5. **Spoofed CONNECT.** Send a CONNECT with a connected device's MAC and a
+   wrong key (or let one time out). The gateway logs the pause, then
+   `session N resumes`, and the device carries on with the same cid and its
+   subscriptions intact.
 5. **Gateway reboot.** Reset the gateway. It sends the device no error. After
    about 45 s of missed heartbeats the device logs
    `gateway silent ... searching again`, then does a full new handshake with a
