@@ -35,6 +35,9 @@ using MessageHandler = void (*)(const char *topic,
 
 bool Publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
+// Text convenience over Publish(): sends the String's bytes as the payload.
+// Returns false when the active connection cannot publish right now.
+bool PublishText(const String &topic, const String &payload, bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
 void OnMessage(MessageHandler handler);

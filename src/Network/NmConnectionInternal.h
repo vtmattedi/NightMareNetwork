@@ -23,7 +23,6 @@ void OnIpLinkAvailabilityIngress(bool available);
 // message. Returns whether an application handler was installed and invoked.
 bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,
                                 size_t length, bool retained);
-bool PublishText(const String &topic, const String &payload, bool retained = false);
 // Publishes now if it can, otherwise holds the message (a few slots) until the
 // next OnConnectedIngress of any connection -- e.g. a reply to a command that
 // is about to drop the link. False only when the holding slots are full.
