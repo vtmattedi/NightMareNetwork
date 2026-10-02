@@ -2,6 +2,10 @@
 
 #include <cstdarg>
 #include <cstdio>
+#if NM_LOG_USE_TIME_OF_DAY
+#include <ctime>
+#include "Time.h"
+#endif
 
 namespace NMLog
 {
@@ -65,12 +69,24 @@ namespace NMLog
         va_start(args, format);
         std::vsnprintf(message, sizeof(message), format, args);
         va_end(args);
-#if (NM_LOG_USE_ANSI)
-#define NM_LOG_TIME_FORMAT "[\033[90m%lu\033[0m] [%s] [%s] %s\n"
-#else
-#define NM_LOG_TIME_FORMAT "[%lu] [%s] [%s] %s\n"
+        // The stamp is text so both clocks share one format: millis() before the first time sync.
+        char stamp[16];
+        std::snprintf(stamp, sizeof(stamp), "%lu", static_cast<unsigned long>(millis()));
+#if NM_LOG_USE_TIME_OF_DAY
+        if (NightMare::Time::valid())
+        {
+            const time_t now = NightMare::Time::now();
+            struct tm local;
+            localtime_r(&now, &local); // the process TZ the application configured
+            std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &local);
+        }
 #endif
-        Serial.printf(NM_LOG_TIME_FORMAT, static_cast<unsigned long>(millis()),
+#if (NM_LOG_USE_ANSI)
+#define NM_LOG_TIME_FORMAT "[\033[90m%s\033[0m] [%s] [%s] %s\n"
+#else
+#define NM_LOG_TIME_FORMAT "[%s] [%s] [%s] %s\n"
+#endif
+        Serial.printf(NM_LOG_TIME_FORMAT, stamp,
                       levelName, module != nullptr ? module : "Core", message);
 #else
         (void)level;

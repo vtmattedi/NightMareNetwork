@@ -18,6 +18,12 @@
 #define NM_LOG_LEVEL NM_LOG_LEVEL_OFF
 #endif
 
+// 1 stamps each line with the local wall-clock time (HH:MM:SS) instead of millis(). Until the
+// clock is valid (before the first time sync) the line falls back to millis().
+#ifndef NM_LOG_USE_TIME_OF_DAY
+#define NM_LOG_USE_TIME_OF_DAY 0
+#endif
+
 #ifndef NM_LOG_USE_ANSI
 #define NM_LOG_USE_ANSI 1
 #endif

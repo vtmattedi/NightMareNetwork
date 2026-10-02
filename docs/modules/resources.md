@@ -775,7 +775,19 @@ colour
 decimal text. These are ordinary typed Values and use the same state, write,
 freshness, and manifest paths as every other `NetValue<T>`.
 
-Unsupported C++ Value types fail to compile unless the project provides an appropriate codec specialization.
+### Applications do not define Value types
+
+`NetCodec<T>` specializations belong to the library. An application must not add its own
+(`template <> struct NetCodec<MyType>`), even though the code compiles. A Value type is part of
+the common wire protocol: every device and every consumer (including MessagePack manifests and
+backend tooling) has to agree on its encoding and its `NetValueType` number, so a type declared in
+one project would have to be declared everywhere, and a mismatch silently corrupts payloads.
+
+Unsupported C++ Value types therefore fail to compile, and that is the intended answer. To carry a
+structured reading, publish a generic struct: a JSON object in a `ManagedSensor<String>`. It
+travels as a `string`, the library neither validates nor interprets its fields, and the consumer is
+responsible for decoding it. Document the fields next to the Resource declaration, and add fields
+rather than changing existing ones so older consumers keep working.
 
 ## Empty payload rule
 
