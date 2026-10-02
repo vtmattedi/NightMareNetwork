@@ -111,7 +111,7 @@ bool handleMessage(const String &fullTopic, const String &payload, bool retained
 {
     // The resource manager accepts owned /set and /invoke requests, as well as
     // manifests and states from other devices. It sees full topics in both cases.
-    if (gResourcesManager.handleIngressMessage(fullTopic, payload))
+    if (gResourcesManager.handleIngressMessage(fullTopic, payload, retained))
         return true;
 
 #if NM_ENABLE_TIME_SYNC

@@ -3010,7 +3010,8 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
         encodedManifestHandler_(deviceName, message);
 }
 
-bool ResourcesManager::handleIngressMessage(const String &topic, const String &message)
+bool ResourcesManager::handleIngressMessage(const String &topic, const String &message,
+                                            bool retained)
 {
     const int firstSlash = topic.indexOf('/');
     if (firstSlash <= 0)
@@ -3070,6 +3071,17 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     }
     if (operation == "event" && resource->kind_ == NetResourceType::EVENT && !resource->isOwned())
     {
+        // /event + retained=false is an occurrence; /event + retained=true is not
+        // one. A broker replays retained messages to every new subscription, so
+        // delivering it would turn a reconnect into a phantom occurrence. The
+        // protocol enforces this itself rather than trusting every publisher.
+        if (retained)
+        {
+            LOG_WARNING("RM", "Ignored retained event for '%s/%s': events are never retained",
+                        resource->ownerDevice_.deviceName.c_str(),
+                        resource->sourceResourceName_.c_str());
+            return true;
+        }
         applyRemoteEvent(*static_cast<NetEventResource *>(resource), message);
         return true;
     }

@@ -11,6 +11,14 @@ Config<uint32_t> smokeConfig("smoke_config", 7);
 namespace
 {
 int configCallbackValue = 0;
+int localEventCalls = 0;
+uint32_t localEventPayload = 0;
+
+void recordLocalEvent(ManagedEvent<uint32_t> &, const uint32_t &payload)
+{
+    ++localEventCalls;
+    localEventPayload = payload;
+}
 
 bool acceptPositiveConfig(Config<int> &, const int &requested)
 {
@@ -85,12 +93,15 @@ static_assert(sizeof(ManagedEvent<uint32_t>) < sizeof(ManagedSensor<uint32_t>) &
 static_assert(!std::is_constructible<NetEvent<uint32_t>, const String &>::value,
               "NetEvent is an implementation base, not an application resource");
 
-static_assert(HasFire<ManagedEvent<uint32_t>>::value && HasLastUpdateMs<ManagedEvent<uint32_t>>::value,
-              "ManagedEvent exposes fire() and lastUpdateMs()");
-static_assert(!HasOnEvent<ManagedEvent<uint32_t>>::value &&
-                  !HasSetSource<ManagedEvent<uint32_t>>::value &&
+static_assert(HasFire<ManagedEvent<uint32_t>>::value && HasLastUpdateMs<ManagedEvent<uint32_t>>::value &&
+                  HasOnEvent<ManagedEvent<uint32_t>>::value,
+              "ManagedEvent exposes fire(), onEvent and lastUpdateMs()");
+static_assert(std::is_same<ManagedEvent<uint32_t>::EventHandler,
+                           void (*)(ManagedEvent<uint32_t> &, const uint32_t &)>::value,
+              "a local onEvent receives the event and the payload that was fired");
+static_assert(!HasSetSource<ManagedEvent<uint32_t>>::value &&
                   !HasClearSource<ManagedEvent<uint32_t>>::value,
-              "ManagedEvent is permanently local: nothing to receive, nothing to retarget");
+              "ManagedEvent is permanently local: nothing to retarget");
 static_assert(HasOnEvent<RemoteEvent<uint32_t>>::value &&
                   HasLastUpdateMs<RemoteEvent<uint32_t>>::value &&
                   HasSetSource<RemoteEvent<uint32_t>>::value &&
@@ -396,7 +407,12 @@ void setup()
                               remoteEvent.sourceResource().length() == 0 &&
                               sourcedEvent.owner() == "watson" &&
                               sourcedEvent.sourceResource() == "smoke_sourced_event";
-    smokeState.setFlag("event_api", eventKinds && eventUnbound && eventSources);
+    // The local listener sees every valid fire(), here even though nothing can be
+    // transported, and the identical payload twice is two calls.
+    managedEvent.onEvent = recordLocalEvent;
+    const bool firedUnbound = !managedEvent.fire(7) && !managedEvent.fire(7);
+    const bool localListener = firedUnbound && localEventCalls == 2 && localEventPayload == 7;
+    smokeState.setFlag("event_api", eventKinds && eventUnbound && eventSources && localListener);
 }
 
 void loop() {}

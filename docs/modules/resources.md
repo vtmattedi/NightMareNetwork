@@ -820,7 +820,41 @@ beep.fire(880); // published again; nothing is compared with the previous call
 
 A `ManagedEvent` has no `getValue()`, no `setValue()`, no `hasValue()`, no
 availability, no freshness, no advertisement period, no hardware policy and no
-`dependsOn()`. The only other public member is `lastUpdateMs()`.
+`dependsOn()`. Besides `fire()` its public members are `onEvent` and
+`lastUpdateMs()`.
+
+#### Local listener
+
+`onEvent` is the same-device counterpart of a RemoteEvent's handler: the code
+that owns the event can react to its own occurrences through the same callback
+shape, instead of calling a function next to every `fire()`.
+
+```cpp
+ManagedEvent<uint32_t> beep("acoustic:beep");
+
+static void onLocalBeep(ManagedEvent<uint32_t> &event, const uint32_t &hertz)
+{
+    // runs inside fire(), on the caller's task
+}
+
+void setup()
+{
+    beep.onEvent = onLocalBeep;
+}
+
+void loop()
+{
+    beep.fire(880); // publishes to the network and calls onLocalBeep(880)
+}
+```
+
+`fire()` attempts the publication and then calls `onEvent`, once per valid
+occurrence, for equal payloads too. It runs whether or not the transport took the
+message, and also while the event is unbound, because the occurrence happened on
+this device; `fire()`'s return value still reports only the publication. A payload
+that cannot be encoded is not an occurrence, so `onEvent` is not called for it.
+The handler runs synchronously inside `fire()`, so it must be short and must not
+call `fire()` on the same event.
 
 ### RemoteEvent
 

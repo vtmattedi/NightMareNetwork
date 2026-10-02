@@ -97,7 +97,13 @@ public:
     /// action or an undecodable state still returns true, so it cannot leak
     /// into the application's generic MQTT callback. Only traffic that is not
     /// for a known resource returns false.
-    bool handleIngressMessage(const String &topic, const String &message);
+    ///
+    /// `retained` is the transport's retain flag for this delivery. Only Events
+    /// care: an `/event` is a live occurrence, so a retained one is a broker
+    /// replay from a publisher that broke the protocol. It is consumed and
+    /// ignored, never delivered.
+    bool handleIngressMessage(const String &topic, const String &message,
+                              bool retained = false);
 
     // Called for valid manifests from other devices, including retained deletion
     // (an empty payload).

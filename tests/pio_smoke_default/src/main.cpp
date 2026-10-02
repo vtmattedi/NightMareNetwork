@@ -206,6 +206,21 @@ public:
     String unsubscribed = "|";
 };
 
+int localEventCalls = 0;
+uint32_t lastLocalEvent = 0;
+int stringEventCalls = 0;
+
+void recordLocalEvent(ManagedEvent<uint32_t> &, const uint32_t &payload)
+{
+    ++localEventCalls;
+    lastLocalEvent = payload;
+}
+
+void countStringEvent(ManagedEvent<String> &, const String &)
+{
+    ++stringEventCalls;
+}
+
 int eventCallbacks = 0;
 uint32_t lastEventSeen = 0;
 
@@ -858,7 +873,10 @@ void setup()
     eventManager.setSubscriber(&eventSubscriber);
     eventManager.setPublisher(&eventPublisher);
 
-    const bool unboundFireRejected = !beep.fire(1) && beep.lastUpdateMs() == 0;
+    // The local listener sees the occurrence even while nothing can carry it.
+    beep.onEvent = recordLocalEvent;
+    const bool unboundFireRejected = !beep.fire(1) && beep.lastUpdateMs() == 0 &&
+                                     localEventCalls == 1 && lastLocalEvent == 1;
     const bool eventsBound = eventManager.bindResource(&beep) &&
                              eventManager.bindResource(&watched) &&
                              eventManager.bindResource(&unsourced);
@@ -914,7 +932,13 @@ void setup()
     eventPublisher.failEvent = true;
     const bool refusedNotRecorded = !beep.fire(43) && beep.lastUpdateMs() == firedAt;
     eventPublisher.failEvent = false;
-    const bool emptyPayloadRejected = !ManagedEvent<String>("empty_payload").fire(String());
+    // 1 unbound + 2 identical + 1 the transport refused: every valid fire() is
+    // one local call, whatever happened to the publication.
+    const bool localListenerSeesEveryFire = localEventCalls == 4 && lastLocalEvent == 43;
+    // An invalid payload is not an occurrence: rejected and never announced locally.
+    ManagedEvent<String> emptyEvent("empty_payload");
+    emptyEvent.onEvent = countStringEvent;
+    const bool emptyPayloadRejected = !emptyEvent.fire(String()) && stringEventCalls == 0;
 
     // A reconnect rebuilds subscriptions and republishes the manifest. It never
     // re-fires, and never invokes a callback.
@@ -939,7 +963,12 @@ void setup()
         eventManager.handleIngressMessage("watson/resource/beep/event", "");
     const bool malformedIgnored = malformedConsumed && eventCallbacks == 2 &&
                                   watched.lastUpdateMs() == receivedAt;
-    const bool ownEchoNotDelivered = !eventManager.handleIngressMessage(beepTopic, "5");
+    // A retained /event is a broker replay from a publisher that broke the
+    // protocol: consumed, never delivered.
+    const bool retainedReplayIgnored =
+        eventManager.handleIngressMessage("watson/resource/beep/event", "5", true) &&
+        eventCallbacks == 2 && watched.lastUpdateMs() == receivedAt;
+    const bool ownEchoNotDelivered =!eventManager.handleIngressMessage(beepTopic, "5");
 
     // Console: described and sourced, never fired, read, written or tuned.
     const ActionResult bare = eventManager.executeCommand(" beep");
@@ -1116,8 +1145,10 @@ void setup()
     smokeState.setFlag("event_resources",
                        unboundFireRejected && eventsBound && providerManifests &&
                            eventSubscriptions && firedTwice && refusedNotRecorded &&
+                           localListenerSeesEveryFire &&
                            emptyPayloadRejected && reconnectDoesNotReplay && repeatedDelivered &&
-                           malformedIgnored && ownEchoNotDelivered && consoleDescribes &&
+                           malformedIgnored && retainedReplayIgnored &&
+                           ownEchoNotDelivered && consoleDescribes &&
                            verbsRejected && commandSourceWorks && sourceRetargeted &&
                            sourceReloaded && manifestDoesNotGate && sourceCleared &&
                            managedUnbound && remoteUnbound && oldEncodingsFallBack &&

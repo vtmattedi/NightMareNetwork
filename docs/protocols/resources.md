@@ -970,6 +970,20 @@ not called and `lastUpdateMs()` does not change. The message is still consumed
 by the Resource Manager, so it does not reach the application's generic MQTT
 callback.
 
+The transport's retain flag is part of ingress, and the protocol enforces the
+no-replay rule itself rather than trusting publishers:
+
+```text
+/event + retain=false  ->  an occurrence
+/event + retain=true   ->  invalid, ignored
+```
+
+A retained `/event` message (from a buggy client, old firmware or a manual
+publish) would be replayed by the broker to every new subscription, so
+delivering it would turn a reconnect into a phantom occurrence. The Resource
+Manager consumes it, logs a warning, and neither calls `onEvent` nor changes
+`lastUpdateMs()`. It does not reach the application's generic MQTT callback.
+
 A Managed Event never receives `/event` traffic, so its own publications are
 not routed back to it.
 

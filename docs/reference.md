@@ -523,6 +523,11 @@ class ManagedEvent
 public:
     explicit ManagedEvent(const String &resourceName);
 
+    using EventHandler =
+        void (*)(ManagedEvent<T> &event, const T &payload);
+
+    EventHandler onEvent = nullptr;
+
     bool fire(const T &payload);
 
     uint32_t lastUpdateMs() const;
@@ -533,6 +538,11 @@ public:
 returns `true` only when the connection accepted the publication; it returns
 `false` when unbound, when the payload encodes to an empty or over-2048-byte
 String, or when publication is refused. Equal payloads are separate occurrences.
+
+`onEvent` is a local listener: `fire()` calls it once for every valid occurrence
+after attempting the publication, whatever the publication's outcome and even
+while unbound. A payload that cannot be encoded is not an occurrence and does not
+call it. It runs synchronously inside `fire()`.
 
 `lastUpdateMs()` is the `millis()` timestamp of the latest occurrence the
 transport accepted, or `0` before the first.
@@ -636,7 +646,8 @@ bool needsSubscription(
 
 bool handleIngressMessage(
     const String &topic,
-    const String &message);
+    const String &message,
+    bool retained = false);
 
 using ManifestHandler =
     void (*)(const String &deviceName, const String &manifest);

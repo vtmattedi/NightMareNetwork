@@ -972,7 +972,15 @@ protected:
         : NetEventResource(resourceName, owner.deviceName, NetCodec<T>::Type,
                            ResourceRole::REMOTE) {}
 
-    bool fireEvent(const T &payload) { return dispatchFire(NetCodec<T>::encode(payload)); }
+    /// @brief Publishes one occurrence. `occurred` reports whether the payload was
+    /// a valid occurrence at all (it encoded to 1..NetResourceMaxPayloadLength
+    /// bytes), independently of whether the transport took it.
+    bool fireEvent(const T &payload, bool &occurred)
+    {
+        const String encoded = NetCodec<T>::encode(payload);
+        occurred = encoded.length() != 0 && encoded.length() <= NetResourceMaxPayloadLength;
+        return dispatchFire(encoded);
+    }
 
     static bool decodeEvent(const String &encoded, T &out)
     {
@@ -986,13 +994,30 @@ template <typename T>
 class ManagedEvent : public NetEvent<T>
 {
 public:
+    using EventHandler = void (*)(ManagedEvent<T> &event, const T &payload);
+
     explicit ManagedEvent(const String &resourceName) : NetEvent<T>(resourceName) {}
 
-    /// @brief Reports one occurrence. True means the transport accepted the
-    /// publication, not that anyone received or handled it. Fails when unbound
-    /// or the payload does not encode to 1..NetResourceMaxPayloadLength bytes.
+    /// @brief Local listener: called by fire() for every valid occurrence, with
+    /// the payload that was fired. It is the same-device counterpart of a
+    /// RemoteEvent's onEvent, and it runs whether or not the transport took the
+    /// publication, and even while unbound, because the occurrence happened here.
+    EventHandler onEvent = nullptr;
+
+    /// @brief Reports one occurrence: calls onEvent (if set), after attempting the
+    /// publication. The return value is only about the publication: true means the
+    /// transport accepted it, not that anyone received or handled it. Fails when
+    /// unbound or the payload does not encode to 1..NetResourceMaxPayloadLength
+    /// bytes (an invalid payload is not an occurrence, so onEvent is not called).
     /// Equal payloads are separate occurrences: nothing is deduplicated.
-    bool fire(const T &payload) { return this->fireEvent(payload); }
+    bool fire(const T &payload)
+    {
+        bool occurred = false;
+        const bool published = this->fireEvent(payload, occurred);
+        if (occurred && onEvent != nullptr)
+            onEvent(*this, payload);
+        return published;
+    }
 };
 
 /// @brief Implemented by another device. onEvent runs once for every valid live
