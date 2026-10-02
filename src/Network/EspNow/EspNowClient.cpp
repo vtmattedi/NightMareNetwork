@@ -518,9 +518,10 @@ namespace NightMare::EspNowClient
         // An associated station is pinned to its AP's channel. One with an AP configured but not
         // associated yet is mid-handshake (or retrying): retuning the radio under it every hop
         // breaks the join, the station retries, the next hop breaks that too, and neither ever
-        // finishes. Leave the channel to the AP in both cases -- the gateway is expected on the
-        // same one. A radio-only device has no station config at all, and WiFi_stop() clears it,
-        // so both hop.
+        // finishes. Leave the channel to the AP in both cases. With the network layer built this
+        // does not arise: NmConnection suspends the station (WiFi_stop() clears its config)
+        // whenever ESP-NOW is selected, so the search hops every channel. A radio-only device
+        // has no station config at all and hops too.
         bool freeToTune()
         {
             wifi_config_t config = {};

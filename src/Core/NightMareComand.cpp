@@ -1006,7 +1006,20 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
             int res = WiFi_scanCount();
             JsonDocument doc;
-            if (start || (res == 0 && !WiFi_scanInProgress()))
+#if NM_ENABLE_NETWORK && NM_NETWORK_ESPNOW
+            // A scan retunes the radio away from the gateway's channel; only a connection change
+            // or a failure may take ESP-NOW down.
+            const bool espNowConnected =
+                NightMare::GetSelectedConnection() == NightMare::ConnectionType::ESP_NOW &&
+                NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED;
+#else
+            const bool espNowConnected = false;
+#endif
+            if (espNowConnected && (start || (res == 0 && !WiFi_scanInProgress())))
+            {
+                doc["control"] = "scan_refused_espnow_connected";
+            }
+            else if (start || (res == 0 && !WiFi_scanInProgress()))
             {
                 if (WiFi_startScan())
                 {

@@ -26,6 +26,7 @@
 namespace
 {
 bool servicesStarted = false;
+bool stationPrepared = false;
 bool firstConnection = true;
 WiFiConnectedCallback connectedCallback = nullptr;
 
@@ -94,7 +95,9 @@ WiFiProfile WiFiStoredProfile()
     return profile;
 }
 
-bool WiFiBegin()
+namespace
+{
+bool prepareStation()
 {
     gDeviceIdentity.lockAddress();
     // Through the radio service, not straight to the driver, so the radio is
@@ -102,7 +105,34 @@ bool WiFiBegin()
     if (!WiFiRadioBegin())
         return false;
     WiFi_onState(onWiFiState);
+    stationPrepared = true;
+    return true;
+}
+}
+
+bool WiFiBegin()
+{
+    if (!prepareStation())
+        return false;
+#if NM_ENABLE_NETWORK
+    // NmConnection starts the station when it selects a connection that needs an IP link.
+    return true;
+#else
+    return WiFiStationResume();
+#endif
+}
+
+bool WiFiStationResume()
+{
+    if (!stationPrepared && !prepareStation())
+        return false;
     return WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str());
+}
+
+void WiFiStationSuspend()
+{
+    if (WiFi_state() != WiFiState::STOPPED)
+        WiFi_stop();
 }
 
 bool WiFiApplyProfile(const WiFiProfile &profile)

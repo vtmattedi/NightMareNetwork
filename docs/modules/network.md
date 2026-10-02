@@ -200,6 +200,29 @@ goes down.
 No scoring, simultaneous connections, topic-specific routing or message
 duplication is introduced here.
 
+## The IP station follows the selected connection
+
+With the network layer built, `NmConnection` decides when the IP station runs;
+`WiFiBegin()` only prepares it. The station runs only while an MQTT profile is
+selected:
+
+```text
+ESP_NOW selected      station suspended (WiFiStationSuspend): no AP, so the
+                      gateway search hops channels 1..13; once a gateway is
+                      found nothing on the Wi-Fi side can retune the radio
+MQTT / LOCAL_MQTT     station resumed (WiFiStationResume); the broker client
+                      starts from the IP-link ingress once there is an address
+```
+
+A gateway can therefore sit on any channel, not only the AP's. Only an explicit
+selection or a failover ends ESP-NOW; `NETWORK WIFI SCAN` is refused while
+ESP-NOW is connected, because a scan retunes the radio. Profile changes made
+while the station is suspended are persisted and used on the next resume.
+
+The cost is that nothing which needs an IP address runs while ESP-NOW is
+selected: SNTP and OTA start with the first station connection, so an ESP-NOW
+device takes its time from the gateway (`Control/time`).
+
 ## Connection subscriptions
 
 All subscription intent is stored in one fixed 256-entry registry owned by
@@ -237,7 +260,8 @@ OnIpLinkAvailabilityIngress   station has an IP / not  MQTT, LOCAL_MQTT need thi
 ```
 
 `NmConnection` owns starting the preferred connection once what it runs on is
-available, selecting connections and failing over. A preferred connection that
+available, selecting connections, failing over, and running the IP station only
+while an MQTT profile is selected. A preferred connection that
 is supported but not ready yet is waited for rather than skipped, so with MQTT
 preferred the radio coming up first does not start ESP-NOW instead. The wait
 counts as down time: after `failover_secs` the next runnable profile starts.

@@ -15,7 +15,15 @@ void WiFi_onConnected(WiFiConnectedCallback callback);
 namespace NightMare
 {
 WiFiProfile WiFiStoredProfile();
+// Prepares the station (radio, state reporting). With the network layer built, NmConnection
+// owns when the station runs -- only while an IP-based connection is selected -- so this does
+// not join the AP itself. Without it, it starts the station straight away.
 bool WiFiBegin();
+// Joins the AP with the stored profile. Idempotent while connecting/connected.
+bool WiFiStationResume();
+// Leaves the AP and stops the station; the stored profile is kept and the radio stays up.
+// Frees the channel, so ESP-NOW may hop.
+void WiFiStationSuspend();
 // Applies the profile to the running stack and persists it once it works.
 // While the stack is stopped it is only persisted.
 bool WiFiApplyProfile(const WiFiProfile &profile);

@@ -15,6 +15,9 @@
 #if NM_NETWORK_ESPNOW
 #include <Network/EspNow/NmEspNowConnection.h>
 #endif
+#if NM_ENABLE_WIFI
+#include <Network/WiFiIP/NmWifiService.h>
+#endif
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -66,6 +69,8 @@ bool resourceConnectionAttached = false;
 // What the drivers below have reported; see NmConnectionInternal.h.
 bool radioAvailable = false;
 bool ipLinkAvailable = false;
+// An MQTT profile is selected but its client waits for the IP station to get an address.
+bool mqttStartPending = false;
 // Failover state, see ConnectionTick(): the position in failoverOrder() of the profile started
 // last, when the connection was last seen down, and when we last switched.
 size_t candidateIndex = 0;
@@ -143,7 +148,8 @@ bool connectionEnabled(ConnectionType connection)
 }
 
 // Whether what a connection runs on is there yet:
-//   MQTT, LOCAL_MQTT   radio + an IP link (a joined AP with an address)
+//   MQTT, LOCAL_MQTT   an IP link -- or, with the station built, the radio to bring one up on:
+//                      the station only runs while an MQTT profile is selected
 //   ESP_NOW            the radio alone -- no AP, no IP
 bool requirementsMet(ConnectionType connection)
 {
@@ -151,7 +157,11 @@ bool requirementsMet(ConnectionType connection)
     {
     case ConnectionType::MQTT:
     case ConnectionType::LOCAL_MQTT:
+#if NM_ENABLE_WIFI
+        return ipLinkAvailable || radioAvailable;
+#else
         return ipLinkAvailable;
+#endif
     case ConnectionType::ESP_NOW:
         return radioAvailable;
     case ConnectionType::AUTO:
@@ -319,6 +329,15 @@ bool startEspNow()
     if (isMqtt(previousConnection) && NmMqttConnection::state() != -1)
         NmMqttConnection::end();
 #endif
+    mqttStartPending = false;
+#if NM_ENABLE_WIFI
+    // The gateway may be on any channel, and an AP pins the radio to its own. ESP-NOW owns the
+    // radio while it is selected -- searching and connected alike -- so the station stays down
+    // until an explicit selection or a failover picks an MQTT profile again.
+    if (WiFi_state() != WiFiState::STOPPED)
+        LOG("NET", "IP station suspended while ESP-NOW is selected");
+    WiFiStationSuspend();
+#endif
     selectedConnection = ConnectionType::ESP_NOW;
     connectionState = ConnectionState::CONNECTING;
     if (NmEspNowConnection::begin())
@@ -326,6 +345,14 @@ bool startEspNow()
     selectedConnection = previousConnection;
     connectionState = previousState;
     return false;
+}
+#endif
+
+#if NM_ENABLE_MQTT
+bool beginMqttClient(ConnectionType connection)
+{
+    return NmMqttConnection::state() == -1 ? NmMqttConnection::begin(connection)
+                                           : NmMqttConnection::changeTo(connection);
 }
 #endif
 
@@ -352,12 +379,24 @@ bool startConnection(ConnectionType connection)
 
     const ConnectionType previousConnection = selectedConnection;
     const ConnectionState previousState = connectionState;
+#if NM_ENABLE_WIFI
+    if (!ipLinkAvailable)
+    {
+        // No address yet: bring the station up and start the client from the IP-link ingress.
+        if (!WiFiStationResume())
+            return false;
+        selectedConnection = connection;
+        connectionState = ConnectionState::CONNECTING;
+        mqttStartPending = true;
+        LOG("NET", "Connection %u waits for the IP station", static_cast<unsigned>(connection));
+        return true;
+    }
+#endif
+    mqttStartPending = false;
     selectedConnection = connection;
     connectionState = ConnectionState::CONNECTING;
 
-    const bool accepted = NmMqttConnection::state() == -1
-                              ? NmMqttConnection::begin(connection)
-                              : NmMqttConnection::changeTo(connection);
+    const bool accepted = beginMqttClient(connection);
     if (!accepted)
     {
         selectedConnection = previousConnection;
@@ -704,6 +743,15 @@ void OnIpLinkAvailabilityIngress(bool available)
         return;
     // An IP link implies a running radio, whatever did or didn't report it.
     radioAvailable = true;
+#if NM_ENABLE_MQTT
+    if (mqttStartPending && isMqtt(static_cast<ConnectionType>(selectedConnection)))
+    {
+        mqttStartPending = false;
+        if (!beginMqttClient(static_cast<ConnectionType>(selectedConnection)))
+            connectionState = ConnectionState::ERROR;
+        return;
+    }
+#endif
     if (!nothingRunning())
         return;
     // No enabled profile means there is nothing to start, which is not an error.
