@@ -176,6 +176,8 @@ NetResource
 NetValueResource
 NetValue<T>
 NetActionResource
+NetEventResource
+NetEvent<T>
 ```
 
 Normal application wrappers:
@@ -188,6 +190,21 @@ RemoteState<T>
 
 ManagedAction
 RemoteAction
+
+ManagedEvent<T>
+RemoteEvent<T>
+```
+
+Kinds (`NetResource::kind()`), appended and never renumbered. The numbers are the
+leading `kind` element of the compact manifests:
+
+```cpp
+enum class NetResourceType : uint8_t
+{
+    VALUE,  // 0
+    ACTION, // 1
+    EVENT   // 2
+};
 ```
 
 Roles:
@@ -482,6 +499,82 @@ bool clearSource();
 bool invoke(const String &payload = String());
 ```
 
+## NetEvent<T>
+
+`NetEventResource` is the non-template boundary and does not derive from
+`NetValueResource`. It holds the payload wire type and one timestamp:
+
+```cpp
+uint32_t lastUpdateMs() const;
+```
+
+`NetEvent<T>` is a non-instantiable implementation base that applies
+`NetCodec<T>` at the wire boundary. The two leaf types below are the application
+API; an Event has no current value, availability, freshness, advertisement,
+hardware policy, dependency, write or invoke path, so those members are absent
+rather than present and rejected.
+
+## ManagedEvent<T>
+
+```cpp
+template <typename T>
+class ManagedEvent
+{
+public:
+    explicit ManagedEvent(const String &resourceName);
+
+    bool fire(const T &payload);
+
+    uint32_t lastUpdateMs() const;
+};
+```
+
+`fire()` publishes `<device>/resource/<name>/event` with retain `false`. It
+returns `true` only when the connection accepted the publication; it returns
+`false` when unbound, when the payload encodes to an empty or over-2048-byte
+String, or when publication is refused. Equal payloads are separate occurrences.
+
+`lastUpdateMs()` is the `millis()` timestamp of the latest occurrence the
+transport accepted, or `0` before the first.
+
+## RemoteEvent<T>
+
+```cpp
+template <typename T>
+class RemoteEvent
+{
+public:
+    explicit RemoteEvent(const String &localName);
+
+    RemoteEvent(
+        const String &resourceName,
+        const NetDeviceIdentity &owner);
+
+    using EventHandler =
+        void (*)(RemoteEvent<T> &event, const T &payload);
+
+    EventHandler onEvent = nullptr;
+
+    uint32_t lastUpdateMs() const;
+
+    bool setSource(
+        const String &deviceName,
+        const String &resourceName);
+
+    bool clearSource();
+};
+```
+
+`onEvent` is called once for every valid live occurrence, including consecutive
+identical payloads. A malformed payload neither calls it nor changes
+`lastUpdateMs()`. The payload is not retained and there is no `getValue()`,
+`lastEvent()`, `hasEvent()`, `available()`, `freshness()` or `isStale()`.
+
+`lastUpdateMs()` is the `millis()` timestamp of the most recent valid live
+occurrence, `0` before the first and again after `setSource()` or
+`clearSource()` changes the source. Sources use the same
+`/remoteresources.json` persistence as the other Remote Resources.
+
 ## Resource topic helpers
 
 ```cpp
@@ -504,9 +597,10 @@ String resolveResourceTopic(
 Operations:
 
 ```cpp
-STATE
-SET
-INVOKE
+STATE   // <device>/resource/<name>/state   retained
+SET     // <device>/resource/<name>/set     transient
+INVOKE  // <device>/resource/<name>/invoke  transient
+EVENT   // <device>/resource/<name>/event   transient
 ```
 
 ## ResourcesManager
@@ -563,10 +657,10 @@ static bool decodeConsumeManifest(
     const String &encoded,
     JsonDocument &into);
 
-constexpr uint8_t ConsumeManifestEncodingVersion = 1;
-constexpr uint8_t ConsumeManifestVersion = 2;
-constexpr uint8_t ManifestEncodingVersion = 2;
-constexpr uint8_t ResourceManifestVersion = 5;
+constexpr uint8_t ConsumeManifestEncodingVersion = 2;
+constexpr uint8_t ConsumeManifestVersion = 3;
+constexpr uint8_t ManifestEncodingVersion = 3;
+constexpr uint8_t ResourceManifestVersion = 6;
 
 String resolveResourceConsumeManifestTopic(
     const String &deviceName,
@@ -619,7 +713,7 @@ Current limits:
 ```text
 Resources per manager:          100
 Resource/topic segment:         64 characters
-Value/Action payload:           2048 bytes
+Value/Action/Event payload:     2048 bytes
 Resource manifest payload limit: 16384 bytes
 Resource command expression:    16640 bytes
 ```

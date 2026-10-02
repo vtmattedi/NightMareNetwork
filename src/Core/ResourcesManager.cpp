@@ -178,7 +178,16 @@ namespace
 
     const char *kindName(NetResourceType kind)
     {
-        return kind == NetResourceType::VALUE ? "value" : "action";
+        switch (kind)
+        {
+        case NetResourceType::VALUE:
+            return "value";
+        case NetResourceType::EVENT:
+            return "event";
+        case NetResourceType::ACTION:
+        default:
+            return "action";
+        }
     }
 
     const char *accessName(AccessPolicy access)
@@ -413,6 +422,13 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource, const Stri
         return String();
     }
 
+    // Events are transient occurrences. A Remote one listens to its owner; the
+    // implementing device only publishes, so it has no ingress at all.
+    if (resource.kind_ == NetResourceType::EVENT)
+        return resource.isOwned()
+                   ? String()
+                   : resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::EVENT);
+
     // Only the implementing device listens for invocations.
     if (resource.isOwned())
         return resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::INVOKE);
@@ -511,6 +527,14 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
             continue;
         }
 
+        if (kind == static_cast<uint8_t>(NetResourceType::EVENT))
+        {
+            // name, kind and type, and nothing else: an event has no state.
+            if (entry.size() >= 3)
+                item["type"] = valueTypeName(static_cast<NetValueType>(entry[2].as<uint8_t>()));
+            continue;
+        }
+
         JsonArray args = item["arguments"].to<JsonArray>();
         if (entry.size() < 3)
             continue;
@@ -579,6 +603,13 @@ bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument
                 out["required"] = argument[2].as<bool>();
             }
         }
+        else if (kind == static_cast<uint8_t>(NetResourceType::EVENT))
+        {
+            if (entry.size() < 4)
+                return false;
+            item["kind"] = "event";
+            item["type"] = valueTypeName(static_cast<NetValueType>(entry[3].as<uint8_t>()));
+        }
         else
             return false;
     }
@@ -623,6 +654,13 @@ bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument
                         static_cast<NetValueType>(argument[1].as<uint8_t>()));
                     out["required"] = argument[2].as<bool>();
                 }
+            }
+            else if (kind == static_cast<uint8_t>(NetResourceType::EVENT))
+            {
+                if (entry.size() < 6)
+                    return false;
+                item["kind"] = "event";
+                item["type"] = valueTypeName(static_cast<NetValueType>(entry[5].as<uint8_t>()));
             }
             else
                 return false;
@@ -1503,6 +1541,12 @@ void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
                     hardware["note"] = value.hardwarePolicy_.note;
             }
         }
+        else if (resource.kind_ == NetResourceType::EVENT)
+        {
+            // name, kind and type only. No access, dependency, advertisement or
+            // hardware: an event has none of the state those describe.
+            item["type"] = valueTypeName(static_cast<const NetEventResource &>(resource).payloadType_);
+        }
         else
         {
             // Published whether or not payloads are checked: this is the
@@ -1569,6 +1613,13 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
             continue;
         }
 
+        if (resource.kind_ == NetResourceType::EVENT)
+        {
+            item.add(static_cast<uint8_t>(
+                static_cast<const NetEventResource &>(resource).payloadType_));
+            continue;
+        }
+
         const NetActionResource &action = static_cast<const NetActionResource &>(resource);
         JsonArray args = item.add<JsonArray>();
         for (size_t a = 0; a < action.argumentCount(); ++a)
@@ -1599,6 +1650,10 @@ void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item["access"] = accessName(value.access_);
             item["type"] = valueTypeName(value.valueType_);
+        }
+        else if (resource.kind_ == NetResourceType::EVENT)
+        {
+            item["type"] = valueTypeName(static_cast<const NetEventResource &>(resource).payloadType_);
         }
         else
         {
@@ -1633,6 +1688,10 @@ void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item["access"] = accessName(value.access_);
             item["type"] = valueTypeName(value.valueType_);
+        }
+        else if (resource.kind_ == NetResourceType::EVENT)
+        {
+            item["type"] = valueTypeName(static_cast<const NetEventResource &>(resource).payloadType_);
         }
         else
         {
@@ -1670,6 +1729,11 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
         }
+        else if (resource.kind_ == NetResourceType::EVENT)
+        {
+            item.add(static_cast<uint8_t>(
+                static_cast<const NetEventResource &>(resource).payloadType_));
+        }
         else
         {
             const NetActionResource &action = static_cast<const NetActionResource &>(resource);
@@ -1702,6 +1766,11 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
             const NetValueResource &value = static_cast<const NetValueResource &>(resource);
             item.add(static_cast<uint8_t>(value.access_));
             item.add(static_cast<uint8_t>(value.valueType_));
+        }
+        else if (resource.kind_ == NetResourceType::EVENT)
+        {
+            item.add(static_cast<uint8_t>(
+                static_cast<const NetEventResource &>(resource).payloadType_));
         }
         else
         {
@@ -1851,6 +1920,29 @@ ActionResult ResourcesManager::listResources() const
     };
     auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> String
     {
+        // An event has no value to show, only its role, where a Remote one
+        // listens, and when it last happened. The source stands in for the
+        // "@owner" disambiguation below.
+        if (resource.kind_ == NetResourceType::EVENT)
+        {
+            String description = resource.isOwned() ? "managed" : "remote";
+            if (!resource.isOwned())
+            {
+                description += " source=";
+                if (sourceConfigured(resource))
+                {
+                    description += resource.ownerDevice_.deviceName;
+                    description += '/';
+                    description += resource.sourceResourceName_;
+                }
+                else
+                    description += '-';
+            }
+            description += " last_update_ms=";
+            description += String(static_cast<const NetEventResource &>(resource).lastUpdateMs_);
+            return description;
+        }
+
         String value;
         if (resource.kind_ == NetResourceType::ACTION)
             value = "-";
@@ -1957,7 +2049,7 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
                                  String(), true))
             withdrawn = false;
     }
-    // Actions need nothing: /invoke is never retained.
+    // Actions and events need nothing: /invoke and /event are never retained.
     //
     // Both manifests go, not just the JSON one -- either left behind would
     // re-announce the old identity to whichever reader prefers that encoding.
@@ -2247,6 +2339,19 @@ bool ResourcesManager::invoke(NetActionResource &resource, const String &payload
                                payload, false);
 }
 
+bool ResourcesManager::fire(NetEventResource &resource, const String &encoded)
+{
+    if (resource.resourceManager_ != this || !resource.isOwned() || encoded.length() == 0 ||
+        encoded.length() > MaxValueLength)
+        return false;
+    // Transient on purpose: retain would make the broker replay an old
+    // occurrence to every late subscriber, which is state, not an event.
+    if (publisher_ == nullptr || !hasResolvedSource(resource))
+        return false;
+    return publisher_->publish(resolveResourceTopic(resource, ResourceTopicOperation::EVENT),
+                               encoded, false);
+}
+
 ActionResult ResourcesManager::executeAction(NetActionResource &action, const String &canonicalPayload)
 {
     if (!action.isOwned())
@@ -2384,6 +2489,16 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
     {
         if (resource->kind_ == NetResourceType::ACTION)
             return invokeAction(*static_cast<NetActionResource *>(resource), String());
+
+        // There is no payload to return: an event is not state. Describe it.
+        if (resource->kind_ == NetResourceType::EVENT)
+        {
+            String description = "EVENT ";
+            description += resource->name_;
+            description += " last_update_ms=";
+            description += String(static_cast<NetEventResource *>(resource)->lastUpdateMs_);
+            return {true, description};
+        }
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (!value.hasValueImpl())
@@ -2602,6 +2717,29 @@ bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
     return true;
 }
 
+// An occurrence is delivered or dropped, never kept. Unlike a state there is no
+// deletion marker to honour and no previous value to compare against, so an
+// identical payload is a second occurrence and calls the handler again. An
+// empty payload cannot be an encoded T (fire() never sends one), so it is
+// treated as malformed along with anything the codec refuses.
+bool ResourcesManager::applyRemoteEvent(NetEventResource &event, const String &message)
+{
+    if (message.length() == 0 || message.length() > MaxValueLength)
+    {
+        LOG_WARNING("RM", "Ignored event for '%s/%s': payload length %u is outside 1..%u",
+                    event.ownerDevice_.deviceName.c_str(), event.sourceResourceName_.c_str(),
+                    (unsigned)message.length(), (unsigned)MaxValueLength);
+        return false;
+    }
+    if (!event.applyEncodedEvent(message))
+    {
+        LOG_WARNING("RM", "Ignored undecodable event for '%s/%s'",
+                    event.ownerDevice_.deviceName.c_str(), event.sourceResourceName_.c_str());
+        return false;
+    }
+    return true;
+}
+
 // The JSON manifest, for a handler that asked for it. Nothing in the library
 // reads this topic any more -- verification moved to the compact encoding -- so
 // this path exists to hand a validated payload to a consumer and does nothing
@@ -2737,6 +2875,20 @@ void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArray
                 LOG_WARNING("RM",
                             "Source '%s/%s' is missing or incompatible with the local declaration",
                             deviceName.c_str(), resource->name_.c_str());
+            continue;
+        }
+
+        // An event is checked on the one thing it declares: its payload type. As
+        // everywhere, the manifest describes and never gates -- events keep being
+        // delivered however this comparison turns out.
+        if (resource->kind_ == NetResourceType::EVENT)
+        {
+            const NetEventResource &event = *static_cast<NetEventResource *>(resource);
+            if (!declared || declaration.size() < 3 ||
+                declaration[2].as<uint8_t>() != static_cast<uint8_t>(event.payloadType_))
+                LOG_WARNING("RM",
+                            "Event '%s/%s' is missing or incompatible with the local declaration",
+                            deviceName.c_str(), resource->sourceResourceName_.c_str());
             continue;
         }
 
@@ -2914,6 +3066,11 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     if (operation == "state" && resource->kind_ == NetResourceType::VALUE && !resource->isOwned())
     {
         applyRemoteState(*static_cast<NetValueResource *>(resource), message);
+        return true;
+    }
+    if (operation == "event" && resource->kind_ == NetResourceType::EVENT && !resource->isOwned())
+    {
+        applyRemoteEvent(*static_cast<NetEventResource *>(resource), message);
         return true;
     }
     if (operation == "set" && resource->kind_ == NetResourceType::VALUE && resource->isOwned())

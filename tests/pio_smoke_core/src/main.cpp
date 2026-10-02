@@ -2,6 +2,9 @@
 
 #include <ArduinoJson.h>
 
+#include <type_traits>
+#include <utility>
+
 RuntimeState smokeState;
 Config<uint32_t> smokeConfig("smoke_config", 7);
 
@@ -29,6 +32,100 @@ static_assert(static_cast<uint8_t>(NetValueType::STRUCT) == 4 &&
                   static_cast<uint8_t>(NetValueType::TIME) == 5 &&
                   static_cast<uint8_t>(NetValueType::COLOUR) == 6,
               "semantic wire types must append without renumbering existing values");
+static_assert(static_cast<uint8_t>(NetResourceType::VALUE) == 0 &&
+                  static_cast<uint8_t>(NetResourceType::ACTION) == 1 &&
+                  static_cast<uint8_t>(NetResourceType::EVENT) == 2,
+              "EVENT must append to NetResourceType without renumbering VALUE or ACTION");
+
+// Detects whether an expression over a `U &` compiles, so the Event leaf API can
+// be asserted by what it does not offer as well as by what it does.
+#define NM_DETECT_MEMBER(Name, ...)                                                      \
+    template <typename T>                                                                \
+    class Has##Name                                                                      \
+    {                                                                                    \
+        template <typename U>                                                            \
+        static auto test(int) -> decltype((void)(__VA_ARGS__), std::true_type());        \
+        template <typename>                                                              \
+        static std::false_type test(...);                                                \
+                                                                                         \
+    public:                                                                              \
+        static constexpr bool value = decltype(test<T>(0))::value;                       \
+    }
+
+NM_DETECT_MEMBER(Fire, std::declval<U &>().fire(1u));
+NM_DETECT_MEMBER(OnEvent, std::declval<U &>().onEvent);
+NM_DETECT_MEMBER(LastUpdateMs, std::declval<const U &>().lastUpdateMs());
+NM_DETECT_MEMBER(SetSource, std::declval<U &>().setSource(String(), String()));
+NM_DETECT_MEMBER(ClearSource, std::declval<U &>().clearSource());
+NM_DETECT_MEMBER(GetValue, std::declval<const U &>().getValue());
+NM_DETECT_MEMBER(SetValue, std::declval<U &>().setValue(1u));
+NM_DETECT_MEMBER(HasValue, std::declval<const U &>().hasValue());
+NM_DETECT_MEMBER(Available, std::declval<const U &>().available());
+NM_DETECT_MEMBER(Freshness, std::declval<const U &>().freshness());
+NM_DETECT_MEMBER(IsStale, std::declval<const U &>().isStale());
+NM_DETECT_MEMBER(SetAvailable, std::declval<U &>().setAvailable(true));
+NM_DETECT_MEMBER(SetHardwarePolicy, std::declval<U &>().setHardwarePolicy(HardwarePolicy()));
+NM_DETECT_MEMBER(HardwareConnected, std::declval<const U &>().hardwareConnected());
+NM_DETECT_MEMBER(DependsOn, std::declval<U &>().dependsOn(std::declval<NetValueResource &>()));
+NM_DETECT_MEMBER(LastEvent, std::declval<const U &>().lastEvent());
+NM_DETECT_MEMBER(HasEvent, std::declval<const U &>().hasEvent());
+NM_DETECT_MEMBER(ValueType, std::declval<const U &>().type());
+
+static_assert(std::is_base_of<NetEventResource, ManagedEvent<uint32_t>>::value &&
+                  std::is_base_of<NetEventResource, RemoteEvent<uint32_t>>::value,
+              "Events share the non-template NetEventResource boundary");
+static_assert(!std::is_base_of<NetValueResource, ManagedEvent<uint32_t>>::value &&
+                  !std::is_base_of<NetValueResource, RemoteEvent<uint32_t>>::value &&
+                  !std::is_base_of<NetActionResource, ManagedEvent<uint32_t>>::value,
+              "An Event is a distinct kind, not a Value with a flag, so it carries no "
+              "Value-only storage");
+static_assert(sizeof(ManagedEvent<uint32_t>) < sizeof(ManagedSensor<uint32_t>) &&
+                  sizeof(RemoteEvent<uint32_t>) < sizeof(RemoteSensor<uint32_t>),
+              "Event storage must exclude the Value-only fields");
+static_assert(!std::is_constructible<NetEvent<uint32_t>, const String &>::value,
+              "NetEvent is an implementation base, not an application resource");
+
+static_assert(HasFire<ManagedEvent<uint32_t>>::value && HasLastUpdateMs<ManagedEvent<uint32_t>>::value,
+              "ManagedEvent exposes fire() and lastUpdateMs()");
+static_assert(!HasOnEvent<ManagedEvent<uint32_t>>::value &&
+                  !HasSetSource<ManagedEvent<uint32_t>>::value &&
+                  !HasClearSource<ManagedEvent<uint32_t>>::value,
+              "ManagedEvent is permanently local: nothing to receive, nothing to retarget");
+static_assert(HasOnEvent<RemoteEvent<uint32_t>>::value &&
+                  HasLastUpdateMs<RemoteEvent<uint32_t>>::value &&
+                  HasSetSource<RemoteEvent<uint32_t>>::value &&
+                  HasClearSource<RemoteEvent<uint32_t>>::value,
+              "RemoteEvent exposes onEvent, lastUpdateMs(), setSource() and clearSource()");
+static_assert(!HasFire<RemoteEvent<uint32_t>>::value,
+              "Only the implementing device fires an event");
+static_assert(std::is_same<RemoteEvent<uint32_t>::EventHandler,
+                           void (*)(RemoteEvent<uint32_t> &, const uint32_t &)>::value,
+              "onEvent receives the event and the already-decoded payload");
+
+static_assert(!HasGetValue<ManagedEvent<uint32_t>>::value &&
+                  !HasGetValue<RemoteEvent<uint32_t>>::value &&
+                  !HasSetValue<ManagedEvent<uint32_t>>::value &&
+                  !HasSetValue<RemoteEvent<uint32_t>>::value &&
+                  !HasHasValue<RemoteEvent<uint32_t>>::value &&
+                  !HasLastEvent<ManagedEvent<uint32_t>>::value &&
+                  !HasLastEvent<RemoteEvent<uint32_t>>::value &&
+                  !HasHasEvent<ManagedEvent<uint32_t>>::value &&
+                  !HasHasEvent<RemoteEvent<uint32_t>>::value,
+              "An event has no current value to read or write");
+static_assert(!HasAvailable<ManagedEvent<uint32_t>>::value &&
+                  !HasAvailable<RemoteEvent<uint32_t>>::value &&
+                  !HasFreshness<RemoteEvent<uint32_t>>::value &&
+                  !HasIsStale<RemoteEvent<uint32_t>>::value &&
+                  !HasSetAvailable<ManagedEvent<uint32_t>>::value &&
+                  !HasValueType<ManagedEvent<uint32_t>>::value,
+              "An event has no availability or freshness");
+static_assert(!HasSetHardwarePolicy<ManagedEvent<uint32_t>>::value &&
+                  !HasHardwareConnected<ManagedEvent<uint32_t>>::value &&
+                  !HasDependsOn<ManagedEvent<uint32_t>>::value,
+              "An event has no hardware policy and mirrors nothing");
+static_assert(HasGetValue<ManagedSensor<uint32_t>>::value && HasFreshness<RemoteSensor<uint32_t>>::value &&
+                  HasDependsOn<ManagedSensor<uint32_t>>::value,
+              "the detectors must be able to see the Value API they assert Events lack");
 
 void setup()
 {
@@ -276,6 +373,30 @@ void setup()
     }
     smokeState.setFlag("config_custom_types", configValues && configManifestTypes && sawTime &&
                                                sawColour);
+
+    // Event leaf API at runtime. This build has no Resource manager, so nothing
+    // can be transported: that is exactly the unbound contract to check. Wire
+    // behaviour (topic, retain, repeat delivery, manifests) is covered by the
+    // default smoke test, which has the manager.
+    ManagedEvent<uint32_t> managedEvent("smoke_event");
+    RemoteEvent<uint32_t> remoteEvent("smoke_remote_event");
+    RemoteEvent<String> sourcedEvent("smoke_sourced_event", NetDeviceIdentity("watson"));
+    const bool eventKinds = managedEvent.kind() == NetResourceType::EVENT &&
+                            remoteEvent.kind() == NetResourceType::EVENT &&
+                            !managedEvent.isRemote() && remoteEvent.isRemote() &&
+                            sourcedEvent.isRemote() && !managedEvent.isBound();
+    const bool eventUnbound = managedEvent.lastUpdateMs() == 0 &&
+                              remoteEvent.lastUpdateMs() == 0 &&
+                              !managedEvent.fire(1) && managedEvent.lastUpdateMs() == 0;
+    const bool eventSources = remoteEvent.sourceResource().length() == 0 &&
+                              remoteEvent.setSource("watson", "beep") &&
+                              remoteEvent.owner() == "watson" &&
+                              remoteEvent.sourceResource() == "beep" &&
+                              remoteEvent.clearSource() &&
+                              remoteEvent.sourceResource().length() == 0 &&
+                              sourcedEvent.owner() == "watson" &&
+                              sourcedEvent.sourceResource() == "smoke_sourced_event";
+    smokeState.setFlag("event_api", eventKinds && eventUnbound && eventSources);
 }
 
 void loop() {}

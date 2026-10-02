@@ -14,7 +14,7 @@ A Resource says:
 ```text
 what capability exists
 who owns it
-whether it is state or an operation
+whether it is state, an operation, or an occurrence
 how another device may interact with it
 ```
 
@@ -42,12 +42,28 @@ NetResource
 │       ├── RemoteSensor<T>
 │       ├── ManagedState<T>
 │       └── RemoteState<T>
-└── NetActionResource
-    ├── ManagedAction
-    └── RemoteAction
+├── NetActionResource
+│   ├── ManagedAction
+│   └── RemoteAction
+└── NetEventResource
+    └── NetEvent<T>
+        ├── ManagedEvent<T>
+        └── RemoteEvent<T>
 ```
 
-The normal application API is the six leaf types.
+The normal application API is the eight leaf types.
+
+The three kinds say different things:
+
+```text
+Value  = something is           (Sensor, State)
+Action = please do something    (Action)
+Event  = something happened     (Event)
+```
+
+An Event is its own kind, not a Value with a flag. `NetEventResource` does not
+derive from `NetValueResource`, so an Event carries no current value, availability,
+freshness, advertisement or hardware state.
 
 `NetValue<T>` remains public for cases that do not fit the standard wrappers, but most projects should prefer the semantic wrappers because they make ownership, access, and synchronization intent obvious.
 
@@ -93,7 +109,7 @@ gResourcesManager.unbindResource(&temperature);
 
 ### Module ownership practice
 
-If a module primarily implements a Sensor, State, Action, or Config, that
+If a module primarily implements a Sensor, State, Action, Event, or Config, that
 module should normally own its declaration, stable name, handlers, and
 binding/exposure. For example, `TemperatureSensor.cpp/.h` should normally own
 the hardware driver and its `ManagedSensor<float>` rather than making
@@ -429,7 +445,7 @@ Retargeting the Resource clears state learned from the old source completely.
 
 ## Remote Resource identity and source
 
-RemoteSensor, RemoteState, and RemoteAction have a stable local name and a separately
+RemoteSensor, RemoteState, RemoteAction, and RemoteEvent have a stable local name and a separately
 configurable remote source.
 
 Example:
@@ -456,16 +472,18 @@ This is useful when the source comes from configuration or later discovery.
 
 ## Retargeting
 
-Remote Value wrappers expose:
+Remote wrappers (RemoteSensor, RemoteState, RemoteAction, RemoteEvent) expose:
 
 ```cpp
 setSource(deviceName, resourceName);
+clearSource();
 ```
 
 Retargeting:
 
 - unsubscribes the previous source,
-- clears Value state learned from the old source,
+- clears Value state learned from the old source (a RemoteEvent resets
+  `lastUpdateMs()`),
 - updates manifest subscriptions,
 - subscribes to the new source if valid,
 - saves the binding in `/remoteresources.json`,
@@ -745,6 +763,139 @@ Unknown fields are allowed and optional declared fields may be absent.
 
 This keeps schema checking tolerant rather than turning manifests into a rigid version lock.
 
+## Events
+
+Use an Event when something **happened** and a listener cares about the
+occurrence, not about a state that persists afterwards.
+
+| | Sensor / State | Action | Event |
+|---|---|---|---|
+| Says | something is | please do something | something happened |
+| Wire | retained `/state` | transient `/invoke` | transient `/event` |
+| Late subscriber sees | current value | nothing | nothing |
+| Same payload twice | one change, notified once | two invocations | two occurrences |
+| Has a current value | yes | no | no |
+| Freshness / availability | yes | no | no |
+
+Good Events:
+
+```text
+button pressed
+IR code received
+acoustic beep emitted
+```
+
+Door open or closed is not an Event: it is state, and a consumer that connects
+later needs to know which one it currently is. Use a Sensor or State.
+
+### ManagedEvent
+
+```cpp
+ManagedEvent<uint32_t> beep("acoustic:beep");
+
+void setup()
+{
+    gResourcesManager.bindResource(&beep);
+    startNightMareESP();
+}
+
+void onButton()
+{
+    beep.fire(880); // frequency in Hz
+}
+```
+
+`fire()` publishes `<device>/resource/acoustic:beep/event`, transient and never
+retained. It returns `true` when the transport accepted the publication, and
+`false` when unbound, when the payload encodes to nothing or more than 2048
+bytes, or when the connection refused it. `true` does not mean anybody received
+or handled it.
+
+Firing equal payloads twice is two occurrences:
+
+```cpp
+beep.fire(880);
+beep.fire(880); // published again; nothing is compared with the previous call
+```
+
+A `ManagedEvent` has no `getValue()`, no `setValue()`, no `hasValue()`, no
+availability, no freshness, no advertisement period, no hardware policy and no
+`dependsOn()`. The only other public member is `lastUpdateMs()`.
+
+### RemoteEvent
+
+```cpp
+RemoteEvent<uint32_t> remoteBeep("beep");
+
+static void onBeep(RemoteEvent<uint32_t> &event, const uint32_t &hertz)
+{
+    // one call per occurrence, with the already-decoded payload
+}
+
+void setup()
+{
+    remoteBeep.onEvent = onBeep;
+    gResourcesManager.bindResource(&remoteBeep);
+    remoteBeep.setSource("Watson", "acoustic:beep");
+}
+```
+
+`onEvent` runs once for every valid live occurrence, **including consecutive
+identical payloads**. There is nothing to read afterwards: the previous payload
+is not kept, and an occurrence that arrives while no source is configured, or
+before the subscription exists, is simply not seen. A payload that fails to
+decode is dropped without calling `onEvent`.
+
+`setSource()` and `clearSource()` use the same persistence as RemoteSensor and
+RemoteState (`/remoteresources.json`, keyed by the stable local name). Retarget
+it like any other Remote Resource:
+
+```cpp
+remoteBeep.setSource("Moriarty", "acoustic:beep");
+```
+
+This unsubscribes the old `/event`, subscribes to the new one, persists the
+mapping, republishes the consume manifest and resets `lastUpdateMs()` to `0`.
+The Resource remains Remote.
+
+### lastUpdateMs()
+
+`lastUpdateMs()` is a local `millis()` timestamp:
+
+```text
+ManagedEvent   latest occurrence the transport accepted
+RemoteEvent    latest valid live occurrence received
+```
+
+It is `0` before the first occurrence and, for a RemoteEvent, again after the
+source changes. It is diagnostic only: do not use it as freshness (an Event that
+has not fired is not stale), and it is not an epoch time.
+
+### Reconnect and replay
+
+Events are never replayed. A reconnect republishes a ManagedEvent's manifest
+entry and fires nothing, and rebuilds a RemoteEvent's `/event` subscription
+without calling `onEvent`. A consumer that was offline simply missed the
+occurrences that happened meanwhile; if that is not acceptable, the information
+is state, not an Event.
+
+### Payloads
+
+Events use the library's `NetCodec<T>`, exactly as Values do, so `bool`, integer,
+floating-point, `String`, `TimeType` and `ColourType` payloads are supported and
+an unsupported `T` fails to compile. Applications do not define their own codecs
+(see [Applications do not define Value types](#applications-do-not-define-value-types)); to carry
+several fields, fire a JSON object in a `ManagedEvent<String>`. Unlike a Value,
+an Event is never decoded from or published as an empty payload.
+
+### When not to use an Event
+
+- The consumer needs the current state when it connects: use a Sensor or State.
+- The payload changes the state of the receiver and must be acknowledged: use an
+  Action, and a correlated path when the result matters.
+- You need every occurrence reliably (no loss, ordering, exactly once): an Event
+  is best effort with no acknowledgement, replay or sequence numbers.
+
 ## Value codecs
 
 Built-in `NetCodec<T>` support currently covers:
@@ -830,31 +981,20 @@ No space after `>` selects an operation owned by the manager itself:
 >raw <topic> [payload]
 ```
 
-`>list` returns JSON describing the currently bound Resources.
-
-Each entry includes:
-
-```text
-name
-kind
-role
-owner
-```
-
-Value entries also include:
+`>list` returns a text table of the currently bound Resources with the columns
+`TYPE` (the kind), `NAME` and `VALUE`:
 
 ```text
-access
-type
-available
-freshness
+TYPE    NAME           VALUE
+value   temperature    21.5
+action  reboot_ctrl    -
+event   acoustic:beep  managed last_update_ms=182345
+event   beep           remote source=Watson/acoustic:beep last_update_ms=0
 ```
 
-Action entries include:
-
-```text
-arguments
-```
+A Value shows its effective current value (or `<unavailable>`), an Action `-`.
+An Event has no value to show, so its cell describes it instead: its role, for a
+Remote Event its source (`source=-` while unconfigured), and `last_update_ms`.
 
 `>manifest json` returns the named-key manifest. A MessagePack selection
 republishes `<device>/manifest/msgpack` and responds `Republished to MQTT.`;
@@ -886,6 +1026,13 @@ A space after `>` selects a bound Resource by unique short name:
 A bare Value performs `get`.
 
 A bare Action performs `invoke` with an empty payload.
+
+A bare Event returns its runtime metadata only, never a payload:
+
+```text
+> acoustic:beep
+EVENT acoustic:beep last_update_ms=182345
+```
 
 The explicit verbs are:
 
@@ -921,13 +1068,17 @@ For a RemoteState, `set` uses the normal typed `setValue()` path, including opti
 
 `invoke` is valid only for Actions. Everything after the verb is one opaque Resource payload.
 
+An Event accepts none of `get`, `set`, `invoke`, `advertise` or `poll`, and there
+is no `fire` verb: firing is application code (`fire()`), not an operator
+command. A Remote Event accepts `source` exactly like any other Remote Resource.
+
 For a ManagedAction, command execution returns its local `ActionResult`.
 
 For a RemoteAction, success means only that the normal MQTT `/invoke` publication was accepted.
 
 ### Limits
 
-Normal Value/Action payloads remain limited to:
+Normal Value/Action/Event payloads remain limited to:
 
 ```text
 2048 bytes
@@ -991,7 +1142,7 @@ Current Resource limits are:
 ```text
 bound Resources:          100
 Resource-name length:     64 characters
-Value/Action payload:     2048 bytes
+Value/Action/Event payload: 2048 bytes
 manifest payload limit:   16384 bytes
 dependencies per Sensor:  1
 ```

@@ -107,10 +107,16 @@ NetResource
 │       ├── RemoteSensor<T>
 │       ├── ManagedState<T>
 │       └── RemoteState<T>
-└── NetActionResource
-    ├── ManagedAction
-    └── RemoteAction
+├── NetActionResource
+│   ├── ManagedAction
+│   └── RemoteAction
+└── NetEventResource
+    └── NetEvent<T>
+        ├── ManagedEvent<T>
+        └── RemoteEvent<T>
 ```
+
+An Event is its own kind rather than a Value with a flag, so it does not inherit the Value-only state (availability, freshness, advertisement, hardware policy, optimistic state).
 
 The typed part of a Value ends at `NetValue<T>`. `ResourcesManager` sees a non-template boundary and encoded Strings.
 

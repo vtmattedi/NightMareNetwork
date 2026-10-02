@@ -65,11 +65,12 @@ It changes formatting and local wall-clock interpretation; Unix epoch values rem
 
 A **Resource** is an application capability exposed to the NightMare network.
 
-There are two kinds:
+There are three kinds:
 
 ```text
-Value
-Action
+Value   something is
+Action  please do something
+Event   something happened
 ```
 
 Resources belong to the application layer. NightMare provides their registration, addressing, discovery, state routing, subscriptions, and connection behavior.
@@ -147,6 +148,28 @@ Invocation uses:
 Ordinary MQTT invocation is fire-and-forget. The connection accepting the message is not proof that the remote Action executed successfully.
 
 When the result matters, use a correlated command/MQTTP path that can preserve the local `ActionResult`.
+
+## Event
+
+An **Event** reports that something happened. It is a transient occurrence, not state.
+
+Example:
+
+```text
+button_pressed
+ir_received
+acoustic:beep
+```
+
+An Event has no current value, availability, freshness, advertisement period, or hardware policy, and it does not use `/state`. A door that is open is a Value; a door that was opened is an Event.
+
+Each occurrence is published to:
+
+```text
+<device>/resource/<name>/event
+```
+
+and is never retained, replayed after a reconnect, or deduplicated. Firing the same payload twice is two occurrences. Delivery is best effort with no acknowledgement.
 
 ## Managed and Remote
 

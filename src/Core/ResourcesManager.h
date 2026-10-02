@@ -45,8 +45,9 @@ ParsedCommand parseCommand(const String &expression);
 
 /// @brief Registration, routing, manifests, subscriptions and reconnect
 /// behaviour for declared resources. Deliberately non-template: it only ever
-/// sees NetResource, NetValueResource, NetActionResource and String. Everything
-/// type-specific lives in NetValue<T>, NetCodec<T> and ManagedState<T>.
+/// sees NetResource, NetValueResource, NetActionResource, NetEventResource and
+/// String. Everything type-specific lives in NetValue<T>, NetEvent<T>,
+/// NetCodec<T> and ManagedState<T>.
 ///
 /// It owns participation and routing, not identity: every topic comes from the
 /// resource layer's resolveResourceTopic(), and a managed resource's owner is
@@ -174,6 +175,7 @@ private:
     friend class NetResource;
     friend struct NetValueResource;
     friend struct NetActionResource;
+    friend class NetEventResource;
 
     // Resource methods delegate here. A managed write keeps local truth even if
     // publication fails; a remote request succeeds only when it was transported.
@@ -185,6 +187,9 @@ private:
     bool setPollOverride(NetValueResource &resource, int32_t milliseconds);
     bool resetPollOverride(NetValueResource &resource);
     bool invoke(NetActionResource &resource, const String &payload);
+    /// @brief Publishes one occurrence of a Managed event, transient. True only
+    /// when the connection accepted it.
+    bool fire(NetEventResource &resource, const String &encoded);
     bool configureRemoteSource(NetResource &resource, const String &deviceName,
                                const String &resourceName, bool persist = true);
 
@@ -216,7 +221,8 @@ private:
                              const NetResource *self) const;
 
     // The one ingress topic a resource needs, or empty when it needs none
-    // (ManagedSensor, RemoteAction, or a Remote resource with no source yet).
+    // (ManagedSensor, ManagedEvent, RemoteAction, or a Remote resource with no
+    // source yet).
     String ingressTopicFor(const NetResource &resource) const;
     String ingressTopicFor(const NetResource &resource, const String &deviceName,
                            const String &resourceName) const;
@@ -268,6 +274,9 @@ private:
     // either way; correlated command callers also use the returned outcome.
     bool applyRemoteState(NetValueResource &value, const String &message);
     bool applyManagedWrite(NetValueResource &value, const String &message);
+    /// @brief One live occurrence of a Remote event. Not retained state, so it is
+    /// decoded and delivered or dropped; nothing is stored or republished.
+    bool applyRemoteEvent(NetEventResource &event, const String &message);
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;

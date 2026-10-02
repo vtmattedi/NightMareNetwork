@@ -31,10 +31,12 @@ struct HardwarePolicy
     String note;
 };
 
+// Append only: these are the numbers the compact manifests carry as `kind`.
 enum class NetResourceType : uint8_t
 {
     VALUE,
-    ACTION
+    ACTION,
+    EVENT
 };
 
 // READ resources can be observed. READ_WRITE values accept /set requests;
@@ -78,13 +80,26 @@ struct NetDeviceIdentity
  *   |     |- RemoteSensor<T>       remote, READ, STRICT
  *   |     |- ManagedState<T>       local, READ_WRITE
  *   |     '- RemoteState<T>        remote, READ_WRITE, OPTIMISTIC
- *   '- NetActionResource           non-template, runtime argument metadata
- *      |- ManagedAction            local implementation + arg schema
- *      '- RemoteAction             remote invocation + arg schema
+ *   |- NetActionResource           non-template, runtime argument metadata
+ *   |  |- ManagedAction            local implementation + arg schema
+ *   |  '- RemoteAction             remote invocation + arg schema
+ *   '- NetEventResource            non-template boundary, transient occurrences
+ *      '- NetEvent<T>              typed codec helpers
+ *         |- ManagedEvent<T>       local, fires
+ *         '- RemoteEvent<T>        remote, onEvent
  *
  * Sensor<T> observes T. State<T> observes T and can request it become another
  * value. An action performs an operation described by runtime metadata, so it
- * has no single T and is not templated.
+ * has no single T and is not templated. An event reports that something
+ * happened and carries a T for that one occurrence only:
+ *
+ *   Value  = something is
+ *   Action = please do something
+ *   Event  = something happened
+ *
+ * An event is not state, so it is not a value with a flag: it has no current
+ * value, freshness, availability, advertisement or hardware policy, and it is
+ * never retained.
  */
 
 /// @brief Whether this device implements the resource or merely points at one.
@@ -162,6 +177,7 @@ private:
     friend class ResourcesManager;
     friend class NetValueResource;
     friend class NetActionResource;
+    friend class NetEventResource;
     friend const String &resolveResourceOwner(const NetResource &resource);
 };
 
@@ -176,12 +192,14 @@ private:
  *   <device>/resource/<name>/state      value state, retained
  *   <device>/resource/<name>/set        write request, transient
  *   <device>/resource/<name>/invoke     action request, transient
+ *   <device>/resource/<name>/event      event occurrence, transient
  */
 enum class ResourceTopicOperation : uint8_t
 {
     STATE,
     SET,
-    INVOKE
+    INVOKE,
+    EVENT
 };
 
 /// @brief How a manifest is encoded on the wire. The same document either way:
@@ -218,6 +236,7 @@ enum class ManifestFormat : uint8_t
  *   resource := [ 0, name:str, access:uint, type:uint,
  *                 dependsOn:str|null, advertiseMs:int, hardware:array|null ] // VALUE
  *             | [ 1, name:str, arguments:array ]                        // ACTION
+ *             | [ 2, name:str, type:uint ]                              // EVENT
  *
  *   hardware := [ pollMs:int, flags:uint, connected:bool|null?, note:str? ]
  *
@@ -261,19 +280,30 @@ enum class ManifestFormat : uint8_t
  *     it. That is what makes rule 3 survivable -- a bump degrades old readers to
  *     JSON instead of breaking them.
  * ------------------------------------------------------------------------- */
-constexpr uint8_t ManifestEncodingVersion = 2;
-constexpr uint8_t ResourceManifestVersion = 5;
-constexpr uint8_t ConsumeManifestEncodingVersion = 1;
-/// Version 2 appends `remotes` (position 3 of the compact form): every Remote
+/// Encoding version 3 introduces the EVENT resource shape (kind 2). Version 2
+/// readers do not know it, so they fall back to the JSON manifest (rule 5).
+/// The VALUE and ACTION shapes are unchanged. The logical ResourceManifestVersion
+/// moves with it because the manifest can now declare a new kind of resource.
+constexpr uint8_t ManifestEncodingVersion = 3;
+constexpr uint8_t ResourceManifestVersion = 6;
+/// Consume encoding version 2 introduces the EVENT entry shapes below. A version 1
+/// reader does not know kind 2, so it falls back to the JSON consume manifest.
+constexpr uint8_t ConsumeManifestEncodingVersion = 2;
+/// Version 2 appended `remotes` (position 3 of the compact form): every Remote
 /// Resource this device declares, bound or not, so a controller can find and
 /// configure them with SOURCE. `consumes` is unchanged and still lists only
-/// dependency edges. Version 1 readers ignore the extra element.
+/// dependency edges. Version 3 adds Remote Events to both lists.
+///
+///   consume := [ 0, device:str, resource:str, access:uint, type:uint ]
+///            | [ 1, device:str, resource:str, arguments:array ]
+///            | [ 2, device:str, resource:str, type:uint ]                  // EVENT
 ///
 ///   remote := [ 0, localName:str, bound:bool, device:str, resource:str, access:uint, type:uint ]
 ///           | [ 1, localName:str, bound:bool, device:str, resource:str, arguments:array ]
+///           | [ 2, localName:str, bound:bool, device:str, resource:str, type:uint ]  // EVENT
 ///
 /// device and resource are empty strings while unbound.
-constexpr uint8_t ConsumeManifestVersion = 2;
+constexpr uint8_t ConsumeManifestVersion = 3;
 
 /// Positions within the top-level array. Position 0 is fixed for all time; see
 /// rule 1 above.
@@ -874,4 +904,133 @@ public:
     /// controlled console or MQTTP path when the result matters. Fails when
     /// unbound, because nothing was sent.
     bool invoke(const String &payload = String()) { return dispatchInvoke(payload); }
+};
+
+/// @brief Manager-facing event: a transient report that something happened.
+///
+/// An event is not state. It carries no current value, so there is nothing to
+/// read back, no availability or freshness to age, no advertisement period to
+/// refresh and no hardware policy to report; none of that storage exists here.
+/// All that is kept is what routing and diagnostics need: the payload's wire
+/// type and when the latest occurrence was seen.
+///
+/// Publication is `<device>/resource/<name>/event`, never retained. Delivery is
+/// best effort, with no replay, acknowledgement or deduplication: firing the
+/// same payload twice is two occurrences.
+class NetEventResource : public NetResource
+{
+public:
+    /// @brief millis() of the latest occurrence: the latest one fired here
+    /// (Managed, only when the transport accepted it) or the latest valid live
+    /// one received (Remote). Zero until one happens, and zero again after a
+    /// Remote source change, because the old source's occurrences no longer
+    /// describe what this points at.
+    uint32_t lastUpdateMs() const { return lastUpdateMs_; }
+
+protected:
+    NetEventResource(const String &resourceName, const String &resourceOwner,
+                     NetValueType payloadType, ResourceRole resourceRole)
+        : NetResource(resourceName, resourceOwner, NetResourceType::EVENT, resourceRole),
+          payloadType_(payloadType) {}
+
+    // Application -> transport, for a Managed event.
+    bool dispatchFire(const String &encoded);
+    void noteOccurrence() { lastUpdateMs_ = (uint32_t)millis(); }
+
+    /// @brief Nothing about an event survives a source change except the
+    /// declaration, and the only thing learned is when it last happened.
+    void resetRemoteState() override { lastUpdateMs_ = 0; }
+
+private:
+    /// @brief Ingress of one live occurrence of a Remote event, in its wire
+    /// format. True when it decoded and was delivered; false leaves everything,
+    /// including lastUpdateMs(), untouched.
+    virtual bool applyEncodedEvent(const String &encoded)
+    {
+        (void)encoded;
+        return false;
+    }
+
+    const NetValueType payloadType_;
+    uint32_t lastUpdateMs_ = 0;
+
+    friend class ResourcesManager;
+};
+
+/// @brief The typed event container: converts at the wire boundary through
+/// NetCodec<T> and nothing more. The framework logic lives in the base.
+template <typename T>
+class NetEvent : public NetEventResource
+{
+protected:
+    /// @brief An event implemented by this device.
+    explicit NetEvent(const String &resourceName)
+        : NetEventResource(resourceName, String(), NetCodec<T>::Type, ResourceRole::MANAGED) {}
+
+    /// @brief An event implemented by another device.
+    NetEvent(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetEventResource(resourceName, owner.deviceName, NetCodec<T>::Type,
+                           ResourceRole::REMOTE) {}
+
+    bool fireEvent(const T &payload) { return dispatchFire(NetCodec<T>::encode(payload)); }
+
+    static bool decodeEvent(const String &encoded, T &out)
+    {
+        return NetCodec<T>::decode(encoded, out);
+    }
+};
+
+/// @brief Implemented by this device. fire() reports one occurrence to anyone
+/// listening; there is no value to read back and nothing is retained.
+template <typename T>
+class ManagedEvent : public NetEvent<T>
+{
+public:
+    explicit ManagedEvent(const String &resourceName) : NetEvent<T>(resourceName) {}
+
+    /// @brief Reports one occurrence. True means the transport accepted the
+    /// publication, not that anyone received or handled it. Fails when unbound
+    /// or the payload does not encode to 1..NetResourceMaxPayloadLength bytes.
+    /// Equal payloads are separate occurrences: nothing is deduplicated.
+    bool fire(const T &payload) { return this->fireEvent(payload); }
+};
+
+/// @brief Implemented by another device. onEvent runs once for every valid live
+/// occurrence, including consecutive identical payloads. The payload is not kept:
+/// there is no getValue(), and no occurrence is replayed after a reconnect.
+template <typename T>
+class RemoteEvent : public NetEvent<T>
+{
+public:
+    using EventHandler = void (*)(RemoteEvent<T> &event, const T &payload);
+
+    /// @brief Stable local identity; point it at a source with setSource().
+    explicit RemoteEvent(const String &localName)
+        : NetEvent<T>(localName, NetDeviceIdentity(String())) {}
+
+    RemoteEvent(const String &resourceName, const NetDeviceIdentity &owner)
+        : NetEvent<T>(resourceName, owner) {}
+
+    /// @brief Called for every valid live occurrence, with the decoded payload.
+    EventHandler onEvent = nullptr;
+
+    /// @brief Points this at a different remote event. Stays REMOTE whatever
+    /// device is named, and resets lastUpdateMs().
+    bool setSource(const String &deviceName, const String &resourceName)
+    {
+        return this->setRemoteSource(deviceName, resourceName);
+    }
+    bool clearSource() { return this->clearRemoteSource(); }
+
+private:
+    bool applyEncodedEvent(const String &encoded) override
+    {
+        T payload = T();
+        if (!this->decodeEvent(encoded, payload))
+            return false;
+        this->noteOccurrence();
+        if (onEvent != nullptr)
+            onEvent(*this, payload);
+        return true;
+    }
 };

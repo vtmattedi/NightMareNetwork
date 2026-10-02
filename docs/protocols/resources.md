@@ -1,6 +1,6 @@
 ---
 title: Resource protocol
-description: MQTT wire format, manifests, Value state, writes, and Action invocation.
+description: MQTT wire format, manifests, Value state, writes, Action invocation, and Events.
 section: protocols
 order: 20
 ---
@@ -19,21 +19,31 @@ The current Resource protocol has these topic shapes:
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
+<device>/resource/<name>/event
 ```
 
 The central rule is:
 
 > **A manifest describes. `/state` tells the truth.**
 
+There are three kinds of Resource, and each one says something different:
+
+```text
+Value  = something is           retained /state
+Action = please do something    transient /invoke
+Event  = something happened     transient /event
+```
+
 ## Protocol version
 
 The current Resource manifest version is:
 
 ```text
-5
+6
 ```
 
-The version appears in the retained manifest document.
+The version appears in the retained manifest document. Version `6` adds the
+`event` kind; the `value` and `action` shapes are unchanged.
 
 ## Resource names
 
@@ -67,7 +77,7 @@ A representative manifest is:
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "resources": [
     {
       "name": "temperature",
@@ -107,6 +117,11 @@ A representative manifest is:
           "required": true
         }
       ]
+    },
+    {
+      "name": "acoustic:beep",
+      "kind": "event",
+      "type": "integer"
     }
   ]
 }
@@ -138,16 +153,22 @@ value  = [0, name, accessEnum, typeEnum, dependsOn|null,
 hardware = [pollMs, flags, connected?, note?]
 action = [1, name, arguments[]]
 arg    = [name, typeEnum, required]
+event  = [2, name, typeEnum]
 ```
+
+The leading number is `NetResourceType`: `0` value, `1` action, `2` event.
 
 `dependsOn` is a single local Resource name. Hardware trailing elements are
 omitted; when a note exists without connection reporting, the connection slot
-is `null`. Actions have no advertisement or hardware policy.
+is `null`. Actions have no advertisement or hardware policy. An Event has
+neither, and no access, dependency or arguments: it declares only its name and
+payload type.
 
-Encoding version `2` is current because the former enabled/seconds positions
-were replaced. Array positions and numeric enums are
-append-only. Readers that do not recognize the encoding version use the JSON
-manifest at `<device>/manifest`.
+Encoding version `3` is current. Version `2` replaced the former
+enabled/seconds positions; version `3` introduces the `event` shape. Array
+positions and numeric enums are append-only. Readers that do not recognize the
+encoding version, including every reader built before Events existed, use the
+JSON manifest at `<device>/manifest`.
 
 ## Consume manifest
 
@@ -163,30 +184,39 @@ This is not an expansion of the provider manifest. `<device>/manifest` remains
 only what this device implements. The consume manifest version is `2` and is
 built automatically. `consumes` lists only bound Remote Resources with a
 resolved, valid source; source-less or refused ones do not create dependency
-edges. Version 2 adds `remotes`: every Remote Resource this device declares,
+edges. Version 2 added `remotes`: every Remote Resource this device declares,
 bound or not (`name` is the local name, `bound`, `device`/`resource` empty while
 unbound, plus `kind` and `access`/`type` or `arguments`). It exists so a
-controller can discover and configure them with `SOURCE`. Version 1 readers
-ignore it.
+controller can discover and configure them with `SOURCE`. Version 3 adds Remote
+Events to both lists.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "consumes": [
     {"device": "weather-node", "resource": "temperature",
      "kind": "value", "access": "read", "type": "float"},
     {"device": "door-node", "resource": "unlock",
-     "kind": "action", "arguments": []}
+     "kind": "action", "arguments": []},
+    {"device": "Watson", "resource": "acoustic:beep",
+     "kind": "event", "type": "integer"}
   ],
   "remotes": [
     {"name": "temperature", "bound": true,
      "device": "weather-node", "resource": "temperature",
      "kind": "value", "access": "read", "type": "float"},
     {"name": "door", "bound": false, "device": "", "resource": "",
-     "kind": "value", "access": "read", "type": "boolean"}
+     "kind": "value", "access": "read", "type": "boolean"},
+    {"name": "beep", "bound": true,
+     "device": "Watson", "resource": "acoustic:beep",
+     "kind": "event", "type": "integer"},
+    {"name": "chime", "bound": false, "device": "", "resource": "",
+     "kind": "event", "type": "string"}
   ]
 }
 ```
+
+A Remote Event entry has no `access`: there is nothing to read or write.
 
 The compact positional schema is:
 
@@ -195,13 +225,17 @@ The compact positional schema is:
 
 value  = [0, device, resource, accessEnum, typeEnum]
 action = [1, device, resource, arguments[]]
+event  = [2, device, resource, typeEnum]
 arg    = [name, typeEnum, required]
 
 remote value  = [0, localName, bound, device, resource, accessEnum, typeEnum]
 remote action = [1, localName, bound, device, resource, arguments[]]
+remote event  = [2, localName, bound, device, resource, typeEnum]
 ```
 
-Encoding version `1` is current (`remotes[]` was appended without a bump). The
+Encoding version `2` is current (`remotes[]` was appended without a bump; the
+Event shapes are the reason for version `2`). A reader that does not speak the
+encoding version uses the JSON consume manifest. The
 document is republished when a Remote Resource is bound, retargeted, detached,
 or unbound, and on reconnect. Identity cleanup tombstones both retained
 encodings under the old device name.
@@ -368,11 +402,16 @@ configured at runtime.
 ```text
 value
 action
+event
 ```
 
 Values include `access` and `type`.
 
 Actions include an `arguments` array.
+
+Events include `type`, the type of the payload each occurrence carries, and
+nothing else. An Event is a distinct kind, not a Value with a flag: it has no
+`access`, `depends_on`, `advertise_ms`, `hardware` or `arguments`.
 
 ## Value access
 
@@ -614,6 +653,7 @@ Likewise, manifest compatibility does not gate:
 /state
 /set
 /invoke
+/event
 ```
 
 This separation lets state remain useful even when descriptive metadata is absent or temporarily inconsistent.
@@ -630,6 +670,8 @@ For Values it checks:
 - if the local Remote Value is `read_write`, remote `access` is also `read_write`.
 
 For Actions it checks that the Action exists and, when the local RemoteAction declares expected arguments, compares those expectations with the remote schema.
+
+For Events it checks that the Event exists, that `kind` is `event`, and that the payload `type` matches. An Event has no access, so there is nothing further to compare.
 
 Disagreements are logged. They do not rewrite the local declaration and do not disable traffic.
 
@@ -853,6 +895,116 @@ Code using `ResourcesManager::executeAction()` directly can preserve the `Action
 
 The current controlled-console/MQTTP transport is a command request/response mechanism; it is not an automatic Resource `/invoke` result channel. See [MQTTP](mqttp.md).
 
+## Event
+
+An Event reports that something happened:
+
+```text
+Value  = something is
+Action = please do something
+Event  = something happened
+```
+
+It is not state. A door that is open is a Value; a button that was pressed, an
+infrared code that was received, or an acoustic beep that was emitted is an
+Event. An Event has no current value, so there is nothing to retain, restore,
+age or read back.
+
+### Event publication
+
+A Managed Event publishes each occurrence at:
+
+```text
+<device>/resource/<name>/event
+```
+
+The publication is **never retained**. A broker therefore never replays an old
+occurrence to a late subscriber or to a reconnecting consumer, and a Managed
+Event never re-fires anything on its own reconnect.
+
+The payload is the direct `NetCodec<T>` encoding of the occurrence's value,
+exactly as for a Value, with no JSON wrapper, sequence number, timestamp or
+request id:
+
+```text
+bool      true
+integer   42
+float     23.5
+String    raw string
+custom T  the custom NetCodec<T> encoding
+```
+
+The maximum payload is 2048 bytes. Unlike an Action payload, an Event payload
+cannot be empty: an empty message is not an occurrence.
+
+### Delivery
+
+Delivery is best effort and transient:
+
+```text
+no retain
+no replay
+no acknowledgement
+no deduplication
+```
+
+Two occurrences with equal payloads are two occurrences. `fire(42)` twice
+publishes twice, and a consumer's `onEvent` runs twice. Nothing compares a
+payload with the previous one, because an Event has no previous value to
+compare with.
+
+A successful `fire()` means the transport accepted the publication. It does not
+mean any consumer received or handled it.
+
+### Event ingress
+
+A Remote Event subscribes to its owner's exact `/event` topic. For each message:
+
+1. the payload is decoded through `NetCodec<T>`,
+2. `lastUpdateMs()` is set to the local `millis()`,
+3. `onEvent` is called.
+
+Every valid message calls `onEvent`, including consecutive identical payloads.
+A payload that is empty, oversized or fails to decode is dropped: `onEvent` is
+not called and `lastUpdateMs()` does not change. The message is still consumed
+by the Resource Manager, so it does not reach the application's generic MQTT
+callback.
+
+A Managed Event never receives `/event` traffic, so its own publications are
+not routed back to it.
+
+### Event timestamps
+
+`lastUpdateMs()` is a local `millis()` timestamp:
+
+- on a Managed Event, the latest occurrence the transport accepted,
+- on a Remote Event, the latest valid live occurrence received.
+
+It is `0` until the first occurrence, and `0` again after `setSource()` or
+`clearSource()` changes the source, because occurrences from the previous source
+no longer describe what the Resource points at. It is not an epoch time and not
+part of the wire protocol.
+
+### What an Event does not have
+
+An Event deliberately has none of the Value machinery:
+
+```text
+retained /state
+current value / last payload
+availability
+freshness / staleness
+advertisement period
+hardware policy
+dependency (dependsOn)
+optimistic state
+/set write handling
+/invoke
+```
+
+The device-wide `<device>/status` presence says nothing about an Event either.
+A Remote Event that has not fired is not stale; it simply has not happened.
+
 ## Resource binding and subscriptions
 
 Binding a Managed Resource:
@@ -864,13 +1016,17 @@ Binding a Managed Resource:
 - publishes state immediately if a Managed Value already has authoritative state,
 - subscribes to `/set` or `/invoke` when required.
 
+A Managed Event does none of the last two: it publishes no initial occurrence and
+subscribes to nothing, because nobody writes to or invokes it.
+
 Binding a configured Remote Resource:
 
 - validates the remote device and Resource address,
 - rejects a source pointing at the current device,
 - prevents duplicate local representations of the same remote address,
 - subscribes to the remote manifest,
-- subscribes to owner `/state` for Remote Values.
+- subscribes to owner `/state` for Remote Values,
+- subscribes to owner `/event` for Remote Events.
 
 A Remote Resource may also be bound before a source is configured. It participates in the local registry but has no network address or subscriptions until `setSource()` supplies a valid source.
 
@@ -884,7 +1040,8 @@ source Resource name are separate routing fields.
 NightMare:
 
 - unsubscribes old ingress,
-- drops state learned from the old source,
+- drops state learned from the old source (for a Remote Event that is
+  `lastUpdateMs()`; there is no payload to clear),
 - updates manifest subscription ownership,
 - validates the new address,
 - subscribes to the new ingress,
@@ -905,7 +1062,11 @@ Unbinding a Managed Value removes its retained `/state` when that Value had auth
 
 Unbinding a Managed Action only requires the manifest update because `/invoke` is not retained.
 
-Remote unbinding removes subscriptions that are no longer needed.
+Unbinding a Managed Event only requires the manifest update because `/event` is
+never retained. There is no tombstone to publish.
+
+Remote unbinding removes subscriptions that are no longer needed, removes the
+persisted source, and republishes the consume manifest.
 
 ## Reconnect
 
@@ -915,6 +1076,10 @@ requests cooperative re-announcement of:
 - the retained Resource manifest,
 - the retained consume manifest,
 - every Managed Value that has authoritative state.
+
+Events are not re-announced. A Managed Event republishes only its manifest
+entry and fires nothing; a Remote Event rebuilds its `/event` subscription and
+does not call `onEvent`, because nothing arrives that was not published live.
 
 Applications do not need to manually republish all bound Resources after reconnect.
 `tickNightMareESP()` processes the manifest, consume manifest, and managed-state
@@ -928,7 +1093,7 @@ When a device identity is migrated, Resource cleanup under the old device name p
 - the old manifest.
 - the old consume manifest.
 
-Actions need no separate cleanup because `/invoke` is transient.
+Actions and Events need no separate cleanup because `/invoke` and `/event` are transient.
 
 A Value removed from firmware before cleanup cannot be discovered from the current Resource registry and therefore cannot be automatically tombstoned under the old identity.
 
@@ -939,6 +1104,6 @@ Current Resource protocol/runtime limits include:
 ```text
 bound Resources per device: 100
 Resource segment length:     64 characters
-Value/Action payload:        2048 bytes
+Value/Action/Event payload:  2048 bytes
 manifest payload limit:      16384 bytes
 ```

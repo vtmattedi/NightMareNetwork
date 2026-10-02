@@ -15,6 +15,8 @@ const char *operationSuffix(ResourceTopicOperation operation)
         return "set";
     case ResourceTopicOperation::INVOKE:
         return "invoke";
+    case ResourceTopicOperation::EVENT:
+        return "event";
     case ResourceTopicOperation::STATE:
     default:
         return "state";
@@ -281,5 +283,30 @@ bool NetActionResource::dispatchInvoke(const String &payload)
     // connection there is nothing to report success about.
     LOG_WARNING("NET", "Cannot invoke unbound action '%s' owned by '%s'",
                 name_.c_str(), ownerDevice_.deviceName.c_str());
+    return false;
+}
+
+bool NetEventResource::dispatchFire(const String &encoded)
+{
+    // Checked here, bound or not, so the answer does not depend on the connection.
+    // An empty payload carries nothing a listener could decode.
+    if (encoded.length() == 0 || encoded.length() > NetResourceMaxPayloadLength)
+    {
+        LOG_WARNING("NET", "Rejected event '%s': encoded length %u is outside 1..%u",
+                    name_.c_str(), (unsigned)encoded.length(), (unsigned)NetResourceMaxPayloadLength);
+        return false;
+    }
+#if NM_ENABLE_RESOURCES
+    if (resourceManager_ != nullptr)
+    {
+        if (!resourceManager_->fire(*this, encoded))
+            return false;
+        // Only an occurrence the transport took counts as having been fired.
+        noteOccurrence();
+        return true;
+    }
+#endif
+    // Firing always means reaching the transport; unbound, nothing was sent.
+    LOG_WARNING("NET", "Cannot fire unbound event '%s'", name_.c_str());
     return false;
 }

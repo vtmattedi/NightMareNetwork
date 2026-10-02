@@ -1,5 +1,6 @@
 #include <NightMareNetwork.h>
 #include <Network/NmMessageRouter.h>
+#include <Core/DocumentPayload.h>
 
 #include <type_traits>
 #include <new>
@@ -127,9 +128,31 @@ public:
             consumeWasRetained = retained;
         }
         else if (topic.endsWith("/manifest/consume/msgpack"))
+        {
             ++consumePackedPublishes;
+            lastConsumePacked = payload;
+        }
+        if (topic.endsWith("/event"))
+        {
+            ++eventAttempts;
+            lastEventTopic = topic;
+            lastEventPayload = payload;
+            if (retained)
+                ++eventRetained;
+            if (failEvent)
+                return false;
+            ++eventPublishes;
+        }
         return true;
     }
+
+    int eventAttempts = 0;
+    int eventPublishes = 0;
+    int eventRetained = 0;
+    bool failEvent = false;
+    String lastEventTopic;
+    String lastEventPayload;
+    String lastConsumePacked;
 
     int consumeJsonPublishes = 0;
     int consumePackedPublishes = 0;
@@ -147,6 +170,58 @@ public:
     String lastStateTopic;
     String lastStatePayload;
 };
+
+// Remembers every filter asked for or given back, as "|filter|filter|", so a test
+// can ask whether one particular subscription was made or released.
+class RecordingSubscriber : public ResourceSubscriber
+{
+public:
+    bool subscribe(const String &filter) override
+    {
+        subscribed += filter;
+        subscribed += '|';
+        return true;
+    }
+    bool unsubscribe(const String &filter) override
+    {
+        unsubscribed += filter;
+        unsubscribed += '|';
+        return true;
+    }
+    void clear()
+    {
+        subscribed = "|";
+        unsubscribed = "|";
+    }
+    bool subscribedTo(const String &filter) const
+    {
+        return subscribed.indexOf(String("|") + filter + "|") >= 0;
+    }
+    bool unsubscribedFrom(const String &filter) const
+    {
+        return unsubscribed.indexOf(String("|") + filter + "|") >= 0;
+    }
+
+    String subscribed = "|";
+    String unsubscribed = "|";
+};
+
+int eventCallbacks = 0;
+uint32_t lastEventSeen = 0;
+
+void recordEvent(RemoteEvent<uint32_t> &, const uint32_t &payload)
+{
+    ++eventCallbacks;
+    lastEventSeen = payload;
+}
+
+bool manifestHasResource(JsonVariantConst manifest, const char *name)
+{
+    for (JsonVariantConst resource : manifest["resources"].as<JsonArrayConst>())
+        if (resource["name"].as<String>() == name)
+            return true;
+    return false;
+}
 
 int writeCalls = 0;
 int applicationMessageCalls = 0;
@@ -287,7 +362,8 @@ void setup()
                                    consumePublisher.lastConsumeJson.indexOf("weather-node") < 0;
     consumeManager.unbindResource(&consumed);
     const bool unbindPublished = consumePublisher.lastConsumeJson ==
-                                 "{\"version\":1,\"consumes\":[]}";
+                                 String("{\"version\":") + ConsumeManifestVersion +
+                                     ",\"consumes\":[],\"remotes\":[]}";
     const bool consumeLifecycleWorks = consumeBound && boundPublished && retargetPublished &&
                                        unbindPublished && consumePublisher.consumeWasRetained &&
                                        consumePublisher.consumeJsonPublishes >= 4 &&
@@ -769,6 +845,284 @@ void setup()
                             hardware.data.indexOf("\"nets\"") < 0 && info.valid &&
                             info.data.indexOf("hwconnections") < 0 &&
                             hardwareCommand.result && !removedConnections.result);
+    // Events: transient occurrences. Never retained, never replayed, never state.
+    // A clean persisted-source file keeps this independent of earlier runs.
+    LittleFS.remove("/remoteresources.json");
+    ResourcesManager eventManager;
+    RecordingPublisher eventPublisher;
+    RecordingSubscriber eventSubscriber;
+    ManagedEvent<uint32_t> beep("acoustic:beep");
+    RemoteEvent<uint32_t> watched("beep", NetDeviceIdentity("watson"));
+    RemoteEvent<String> unsourced("unsourced_event");
+    watched.onEvent = recordEvent;
+    eventManager.setSubscriber(&eventSubscriber);
+    eventManager.setPublisher(&eventPublisher);
+
+    const bool unboundFireRejected = !beep.fire(1) && beep.lastUpdateMs() == 0;
+    const bool eventsBound = eventManager.bindResource(&beep) &&
+                             eventManager.bindResource(&watched) &&
+                             eventManager.bindResource(&unsourced);
+    const String beepTopic = gDeviceIdentity.getDeviceName() + "/resource/acoustic:beep/event";
+
+    // Provider manifests: JSON names the kind and type and nothing else; the
+    // compact form is [2, name, typeEnum] under the bumped encoding version.
+    JsonDocument providerJson;
+    const bool providerParsed = !deserializeJson(providerJson, eventPublisher.lastManifestJson);
+    JsonDocument providerPacked;
+    const bool providerPackedParsed =
+        !deserializeMsgPack(providerPacked, eventPublisher.lastManifestPacked);
+    bool compactEventShape = false;
+    for (JsonArrayConst entry : providerPacked[2].as<JsonArrayConst>())
+        if (entry[1].as<String>() == "acoustic:beep")
+            compactEventShape = entry.size() == 3 &&
+                                entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
+                                entry[2].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
+    JsonDocument expandedProvider;
+    const bool providerExpanded =
+        ResourcesManager::decodeManifest(eventPublisher.lastManifestPacked, expandedProvider) &&
+        expandedProvider["resources"][0]["kind"].as<String>() == "event" &&
+        expandedProvider["resources"][0]["type"].as<String>() == "integer" &&
+        expandedProvider["resources"][0].size() == 3;
+    const bool providerManifests =
+        providerParsed && providerPackedParsed &&
+        providerJson["version"].as<int>() == ResourceManifestVersion &&
+        providerJson["resources"].size() == 1 &&
+        providerJson["resources"][0]["name"].as<String>() == "acoustic:beep" &&
+        providerJson["resources"][0]["kind"].as<String>() == "event" &&
+        providerJson["resources"][0]["type"].as<String>() == "integer" &&
+        providerJson["resources"][0].size() == 3 &&
+        providerPacked[0].as<uint8_t>() == ManifestEncodingVersion &&
+        compactEventShape && providerExpanded;
+
+    // Binding subscribes a Remote event to its owner's /event and manifest, and
+    // a Managed one to nothing: no /set, no /invoke.
+    const bool eventSubscriptions =
+        eventSubscriber.subscribedTo("watson/resource/beep/event") &&
+        eventSubscriber.subscribedTo("watson/manifest/msgpack") &&
+        eventSubscriber.subscribed.indexOf("acoustic:beep") < 0 &&
+        eventSubscriber.subscribed.indexOf("unsourced_event") < 0;
+
+    // The same payload twice is two occurrences, published transient on /event.
+    const int publishedBefore = eventPublisher.eventPublishes;
+    const bool firedTwice = beep.fire(42) && beep.fire(42) &&
+                            eventPublisher.eventPublishes == publishedBefore + 2 &&
+                            eventPublisher.lastEventTopic == beepTopic &&
+                            eventPublisher.lastEventPayload == "42" &&
+                            eventPublisher.eventRetained == 0 && beep.lastUpdateMs() != 0;
+    const uint32_t firedAt = beep.lastUpdateMs();
+    delay(2);
+    eventPublisher.failEvent = true;
+    const bool refusedNotRecorded = !beep.fire(43) && beep.lastUpdateMs() == firedAt;
+    eventPublisher.failEvent = false;
+    const bool emptyPayloadRejected = !ManagedEvent<String>("empty_payload").fire(String());
+
+    // A reconnect rebuilds subscriptions and republishes the manifest. It never
+    // re-fires, and never invokes a callback.
+    const int publishedBeforeReconnect = eventPublisher.eventAttempts;
+    eventSubscriber.clear();
+    eventManager.announceAll();
+    eventManager.subscribeAll();
+    const bool reconnectDoesNotReplay =
+        eventPublisher.eventAttempts == publishedBeforeReconnect && eventCallbacks == 0 &&
+        eventSubscriber.subscribedTo("watson/resource/beep/event") &&
+        eventSubscriber.subscribed.indexOf("acoustic:beep") < 0;
+
+    // Every valid live occurrence calls onEvent, identical payloads included.
+    const bool firstConsumed = eventManager.handleIngressMessage("watson/resource/beep/event", "5");
+    const bool secondConsumed = eventManager.handleIngressMessage("watson/resource/beep/event", "5");
+    const bool repeatedDelivered = firstConsumed && secondConsumed && eventCallbacks == 2 &&
+                                   lastEventSeen == 5 && watched.lastUpdateMs() != 0;
+    const uint32_t receivedAt = watched.lastUpdateMs();
+    delay(2);
+    const bool malformedConsumed =
+        eventManager.handleIngressMessage("watson/resource/beep/event", "not-a-number") &&
+        eventManager.handleIngressMessage("watson/resource/beep/event", "");
+    const bool malformedIgnored = malformedConsumed && eventCallbacks == 2 &&
+                                  watched.lastUpdateMs() == receivedAt;
+    const bool ownEchoNotDelivered = !eventManager.handleIngressMessage(beepTopic, "5");
+
+    // Console: described and sourced, never fired, read, written or tuned.
+    const ActionResult bare = eventManager.executeCommand(" beep");
+    const ActionResult listing = eventManager.executeCommand("list");
+    const int publishedBeforeVerbs = eventPublisher.eventAttempts;
+    const bool verbsRejected =
+        !eventManager.executeCommand(" beep get").success &&
+        !eventManager.executeCommand(" beep set 1").success &&
+        !eventManager.executeCommand(" beep invoke").success &&
+        !eventManager.executeCommand(" beep advertise").success &&
+        !eventManager.executeCommand(" beep poll").success &&
+        !eventManager.executeCommand(" acoustic:beep fire 1").success &&
+        !eventManager.executeCommand(" acoustic:beep source watson/beep").success &&
+        eventPublisher.eventAttempts == publishedBeforeVerbs;
+    const bool consoleDescribes =
+        bare.success && bare.result.startsWith("EVENT beep last_update_ms=") &&
+        listing.success && listing.result.indexOf("managed last_update_ms=") >= 0 &&
+        listing.result.indexOf("remote source=watson/beep last_update_ms=") >= 0 &&
+        listing.result.indexOf("remote source=- last_update_ms=0") >= 0;
+    const ActionResult commandSource =
+        eventManager.executeCommand(" unsourced_event source holmes/lamp");
+    const bool commandSourceWorks =
+        commandSource.success && unsourced.owner() == "holmes" &&
+        unsourced.sourceResource() == "lamp" &&
+        eventManager.executeCommand(" unsourced_event source").result == "holmes/lamp" &&
+        eventSubscriber.subscribedTo("holmes/resource/lamp/event") &&
+        eventManager.executeCommand(" unsourced_event source clear").success &&
+        unsourced.sourceResource().length() == 0 &&
+        eventSubscriber.unsubscribedFrom("holmes/resource/lamp/event");
+
+    // Retargeting drops the old ingress, subscribes the new one, forgets the old
+    // source's occurrences, persists the mapping and republishes what is consumed.
+    eventSubscriber.clear();
+    const bool retargeted = watched.setSource("holmes", "chime");
+    JsonDocument consumedPacked;
+    const bool consumePackedParsed =
+        !deserializeMsgPack(consumedPacked, eventPublisher.lastConsumePacked);
+    bool compactConsume = false;
+    bool compactRemote = false;
+    for (JsonArrayConst entry : consumedPacked[2].as<JsonArrayConst>())
+        if (entry[2].as<String>() == "chime")
+            compactConsume = entry.size() == 4 &&
+                             entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
+                             entry[1].as<String>() == "holmes" &&
+                             entry[3].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
+    for (JsonArrayConst entry : consumedPacked[3].as<JsonArrayConst>())
+        if (entry[1].as<String>() == "beep")
+            compactRemote = entry.size() == 6 &&
+                            entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
+                            entry[2].as<bool>() && entry[3].as<String>() == "holmes" &&
+                            entry[4].as<String>() == "chime" &&
+                            entry[5].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
+    JsonDocument expandedConsume;
+    const bool consumeExpanded =
+        ResourcesManager::decodeConsumeManifest(eventPublisher.lastConsumePacked,
+                                                expandedConsume) &&
+        expandedConsume["remotes"][0]["kind"].as<String>() == "event" &&
+        expandedConsume["remotes"][0]["type"].as<String>() == "integer";
+    File persistedFile = LittleFS.open("/remoteresources.json", "r");
+    const String persisted = persistedFile ? persistedFile.readString() : String();
+    if (persistedFile)
+        persistedFile.close();
+    const bool sourceRetargeted =
+        retargeted && watched.lastUpdateMs() == 0 &&
+        eventSubscriber.unsubscribedFrom("watson/resource/beep/event") &&
+        eventSubscriber.unsubscribedFrom("watson/manifest/msgpack") &&
+        eventSubscriber.subscribedTo("holmes/resource/chime/event") &&
+        eventSubscriber.subscribedTo("holmes/manifest/msgpack") &&
+        eventPublisher.lastConsumeJson.indexOf(
+            "{\"device\":\"holmes\",\"resource\":\"chime\",\"kind\":\"event\","
+            "\"type\":\"integer\"}") >= 0 &&
+        eventPublisher.lastConsumeJson.indexOf(
+            "{\"name\":\"beep\",\"bound\":true,\"device\":\"holmes\","
+            "\"resource\":\"chime\",\"kind\":\"event\",\"type\":\"integer\"}") >= 0 &&
+        consumePackedParsed && consumedPacked[0].as<uint8_t>() == ConsumeManifestEncodingVersion &&
+        compactConsume && compactRemote && consumeExpanded &&
+        persisted.indexOf("\"beep\":\"holmes/chime\"") >= 0 &&
+        !eventManager.handleIngressMessage("watson/resource/beep/event", "5") &&
+        eventManager.handleIngressMessage("holmes/resource/chime/event", "6") &&
+        eventCallbacks == 3 && lastEventSeen == 6 && watched.lastUpdateMs() != 0;
+
+    // The persisted mapping comes back through the ordinary Remote source path.
+    ResourcesManager reloadManager;
+    RemoteEvent<uint32_t> reloaded("beep");
+    const bool sourceReloaded = reloadManager.bindResource(&reloaded) &&
+                                reloadManager.loadRemoteSources() &&
+                                reloaded.owner() == "holmes" &&
+                                reloaded.sourceResource() == "chime";
+
+    // A manifest only describes: a mismatched payload type is reported, never a
+    // reason to stop delivering.
+    JsonDocument mismatchedManifest;
+    JsonArray mismatchedRoot = mismatchedManifest.to<JsonArray>();
+    mismatchedRoot.add(ManifestEncodingVersion);
+    mismatchedRoot.add(ResourceManifestVersion);
+    JsonArray mismatchedItems = mismatchedRoot.add<JsonArray>();
+    JsonArray mismatchedEvent = mismatchedItems.add<JsonArray>();
+    mismatchedEvent.add(static_cast<uint8_t>(NetResourceType::EVENT));
+    mismatchedEvent.add("chime");
+    mismatchedEvent.add(static_cast<uint8_t>(NetValueType::STRING));
+    // The type enum for STRING is 0, a NUL byte that the String writer inside
+    // serializeMsgPack() would cut off; the binary-safe serializer keeps it.
+    String encodedMismatch;
+    const bool mismatchEncoded =
+        serializeWholeDocument(mismatchedManifest, DocumentEncoding::MSGPACK,
+                               encodedMismatch) == PayloadResult::Complete;
+    const bool manifestDoesNotGate =
+        mismatchEncoded &&
+        eventManager.handleIngressMessage("holmes/manifest/msgpack", encodedMismatch) &&
+        eventManager.handleIngressMessage("holmes/resource/chime/event", "7") &&
+        eventCallbacks == 4 && lastEventSeen == 7;
+
+    // Clearing leaves a discoverable, unbound declaration and forgets the source.
+    eventSubscriber.clear();
+    const bool cleared = watched.clearSource();
+    File clearedFile = LittleFS.open("/remoteresources.json", "r");
+    const String persistedAfterClear = clearedFile ? clearedFile.readString() : String();
+    if (clearedFile)
+        clearedFile.close();
+    const bool sourceCleared =
+        cleared && watched.lastUpdateMs() == 0 &&
+        eventSubscriber.unsubscribedFrom("holmes/resource/chime/event") &&
+        eventPublisher.lastConsumeJson.indexOf(
+            "{\"name\":\"beep\",\"bound\":false,\"device\":\"\",\"resource\":\"\","
+            "\"kind\":\"event\",\"type\":\"integer\"}") >= 0 &&
+        eventPublisher.lastConsumeJson.indexOf(
+            "{\"name\":\"unsourced_event\",\"bound\":false,\"device\":\"\","
+            "\"resource\":\"\",\"kind\":\"event\",\"type\":\"string\"}") >= 0 &&
+        persistedAfterClear.indexOf("\"beep\"") < 0;
+
+    // Unbinding: a Managed event just leaves the manifest, with no tombstone to
+    // retract (nothing was retained); a Remote one gives its subscription and
+    // persisted source back.
+    const int attemptsBeforeUnbind = eventPublisher.eventAttempts;
+    eventManager.unbindResource(&beep);
+    JsonDocument manifestAfterUnbind;
+    const bool managedUnbound =
+        !beep.isBound() && !deserializeJson(manifestAfterUnbind, eventPublisher.lastManifestJson) &&
+        !manifestHasResource(manifestAfterUnbind, "acoustic:beep") &&
+        eventPublisher.eventAttempts == attemptsBeforeUnbind;
+    watched.setSource("holmes", "chime");
+    eventSubscriber.clear();
+    eventManager.unbindResource(&watched);
+    File unboundFile = LittleFS.open("/remoteresources.json", "r");
+    const String persistedAfterUnbind = unboundFile ? unboundFile.readString() : String();
+    if (unboundFile)
+        unboundFile.close();
+    const bool remoteUnbound =
+        !watched.isBound() && eventSubscriber.unsubscribedFrom("holmes/resource/chime/event") &&
+        persistedAfterUnbind.indexOf("\"beep\"") < 0 &&
+        eventPublisher.lastConsumeJson.indexOf("\"name\":\"beep\"") < 0;
+
+    // Readers refuse a compact manifest in an encoding they do not speak, and
+    // fall back to the JSON one published beside it.
+    JsonDocument oldManifest;
+    JsonArray oldRoot = oldManifest.to<JsonArray>();
+    oldRoot.add(ManifestEncodingVersion - 1);
+    oldRoot.add(ResourceManifestVersion);
+    oldRoot.add<JsonArray>();
+    String encodedOldManifest;
+    serializeMsgPack(oldManifest, encodedOldManifest);
+    JsonDocument oldConsume;
+    JsonArray oldConsumeRoot = oldConsume.to<JsonArray>();
+    oldConsumeRoot.add(ConsumeManifestEncodingVersion - 1);
+    oldConsumeRoot.add(ConsumeManifestVersion);
+    oldConsumeRoot.add<JsonArray>();
+    String encodedOldConsume;
+    serializeMsgPack(oldConsume, encodedOldConsume);
+    JsonDocument ignored;
+    const bool oldEncodingsFallBack =
+        !ResourcesManager::decodeManifest(encodedOldManifest, ignored) &&
+        !ResourcesManager::decodeConsumeManifest(encodedOldConsume, ignored);
+
+    smokeState.setFlag("event_resources",
+                       unboundFireRejected && eventsBound && providerManifests &&
+                           eventSubscriptions && firedTwice && refusedNotRecorded &&
+                           emptyPayloadRejected && reconnectDoesNotReplay && repeatedDelivered &&
+                           malformedIgnored && ownEchoNotDelivered && consoleDescribes &&
+                           verbsRejected && commandSourceWorks && sourceRetargeted &&
+                           sourceReloaded && manifestDoesNotGate && sourceCleared &&
+                           managedUnbound && remoteUnbound && oldEncodingsFallBack &&
+                           eventPublisher.eventRetained == 0);
+
     Telemetry.start();
 }
 
