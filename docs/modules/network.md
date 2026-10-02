@@ -53,8 +53,8 @@ enum class ConnectionState : uint8_t
 `MQTT` means the Remote MQTT/TLS connection. `LOCAL_MQTT` means the local
 broker connection.
 
-`AUTO` policy is intentionally deferred until the concrete connection types are
-reliable. Selecting it returns `false` without disrupting an active connection.
+`AUTO` is the failover order with no preferred profile on top; see
+[Failover](#failover).
 
 `ESP_NOW` (built when `NM_NETWORK_ESPNOW` is set, ESP-IDF only) connects to the
 Nightmare Gateway through `Network/EspNow/EspNowClient.*`. It runs a
@@ -133,8 +133,8 @@ nightmare:connection:preferred_connection
 ```
 
 The accepted connection type is stored as its `ConnectionType` integer. The
-default for this first stage is `ConnectionType::MQTT`; `AUTO` is not yet a
-policy.
+build default is the first enabled of `MQTT`, `LOCAL_MQTT`, `ESP_NOW`. `AUTO`
+(`0`) is accepted and means "no preference": the base failover order.
 
 ## MQTT reuse
 
@@ -167,14 +167,38 @@ path. It asks the MQTT control task to stop the old client and start the target
 profile. On connection, `NmConnection` restores subscriptions once and invokes
 the generic connected publication path.
 
-When a switch started from a connected MQTT profile reaches two non-transient
-broker connection errors before connecting, `NmConnection` rolls back to the
-previous profile and restores that persisted selection. A first-start failure
-has no known-good profile and enters `ERROR`. This bounded rollback is separate
-from the deferred `AUTO` policy.
+An explicit selection restarts the failover order from its new head. A
+profile that reaches two non-transient broker connection errors enters
+`ERROR`; what runs next is decided by failover, not by the driver.
 
-No scoring, simultaneous connections, topic-specific routing, message
-duplication, or new automatic failover policy is introduced here.
+## Failover
+
+One connection runs at a time. The failover order is the base order with the
+preferred profile moved to the top; profiles the build lacks are left out:
+
+```text
+base (AUTO)          ESP_NOW, MQTT, LOCAL_MQTT
+preferred LOCAL_MQTT LOCAL_MQTT, ESP_NOW, MQTT
+preferred MQTT       MQTT, ESP_NOW, LOCAL_MQTT
+```
+
+`ConnectionTick()`, called from `tickNightMareESP()`, starts the next runnable
+profile in that order when the active one has been down for
+`nightmare:connection:failover_secs` (default `60`, range `0`-`86400`), or at
+once when it is in `ERROR`. "Down" covers never connecting, being
+disconnected, and a head that is still waiting for its radio or IP link. A
+profile whose requirement is not met is skipped; wrapping round to the active
+profile restarts it. Switches are at least 5 s apart, and each newly started
+profile gets a full window. `0` disables failover: the selected profile keeps
+retrying on its own.
+
+Failover never rewrites `preferred_connection`, so the next boot starts from
+the preferred profile again. It does not return to a higher-priority profile
+while the current one stays connected; it only moves on when the current one
+goes down.
+
+No scoring, simultaneous connections, topic-specific routing or message
+duplication is introduced here.
 
 ## Connection subscriptions
 
@@ -215,4 +239,5 @@ OnIpLinkAvailabilityIngress   station has an IP / not  MQTT, LOCAL_MQTT need thi
 `NmConnection` owns starting the preferred connection once what it runs on is
 available, selecting connections and failing over. A preferred connection that
 is supported but not ready yet is waited for rather than skipped, so with MQTT
-preferred the radio coming up first does not start the ESP-NOW fallback.
+preferred the radio coming up first does not start ESP-NOW instead. The wait
+counts as down time: after `failover_secs` the next runnable profile starts.

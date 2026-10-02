@@ -40,6 +40,9 @@ constexpr ConnectionType defaultConnection()
 
 Config<int> preferredConnection("nightmare:connection:preferred_connection",
                                static_cast<int>(defaultConnection()));
+// How long a connection may stay down before the next profile in the failover order is tried.
+// 0 disables failover: the selected profile keeps retrying on its own.
+Config<int> failoverSeconds("nightmare:connection:failover_secs", 60);
 
 namespace
 {
@@ -63,8 +66,14 @@ bool resourceConnectionAttached = false;
 // What the drivers below have reported; see NmConnectionInternal.h.
 bool radioAvailable = false;
 bool ipLinkAvailable = false;
-ConnectionType rollbackConnection = ConnectionType::AUTO;
-bool rollbackAvailable = false;
+// Failover state, see ConnectionTick(): the position in failoverOrder() of the profile started
+// last, when the connection was last seen down, and when we last switched.
+size_t candidateIndex = 0;
+uint32_t notConnectedSinceMs = 0;
+uint32_t lastSwitchMs = 0;
+// Never switch more often than this, so a profile that errors instantly cannot make the tick
+// cycle through every profile on every call.
+constexpr uint32_t MinSwitchIntervalMs = 5000;
 std::atomic<MessageHandler> applicationMessageHandler{nullptr};
 
 // PublishTextWhenConnected() backlog, flushed on every connect whatever the
@@ -310,8 +319,6 @@ bool startEspNow()
     if (isMqtt(previousConnection) && NmMqttConnection::state() != -1)
         NmMqttConnection::end();
 #endif
-    // No rollback across drivers: a failed ESP-NOW start is reported as ERROR.
-    rollbackAvailable = false;
     selectedConnection = ConnectionType::ESP_NOW;
     connectionState = ConnectionState::CONNECTING;
     if (NmEspNowConnection::begin())
@@ -345,12 +352,6 @@ bool startConnection(ConnectionType connection)
 
     const ConnectionType previousConnection = selectedConnection;
     const ConnectionState previousState = connectionState;
-    const ConnectionType previousRollbackConnection = rollbackConnection;
-    const bool previousRollbackAvailable = rollbackAvailable;
-    rollbackAvailable = previousState == ConnectionState::CONNECTED &&
-                        isMqtt(previousConnection) && previousConnection != connection;
-    if (rollbackAvailable)
-        rollbackConnection = previousConnection;
     selectedConnection = connection;
     connectionState = ConnectionState::CONNECTING;
 
@@ -361,8 +362,6 @@ bool startConnection(ConnectionType connection)
     {
         selectedConnection = previousConnection;
         connectionState = previousState;
-        rollbackConnection = previousRollbackConnection;
-        rollbackAvailable = previousRollbackAvailable;
     }
     return accepted;
 #else
@@ -371,27 +370,50 @@ bool startConnection(ConnectionType connection)
 #endif
 }
 
-// Start policy: the persisted preference first, then the build's default
-// profile. Used whenever the radio or the IP link comes up and nothing runs.
-//
-// A preference this build supports but can't run *yet* is waited for, not
-// skipped: with MQTT preferred and ESP-NOW also compiled in, the radio comes
-// up before the IP link, and falling back then would leave ESP-NOW running
-// and MQTT never started. The fallback is for a preference this build lacks
-// (e.g. one persisted by older firmware) or one that failed to start.
+constexpr ConnectionType BaseOrder[] = {ConnectionType::ESP_NOW, ConnectionType::MQTT,
+                                        ConnectionType::LOCAL_MQTT};
+constexpr size_t MaxProfiles = sizeof(BaseOrder) / sizeof(BaseOrder[0]);
+
+// Failover order for a preference. AUTO is the base order; a concrete preference moves to the
+// top and the others keep their base order:
+//   AUTO        ESP_NOW, MQTT, LOCAL_MQTT
+//   LOCAL_MQTT  LOCAL_MQTT, ESP_NOW, MQTT
+// Profiles this build lacks are left out. Returns how many were written.
+size_t failoverOrder(ConnectionType preferred, ConnectionType (&order)[MaxProfiles])
+{
+    size_t count = 0;
+    if (connectionEnabled(preferred))
+        order[count++] = preferred;
+    for (ConnectionType connection : BaseOrder)
+        if (connection != preferred && connectionEnabled(connection))
+            order[count++] = connection;
+    return count;
+}
+
+size_t failoverOrder(ConnectionType (&order)[MaxProfiles])
+{
+    return failoverOrder(static_cast<ConnectionType>(preferredConnection.value()), order);
+}
+
+// Start policy, used whenever the radio or the IP link comes up and nothing runs: the head of
+// the failover order. A head this build supports but can't run *yet* is waited for, not
+// skipped -- with MQTT preferred the radio comes up before the IP link, and skipping then would
+// start ESP-NOW instead. A wait that outlasts failover_secs is ended by ConnectionTick().
 bool startPreferredConnection()
 {
-    const ConnectionType preferred = static_cast<ConnectionType>(preferredConnection.value());
-    if (connectionEnabled(preferred))
+    ConnectionType order[MaxProfiles];
+    const size_t count = failoverOrder(order);
+    for (size_t i = 0; i < count; ++i)
     {
-        if (!requirementsMet(preferred))
+        if (!requirementsMet(order[i]))
             return false;
-        if (startConnection(preferred))
+        if (startConnection(order[i]))
+        {
+            candidateIndex = i;
             return true;
+        }
     }
-    const ConnectionType fallback = defaultConnection();
-    return fallback != preferred && connectionEnabled(fallback) && requirementsMet(fallback) &&
-           startConnection(fallback);
+    return false;
 }
 
 bool nothingRunning()
@@ -399,10 +421,25 @@ bool nothingRunning()
     return connectionState == ConnectionState::STOPPED || connectionState == ConnectionState::ERROR;
 }
 
+// An explicit choice restarts the failover order from its new head. The Config still holds the
+// old value while this runs, so the order is built from the requested one.
 bool changePreferredConnection(Config<int> &, const int &requested)
 {
     const ConnectionType connection = static_cast<ConnectionType>(requested);
-    return connectionEnabled(connection) && startConnection(connection);
+    if (connection != ConnectionType::AUTO && !connectionEnabled(connection))
+        return false;
+    ConnectionType order[MaxProfiles];
+    if (failoverOrder(connection, order) == 0 || !startConnection(order[0]))
+        return false;
+    candidateIndex = 0;
+    notConnectedSinceMs = millis();
+    lastSwitchMs = notConnectedSinceMs;
+    return true;
+}
+
+bool acceptFailoverSeconds(Config<int> &, const int &requested)
+{
+    return requested >= 0 && requested <= 86400;
 }
 
 struct PreferredConnectionHandlerInstaller
@@ -410,6 +447,7 @@ struct PreferredConnectionHandlerInstaller
     PreferredConnectionHandlerInstaller()
     {
         preferredConnection.onWrite = changePreferredConnection;
+        failoverSeconds.onWrite = acceptFailoverSeconds;
     }
 };
 
@@ -529,7 +567,7 @@ void OnMessage(MessageHandler handler)
 
 bool SelectConnection(ConnectionType connection)
 {
-    if (!connectionEnabled(connection))
+    if (connection != ConnectionType::AUTO && !connectionEnabled(connection))
         return false;
 
     String request = "set ";
@@ -554,7 +592,6 @@ void OnConnectedIngress(ConnectionType connection)
     if (connection != selectedConnection)
         return;
     connectionState = ConnectionState::CONNECTED;
-    rollbackAvailable = false;
     restoreSubscriptions();
     NmMessageRouter::onConnected();
     flushDeferred();
@@ -568,30 +605,64 @@ void OnDisconnectedIngress(ConnectionType connection)
 
 void OnConnectionFailedIngress(ConnectionType connection)
 {
-    if (connection != selectedConnection)
-        return;
-
-    if (!rollbackAvailable)
-    {
+    // Only a state: ConnectionTick() decides what runs next.
+    if (connection == selectedConnection)
         connectionState = ConnectionState::ERROR;
+}
+
+void ConnectionTick()
+{
+    const int seconds = failoverSeconds.value();
+    if (seconds <= 0)
+        return;
+    const uint32_t now = millis();
+    if (connectionState == ConnectionState::CONNECTED)
+    {
+        notConnectedSinceMs = 0;
         return;
     }
+    if (notConnectedSinceMs == 0)
+    {
+        notConnectedSinceMs = now; // the loss starts counting now
+        return;
+    }
+    const bool failed = connectionState == ConnectionState::ERROR;
+    if (!failed && now - notConnectedSinceMs < static_cast<uint32_t>(seconds) * 1000UL)
+        return;
+    if (now - lastSwitchMs < MinSwitchIntervalMs)
+        return;
 
-    const ConnectionType fallback = rollbackConnection;
-    rollbackAvailable = false;
-    LOG_WARNING("NET", "Connection type %u failed; rolling back to %u",
-                static_cast<unsigned>(connection), static_cast<unsigned>(fallback));
-
-    if (!preferredConnection.set(static_cast<int>(fallback)))
-        LOG_ERROR("NET", "Could not persist the rollback connection");
-    if (!startConnection(fallback))
-        connectionState = ConnectionState::ERROR;
+    ConnectionType order[MaxProfiles];
+    const size_t count = failoverOrder(order);
+    if (count == 0)
+        return;
+    lastSwitchMs = now;
+    notConnectedSinceMs = now; // whatever starts next gets a full window
+    // The next runnable profile after the current one. Wrapping all the way round lands on the
+    // current one, which is then simply restarted.
+    for (size_t step = 1; step <= count; ++step)
+    {
+        const size_t index = (candidateIndex + step) % count;
+        if (!requirementsMet(order[index]))
+            continue;
+        LOG_WARNING("NET", "Connection %u %s; trying %u",
+                    static_cast<unsigned>(static_cast<ConnectionType>(selectedConnection)),
+                    failed ? "failed" : "stayed down", static_cast<unsigned>(order[index]));
+        if (startConnection(order[index]))
+        {
+            candidateIndex = index;
+            return;
+        }
+    }
 }
 
 bool ConnectionBegin()
 {
     if (!nothingRunning())
         return true;
+    // The failover window counts from here, so a head that never becomes runnable is skipped.
+    notConnectedSinceMs = millis();
+    lastSwitchMs = notConnectedSinceMs;
     // Whatever can run now starts now. Anything still waiting on the radio or
     // an IP link starts from the matching ingress when that arrives.
     if (startPreferredConnection())

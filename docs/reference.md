@@ -1198,7 +1198,9 @@ ConnectionState GetConnectionState();
 
 `MQTT` means Remote MQTT/TLS. The payload pointer and explicit length make the
 generic boundary binary-safe. `ESP_NOW` is available when built with
-`NM_NETWORK_ESPNOW`; `AUTO` policy remains deferred.
+`NM_NETWORK_ESPNOW`; `AUTO` selects the base failover order (ESP-NOW, Remote
+MQTT, Local MQTT). `failoverSeconds` (`nightmare:connection:failover_secs`)
+sets how long a connection may stay down before the next profile is tried.
 
 `OnMessage()` replaces the single application message handler, or unregisters
 it when passed `nullptr`. The handler receives only messages left unconsumed by

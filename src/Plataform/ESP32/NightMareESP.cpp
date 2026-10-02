@@ -294,6 +294,9 @@ void tickNightMareESP()
     processTimeSyncEvents();
 #endif
     processOneSystemRequest();
+#if NM_ENABLE_NETWORK
+    NightMare::ConnectionTick();
+#endif
 #if NM_ENABLE_SCHEDULER
     // In TASK mode the Scheduler's own task does this; ticking here too would
     // only contend for the same lock.

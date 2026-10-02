@@ -93,11 +93,26 @@ while more than one type may reuse one driver implementation. Remote `MQTT` and
 availability policy without justifying duplicated MQTT client code.
 
 **Consequence:** Config and commands store/select `ConnectionType` integers.
-`AUTO` policy and the ESP-NOW driver remain deferred. MQTT reconnects the
-selected broker profile but cannot silently change the selected connection
-type; only `NmConnection` may do that. A failed explicit remote/local switch may
-be rolled back by `NmConnection` to the last connected profile; that safety
-transaction is not general automatic failover.
+MQTT reconnects the selected broker profile but cannot silently change the
+selected connection type; only `NmConnection` may do that.
+
+## Failover is one ordered list, and never rewrites the preference
+
+**Decision:** `NmConnection` keeps one failover order -- ESP-NOW, Remote MQTT,
+Local MQTT, with the preferred profile moved to the top -- and moves to the
+next runnable profile after `failover_secs` of down time or on `ERROR`. `AUTO`
+is that order with no preference. The earlier one-shot rollback after a failed
+explicit switch is removed.
+
+**Reason:** a rollback and a failover policy would be two competing answers to
+"what runs next". One ordered list answers it for boot, for an explicit switch
+and for a connection lost later, and the preference stays the operator's
+statement of intent.
+
+**Consequence:** failover is not persisted, so each boot starts from the
+preference. A failed explicit switch moves on through the order instead of
+reverting to the previous profile. There is no return to a higher-priority
+profile while a lower one stays connected.
 
 ## Generic application ingress runs after framework routing
 

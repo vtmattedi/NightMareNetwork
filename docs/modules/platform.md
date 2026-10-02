@@ -473,8 +473,9 @@ startSntpTimeSync();
 
 according to feature flags.
 
-The initial concrete connection comes from `preferredConnection`, whose current
-default is Remote MQTT. `AUTO` policy is intentionally deferred.
+The initial concrete connection is the head of the failover order built from
+`preferredConnection`, whose build default is Remote MQTT. `tickNightMareESP()`
+also drives failover; see the Network module.
 
 `startSntpTimeSync()` configures the ESP32 SNTP client and returns immediately. Completion is applied later through `tickNightMareESP()`.
 

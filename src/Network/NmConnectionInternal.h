@@ -12,6 +12,9 @@ namespace NightMare
 void OnConnectedIngress(ConnectionType connection);
 void OnDisconnectedIngress(ConnectionType connection);
 void OnConnectionFailedIngress(ConnectionType connection);
+// Failover: once the connection has been down for failover_secs (or is in ERROR), starts the
+// next runnable profile in the failover order. Called from tickNightMareESP().
+void ConnectionTick();
 // Two separate capabilities, which used to be one "link":
 //   radio    the Wi-Fi driver is started -- enough for ESP-NOW
 //   IP link  the station joined an AP and has an address -- needed by MQTT

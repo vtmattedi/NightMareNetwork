@@ -657,8 +657,11 @@ NETWORK SET AUTO
 `selected`, `preferred` and `state` (Network support) and the WiFi driver status
 code and readable name as `wifi` and `wifi_name` (WiFi support).
 `MQTT` selects Remote MQTT/TLS. `LOCAL_MQTT` selects the local broker.
-`ESP_NOW` and `AUTO` currently return an unavailable error without stopping the
-active MQTT connection; their implementations are deliberately deferred.
+`ESP_NOW` selects the gateway connection when the build includes it, and
+returns an unavailable error otherwise. `AUTO` clears the preference: the base
+failover order (ESP-NOW, Remote MQTT, Local MQTT) applies. Any selection
+restarts that order from its head; how long a connection may stay down before
+the next one is tried is the `nightmare:connection:failover_secs` Config.
 
 The former `TRANSPORT`, `WIFI`, `MQTT STATE`, `MQTT CONNECT`, `MQTT DISCONNECT`
 and `MQTT SWAP` commands were removed. Connection selection, state and WiFi

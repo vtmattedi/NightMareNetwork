@@ -27,6 +27,7 @@ enum class ConnectionState : uint8_t
 };
 
 extern Config<int> preferredConnection;
+extern Config<int> failoverSeconds;
 
 using MessageHandler = void (*)(const char *topic,
                                 const uint8_t *payload,
