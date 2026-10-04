@@ -592,7 +592,13 @@ const String &resolveResourceOwner(
     const NetResource &resource);
 
 String resolveResourceManifestTopic(
-    const String &deviceName);
+    const String &deviceName,
+    DocumentFormat format);
+
+String resolveDocumentTopic(
+    const String &deviceName,
+    const String &documentRoot,
+    DocumentFormat format);
 
 String resolveResourceTopic(
     const NetResource &resource,
@@ -668,14 +674,14 @@ static bool decodeConsumeManifest(
     const String &encoded,
     JsonDocument &into);
 
-constexpr uint8_t ConsumeManifestEncodingVersion = 2;
-constexpr uint8_t ConsumeManifestVersion = 3;
+constexpr uint8_t ConsumeManifestEncodingVersion = 3;
+constexpr uint8_t ConsumeManifestVersion = 4;
 constexpr uint8_t ManifestEncodingVersion = 3;
 constexpr uint8_t ResourceManifestVersion = 6;
 
 String resolveResourceConsumeManifestTopic(
     const String &deviceName,
-    ManifestFormat format = ManifestFormat::JSON);
+    DocumentFormat format);
 
 ActionResult executeAction(
     NetActionResource &action,
@@ -1032,7 +1038,7 @@ enum class SystemRequest : uint16_t
     PublishConsumeManifest,
     PublishResourceStates,
     PublishInfo,
-    PublishHardwareJson,
+    PublishHardware,
     Count
 };
 
@@ -1252,6 +1258,10 @@ bool Telemetry.publishInfo(
     const String &type);
 
 TelemetryResult Telemetry.getHardware() const;
+TelemetryResult Telemetry.getHardwareMessagePack() const;
+static bool TelemetryService::decodeHardware(
+    const String &encoded,
+    JsonDocument &into);
 bool Telemetry.publishHardware();
 
 bool Telemetry.publishAll();
@@ -1447,6 +1457,7 @@ void loop()
 namespace NMHardware
 {
 constexpr uint8_t HwConfigVersion = 2;
+constexpr uint8_t HardwareEncodingVersion = 1;
 
 enum class AssemblyKind
 {
@@ -1650,6 +1661,7 @@ NM_ENABLE_CONSOLE                   1
 NM_ENABLE_WIFI                      1
 NM_ENABLE_MQTT                      1
 NM_ENABLE_TELEMETRY                 1
+NM_ENABLE_JSON_WIRE                 0
 NM_ENABLE_SCHEDULER                 1
 NM_ENABLE_JOBS                      1
 NM_ENABLE_TIME_SYNC                 1

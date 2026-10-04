@@ -4,11 +4,18 @@
 
 /// @brief Which encoding a document is serialized into. Deliberately separate
 /// from higher-level document selection: this says only how bytes are produced.
-enum class DocumentEncoding : uint8_t
+enum class DocumentFormat : uint8_t
 {
-    JSON,
-    MSGPACK
+    MSGPACK,
+    JSON
 };
+
+const char *documentFormatName(DocumentFormat format);
+
+/// @brief Build `<device>/<document-root>/<encoding>`.
+/// Document roots are namespaces and never payload topics themselves.
+String resolveDocumentTopic(const String &deviceName, const String &documentRoot,
+                            DocumentFormat format);
 
 /// @brief Why a payload could not be produced whole. Reported rather than
 /// folded into one boolean because the three causes call for different
@@ -63,5 +70,5 @@ const char *describePayloadResult(PayloadResult result);
 ///
 /// Measuring costs a second walk of the document and no allocation, which is
 /// the price of the guarantee.
-PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentEncoding encoding,
+PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentFormat format,
                                      String &out);

@@ -239,7 +239,8 @@ connections: none
 ```
 
 The host assembly model feeds INFO/HARDWARE. The complete source configuration
-is retained at `<device>/hardware` and is available through `HW`.
+is retained canonically at `<device>/hardware/msgpack`; optional wire JSON is at
+`<device>/hardware/json`, and readable JSON remains available through `HW`.
 
 `validateHwConfig()` checks references, IDs, definition cycles, connector-only
 assembly crossings, self-connections, duplicates, capacity, and canonical-net

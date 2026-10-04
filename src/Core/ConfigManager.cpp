@@ -230,7 +230,7 @@ String ConfigManager::list() const
     }
 
     String output;
-    if (serializeWholeDocument(doc, DocumentEncoding::JSON, output) != PayloadResult::Complete)
+    if (serializeWholeDocument(doc, DocumentFormat::JSON, output) != PayloadResult::Complete)
         return "ERROR: unable to build config list";
     return output;
 }
@@ -309,7 +309,7 @@ bool ConfigManager::serializeManifest(String &payload) const
         item.add(static_cast<uint8_t>(config.valueType_));
         item.add(config.requireReboot_);
     }
-    return serializeWholeDocument(doc, DocumentEncoding::MSGPACK, payload) ==
+    return serializeWholeDocument(doc, DocumentFormat::MSGPACK, payload) ==
            PayloadResult::Complete;
 }
 

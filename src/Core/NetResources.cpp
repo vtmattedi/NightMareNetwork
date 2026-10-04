@@ -36,26 +36,14 @@ const String &NetResource::owner() const
     return resolveResourceOwner(*this);
 }
 
-String resolveResourceManifestTopic(const String &deviceName)
+String resolveResourceManifestTopic(const String &deviceName, DocumentFormat format)
 {
-    return deviceName + "/manifest";
+    return resolveDocumentTopic(deviceName, "manifest", format);
 }
 
-String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format)
+String resolveResourceConsumeManifestTopic(const String &deviceName, DocumentFormat format)
 {
-    String topic = resolveResourceManifestTopic(deviceName);
-    if (format == ManifestFormat::MSGPACK)
-        topic += "/msgpack";
-    return topic;
-}
-
-String resolveResourceConsumeManifestTopic(const String &deviceName, ManifestFormat format)
-{
-    String topic = resolveResourceManifestTopic(deviceName);
-    topic += "/consume";
-    if (format == ManifestFormat::MSGPACK)
-        topic += "/msgpack";
-    return topic;
+    return resolveDocumentTopic(deviceName, "manifest/consume", format);
 }
 
 String resolveResourceRootTopic(const String &deviceName)

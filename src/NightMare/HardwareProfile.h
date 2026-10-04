@@ -5,6 +5,28 @@
 namespace NMHardware
 {
 constexpr uint8_t HwConfigVersion = 2;
+constexpr uint8_t HardwareEncodingVersion = 1;
+
+/* Canonical positional MessagePack contract:
+ *   hardware   = [encodingVersion, hwConfigVersion, hostAssembly,
+ *                 definitions[], roots[], connections[]]
+ *   definition = [id, kind, name|null, model|null, manufacturer|null, members]
+ *   assembly   = [id, definition|null, name|null, kind, model|null,
+ *                 manufacturer|null, serialNumber|null, location|null, members]
+ *   members    = [assemblies[], devices[], connectors[], connections[]]
+ *   device     = [id, name|null, kind|null, model|null, manufacturer|null, terminals[]]
+ *   terminal   = [id, canonicalNet, name|null]
+ *   connector  = [id, name|null, kind, model|null, manufacturer|null, contacts[]]
+ *   contact    = [id, canonicalNet, name|null]
+ *   endpoint   = [assembly, kind, owner, endpoint]
+ *   connection = [a, b, wire|null]
+ *   wire       = [color|null, gauge|null, label|null, lengthMm]
+ *
+ * Position 0 is always the encoding version. Append optional fields only at
+ * the end; never reorder or repurpose positions. Enum numbers are append-only.
+ * An incompatible positional change bumps HardwareEncodingVersion, not
+ * HwConfigVersion. Inferred nets are never part of this source-profile format.
+ */
 constexpr size_t MaxDiagnostics = 24;
 constexpr size_t MaxGraphAssemblies = 96;
 constexpr size_t MaxGraphEndpoints = 192;

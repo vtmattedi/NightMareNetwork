@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Core/Config.h>
+#include <Core/DocumentPayload.h>
+#include <NightMare/HardwareProfile.h>
 
 constexpr int HeartbeatMinPeriodSeconds = 15;
 constexpr int HeartbeatMaxPeriodSeconds = 24 * 60 * 60;
@@ -38,7 +40,8 @@ struct TelemetryResult
 // Device-wide information, split by how often it changes. Four retained documents
 // and one transient heartbeat stream:
 //   <device>/info               identity, hardware, build, boot: fixed per boot
-//   <device>/hardware           hardware configuration as retained JSON
+//   <device>/hardware/msgpack   canonical retained hardware configuration
+//   <device>/hardware/json      optional readable sibling
 //   <device>/telemetry/system   runtime health, every NM_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/network  network bookkeeping, every NM_NETWORK_TELEMETRY_INTERVAL_MS
 //   <device>/telemetry/heartbeat non-retained, controlled by heartbeat Configs
@@ -65,10 +68,17 @@ public:
     /// @brief Builds the validated hardware configuration JSON document.
     TelemetryResult getHardware() const;
 
+    /// @brief Builds the canonical positional MessagePack hardware document.
+    TelemetryResult getHardwareMessagePack() const;
+
+    /// @brief Expands the current positional hardware encoding to its named
+    /// logical JSON shape. Rejects unknown versions and malformed layouts.
+    static bool decodeHardware(const String &encoded, JsonDocument &into);
+
     /// @brief Publishes the retained hardware configuration document.
     bool publishHardware();
 
-    /// @brief /info, /hardware, system, network, and heartbeat when enabled.
+    /// @brief /info, canonical hardware, system, network, and heartbeat when enabled.
     /// True only if every enabled publication went out.
     bool publishAll();
 
@@ -83,6 +93,7 @@ private:
     void appendSystem(JsonObject dst) const;
     void appendNetwork(JsonObject dst) const;
     void buildNamedHardware(JsonDocument &doc) const;
+    void buildPositionalHardware(JsonDocument &doc) const;
 
     bool started_ = false;
     uint32_t heartbeatCounter_ = 0;

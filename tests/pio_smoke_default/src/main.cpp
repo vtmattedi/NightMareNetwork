@@ -110,10 +110,10 @@ public:
                 return false;
             ++statePublishes;
         }
-        if (topic.endsWith("/manifest") || topic.endsWith("/manifest/msgpack"))
+        if (topic.endsWith("/manifest/msgpack") || topic.endsWith("/manifest/json"))
         {
             ++manifestAttempts;
-            if (failManifest)
+            if (failManifest || (failJsonDocuments && topic.endsWith("/json")))
                 return false;
             ++manifestPublishes;
             if (topic.endsWith("/manifest/msgpack"))
@@ -121,9 +121,11 @@ public:
             else
                 lastManifestJson = payload;
         }
-        if (topic.endsWith("/manifest/consume"))
+        if (topic.endsWith("/manifest/consume/json"))
         {
             ++consumeJsonPublishes;
+            if (failJsonDocuments)
+                return false;
             lastConsumeJson = payload;
             consumeWasRetained = retained;
         }
@@ -131,7 +133,11 @@ public:
         {
             ++consumePackedPublishes;
             lastConsumePacked = payload;
+            consumeWasRetained = retained;
         }
+        if (topic.endsWith("/manifest") || topic.endsWith("/manifest/consume") ||
+            topic.endsWith("/hardware"))
+            ++bareDocumentPublishes;
         if (topic.endsWith("/event"))
         {
             ++eventAttempts;
@@ -165,10 +171,12 @@ public:
     int manifestAttempts = 0;
     int manifestPublishes = 0;
     bool failManifest = false;
+    bool failJsonDocuments = false;
     String lastManifestJson;
     String lastManifestPacked;
     String lastStateTopic;
     String lastStatePayload;
+    int bareDocumentPublishes = 0;
 };
 
 // Remembers every filter asked for or given back, as "|filter|filter|", so a test
@@ -352,6 +360,8 @@ void setup()
     JsonArray consumeItems = consumeRoot.add<JsonArray>();
     JsonArray consumeValue = consumeItems.add<JsonArray>();
     consumeValue.add(static_cast<uint8_t>(NetResourceType::VALUE));
+    consumeValue.add("outside_temperature");
+    consumeValue.add(true);
     consumeValue.add("outside-node");
     consumeValue.add("temperature");
     consumeValue.add(static_cast<uint8_t>(AccessPolicy::READ));
@@ -362,27 +372,42 @@ void setup()
     const bool consumeCodecWorks =
         ResourcesManager::decodeConsumeManifest(encodedConsume, decodedConsume) &&
         decodedConsume["version"].as<int>() == ConsumeManifestVersion &&
-        decodedConsume["consumes"][0]["device"].as<String>() == "outside-node" &&
-        resolveResourceConsumeManifestTopic("smoke") == "smoke/manifest/consume";
+        decodedConsume["remotes"][0]["device"].as<String>() == "outside-node" &&
+        decodedConsume["remotes"][0]["bound"].as<bool>() &&
+        decodedConsume["consumes"].isNull() &&
+        resolveResourceConsumeManifestTopic("smoke", DocumentFormat::MSGPACK) ==
+            "smoke/manifest/consume/msgpack" &&
+        resolveResourceManifestTopic("smoke", DocumentFormat::JSON) ==
+            "smoke/manifest/json" &&
+        resolveDocumentTopic("smoke", "hardware", DocumentFormat::MSGPACK) ==
+            "smoke/hardware/msgpack";
 
     ResourcesManager consumeManager;
     RecordingPublisher consumePublisher;
     RemoteSensor<float> consumed("temperature", NetDeviceIdentity("weather-node"));
     consumeManager.setPublisher(&consumePublisher);
     const bool consumeBound = consumeManager.bindResource(&consumed);
-    const bool boundPublished = consumePublisher.lastConsumeJson.indexOf("weather-node") >= 0 &&
-                                consumePublisher.lastConsumeJson.indexOf("temperature") >= 0;
+    JsonDocument boundConsume;
+    const bool boundPublished = ResourcesManager::decodeConsumeManifest(
+        consumePublisher.lastConsumePacked, boundConsume) &&
+        boundConsume["remotes"][0]["bound"].as<bool>() &&
+        boundConsume["remotes"][0]["device"].as<String>() == "weather-node";
     consumed.setSource("relay-node", "target");
-    const bool retargetPublished = consumePublisher.lastConsumeJson.indexOf("relay-node") >= 0 &&
-                                   consumePublisher.lastConsumeJson.indexOf("weather-node") < 0;
+    JsonDocument retargetConsume;
+    const bool retargetPublished = ResourcesManager::decodeConsumeManifest(
+        consumePublisher.lastConsumePacked, retargetConsume) &&
+        retargetConsume["remotes"][0]["device"].as<String>() == "relay-node";
     consumeManager.unbindResource(&consumed);
-    const bool unbindPublished = consumePublisher.lastConsumeJson ==
-                                 String("{\"version\":") + ConsumeManifestVersion +
-                                     ",\"consumes\":[],\"remotes\":[]}";
+    JsonDocument unboundConsume;
+    const bool unbindPublished = ResourcesManager::decodeConsumeManifest(
+        consumePublisher.lastConsumePacked, unboundConsume) &&
+        unboundConsume["remotes"].size() == 0;
     const bool consumeLifecycleWorks = consumeBound && boundPublished && retargetPublished &&
                                        unbindPublished && consumePublisher.consumeWasRetained &&
-                                       consumePublisher.consumeJsonPublishes >= 4 &&
-                                       consumePublisher.consumePackedPublishes >= 4;
+                                       consumePublisher.consumePackedPublishes >= 4 &&
+                                       consumePublisher.bareDocumentPublishes == 0 &&
+                                       consumePublisher.consumeJsonPublishes ==
+                                           (NM_ENABLE_JSON_WIRE ? consumePublisher.consumePackedPublishes : 0);
 
     const ActionResult list = gResourcesManager.executeCommand("list");
     const ActionResult local = gResourcesManager.executeCommand(" outside_temperature");
@@ -834,6 +859,33 @@ void setup()
         topologyGraph.edgeCount >= profile.connectionCount &&
         illegalGraph.edgeCount == topologyGraph.edgeCount - profile.connectionCount;
     const TelemetryResult hardware = Telemetry.getHardware();
+    const TelemetryResult packedHardware = Telemetry.getHardwareMessagePack();
+    JsonDocument decodedHardware;
+    const bool hardwareDecoded = packedHardware.valid &&
+        TelemetryService::decodeHardware(packedHardware.data, decodedHardware);
+    String decodedHardwareJson;
+    serializeJson(decodedHardware, decodedHardwareJson);
+    JsonDocument badHardwareVersion;
+    JsonArray badVersionRoot = badHardwareVersion.to<JsonArray>();
+    badVersionRoot.add(NMHardware::HardwareEncodingVersion + 1);
+    badVersionRoot.add(NMHardware::HwConfigVersion);
+    badVersionRoot.add("main");
+    badVersionRoot.add<JsonArray>();
+    badVersionRoot.add<JsonArray>();
+    badVersionRoot.add<JsonArray>();
+    String badVersionPayload;
+    serializeMsgPack(badHardwareVersion, badVersionPayload);
+    JsonDocument malformedHardware;
+    JsonArray malformedRoot = malformedHardware.to<JsonArray>();
+    malformedRoot.add(NMHardware::HardwareEncodingVersion);
+    malformedRoot.add(NMHardware::HwConfigVersion);
+    malformedRoot.add("main");
+    String malformedPayload;
+    serializeMsgPack(malformedHardware, malformedPayload);
+    JsonDocument rejectedHardware;
+    const bool hardwareFailuresSafe =
+        !TelemetryService::decodeHardware(badVersionPayload, rejectedHardware) &&
+        !TelemetryService::decodeHardware(malformedPayload, rejectedHardware);
     const TelemetryResult info = Telemetry.getInfo();
     const NightMareResults hardwareCommand = handleNightMareCommand("HW JSON");
     const NightMareResults removedConnections = handleNightMareCommand("INFO HWCONNECTIONS");
@@ -847,7 +899,8 @@ void setup()
                             selfConnectionRejected && capacityRejected &&
                             graphBuilt && dataNetInferred && nestedDefinitionPathsWork &&
                             illegalGraphRejected &&
-                            hardware.valid &&
+                            hardware.valid && hardwareDecoded && hardwareFailuresSafe &&
+                            decodedHardwareJson == hardware.data &&
                             hardware.data.indexOf("esp32-devkit:test") >= 0 &&
                             hardware.data.indexOf("\"version\":2") >= 0 &&
                             hardware.data.indexOf("\"host_assembly\":\"controller\"") >= 0 &&
@@ -884,8 +937,6 @@ void setup()
 
     // Provider manifests: JSON names the kind and type and nothing else; the
     // compact form is [2, name, typeEnum] under the bumped encoding version.
-    JsonDocument providerJson;
-    const bool providerParsed = !deserializeJson(providerJson, eventPublisher.lastManifestJson);
     JsonDocument providerPacked;
     const bool providerPackedParsed =
         !deserializeMsgPack(providerPacked, eventPublisher.lastManifestPacked);
@@ -902,15 +953,15 @@ void setup()
         expandedProvider["resources"][0]["type"].as<String>() == "integer" &&
         expandedProvider["resources"][0].size() == 3;
     const bool providerManifests =
-        providerParsed && providerPackedParsed &&
-        providerJson["version"].as<int>() == ResourceManifestVersion &&
-        providerJson["resources"].size() == 1 &&
-        providerJson["resources"][0]["name"].as<String>() == "acoustic:beep" &&
-        providerJson["resources"][0]["kind"].as<String>() == "event" &&
-        providerJson["resources"][0]["type"].as<String>() == "integer" &&
-        providerJson["resources"][0].size() == 3 &&
+        providerPackedParsed &&
+        (NM_ENABLE_JSON_WIRE ? eventPublisher.lastManifestJson.length() != 0
+                             : eventPublisher.lastManifestJson.length() == 0) &&
         providerPacked[0].as<uint8_t>() == ManifestEncodingVersion &&
         compactEventShape && providerExpanded;
+    eventPublisher.failJsonDocuments = true;
+    const bool optionalJsonCannotFailCanonical = eventManager.publishManifest() &&
+                                                  eventManager.publishConsumeManifest();
+    eventPublisher.failJsonDocuments = false;
 
     // Binding subscribes a Remote event to its owner's /event and manifest, and
     // a Managed one to nothing: no /set, no /invoke.
@@ -1006,15 +1057,8 @@ void setup()
     JsonDocument consumedPacked;
     const bool consumePackedParsed =
         !deserializeMsgPack(consumedPacked, eventPublisher.lastConsumePacked);
-    bool compactConsume = false;
     bool compactRemote = false;
     for (JsonArrayConst entry : consumedPacked[2].as<JsonArrayConst>())
-        if (entry[2].as<String>() == "chime")
-            compactConsume = entry.size() == 4 &&
-                             entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
-                             entry[1].as<String>() == "holmes" &&
-                             entry[3].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
-    for (JsonArrayConst entry : consumedPacked[3].as<JsonArrayConst>())
         if (entry[1].as<String>() == "beep")
             compactRemote = entry.size() == 6 &&
                             entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
@@ -1037,14 +1081,8 @@ void setup()
         eventSubscriber.unsubscribedFrom("watson/manifest/msgpack") &&
         eventSubscriber.subscribedTo("holmes/resource/chime/event") &&
         eventSubscriber.subscribedTo("holmes/manifest/msgpack") &&
-        eventPublisher.lastConsumeJson.indexOf(
-            "{\"device\":\"holmes\",\"resource\":\"chime\",\"kind\":\"event\","
-            "\"type\":\"integer\"}") >= 0 &&
-        eventPublisher.lastConsumeJson.indexOf(
-            "{\"name\":\"beep\",\"bound\":true,\"device\":\"holmes\","
-            "\"resource\":\"chime\",\"kind\":\"event\",\"type\":\"integer\"}") >= 0 &&
         consumePackedParsed && consumedPacked[0].as<uint8_t>() == ConsumeManifestEncodingVersion &&
-        compactConsume && compactRemote && consumeExpanded &&
+        consumedPacked.size() == 3 && compactRemote && consumeExpanded &&
         persisted.indexOf("\"beep\":\"holmes/chime\"") >= 0 &&
         !eventManager.handleIngressMessage("watson/resource/beep/event", "5") &&
         eventManager.handleIngressMessage("holmes/resource/chime/event", "6") &&
@@ -1073,7 +1111,7 @@ void setup()
     // serializeMsgPack() would cut off; the binary-safe serializer keeps it.
     String encodedMismatch;
     const bool mismatchEncoded =
-        serializeWholeDocument(mismatchedManifest, DocumentEncoding::MSGPACK,
+        serializeWholeDocument(mismatchedManifest, DocumentFormat::MSGPACK,
                                encodedMismatch) == PayloadResult::Complete;
     const bool manifestDoesNotGate =
         mismatchEncoded &&
@@ -1088,15 +1126,15 @@ void setup()
     const String persistedAfterClear = clearedFile ? clearedFile.readString() : String();
     if (clearedFile)
         clearedFile.close();
+    JsonDocument clearedConsume;
+    const bool clearedConsumeDecoded = ResourcesManager::decodeConsumeManifest(
+        eventPublisher.lastConsumePacked, clearedConsume);
     const bool sourceCleared =
         cleared && watched.lastUpdateMs() == 0 &&
         eventSubscriber.unsubscribedFrom("holmes/resource/chime/event") &&
-        eventPublisher.lastConsumeJson.indexOf(
-            "{\"name\":\"beep\",\"bound\":false,\"device\":\"\",\"resource\":\"\","
-            "\"kind\":\"event\",\"type\":\"integer\"}") >= 0 &&
-        eventPublisher.lastConsumeJson.indexOf(
-            "{\"name\":\"unsourced_event\",\"bound\":false,\"device\":\"\","
-            "\"resource\":\"\",\"kind\":\"event\",\"type\":\"string\"}") >= 0 &&
+        clearedConsumeDecoded && clearedConsume["remotes"].size() == 2 &&
+        !clearedConsume["remotes"][0]["bound"].as<bool>() &&
+        !clearedConsume["remotes"][1]["bound"].as<bool>() &&
         persistedAfterClear.indexOf("\"beep\"") < 0;
 
     // Unbinding: a Managed event just leaves the manifest, with no tombstone to
@@ -1106,7 +1144,8 @@ void setup()
     eventManager.unbindResource(&beep);
     JsonDocument manifestAfterUnbind;
     const bool managedUnbound =
-        !beep.isBound() && !deserializeJson(manifestAfterUnbind, eventPublisher.lastManifestJson) &&
+        !beep.isBound() && ResourcesManager::decodeManifest(
+                               eventPublisher.lastManifestPacked, manifestAfterUnbind) &&
         !manifestHasResource(manifestAfterUnbind, "acoustic:beep") &&
         eventPublisher.eventAttempts == attemptsBeforeUnbind;
     watched.setSource("holmes", "chime");
@@ -1116,13 +1155,15 @@ void setup()
     const String persistedAfterUnbind = unboundFile ? unboundFile.readString() : String();
     if (unboundFile)
         unboundFile.close();
+    JsonDocument consumeAfterUnbind;
     const bool remoteUnbound =
         !watched.isBound() && eventSubscriber.unsubscribedFrom("holmes/resource/chime/event") &&
         persistedAfterUnbind.indexOf("\"beep\"") < 0 &&
-        eventPublisher.lastConsumeJson.indexOf("\"name\":\"beep\"") < 0;
+        ResourcesManager::decodeConsumeManifest(eventPublisher.lastConsumePacked,
+                                                consumeAfterUnbind) &&
+        consumeAfterUnbind["remotes"].size() == 1;
 
-    // Readers refuse a compact manifest in an encoding they do not speak, and
-    // fall back to the JSON one published beside it.
+    // Readers refuse positional documents in an encoding they do not speak.
     JsonDocument oldManifest;
     JsonArray oldRoot = oldManifest.to<JsonArray>();
     oldRoot.add(ManifestEncodingVersion - 1);
@@ -1144,6 +1185,7 @@ void setup()
 
     smokeState.setFlag("event_resources",
                        unboundFireRejected && eventsBound && providerManifests &&
+                           optionalJsonCannotFailCanonical &&
                            eventSubscriptions && firedTwice && refusedNotRecorded &&
                            localListenerSeesEveryFire &&
                            emptyPayloadRejected && reconnectDoesNotReplay && repeatedDelivered &&

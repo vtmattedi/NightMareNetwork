@@ -112,7 +112,7 @@ public:
     /// @brief Install a handler for every device's manifest, and subscribe to
     /// them. Setting one is the request: a handler wants the whole network, not
     /// only the devices this one happens to bind resources from, so the manager
-    /// takes "+/manifest" on its behalf and gives it back when the handler is
+    /// takes "+/manifest/json" on its behalf and gives it back when the handler is
     /// cleared. Independent of NM_ENABLE_REMOTE_RESOURCE_VERIFICATION, which
     /// governs only the manager's own checking of its own Remote resources.
     ///
@@ -137,8 +137,7 @@ public:
     /// The payload handed over is the raw MessagePack, already checked to be
     /// well formed and to carry an encoding version this build understands. A
     /// manifest in a version it does not is dropped with a warning rather than
-    /// guessed at; the JSON manifest is always published beside it, so a reader
-    /// that cares can fall back to that.
+    /// guessed at.
     ///
     /// Stored before subscribing, for the same reason as setManifestHandler().
     void setEncodedManifestHandler(EncodedManifestHandler handler);
@@ -152,7 +151,7 @@ public:
     /// read positions directly can skip this and keep the compact document.
     static bool decodeManifest(const String &encoded, JsonDocument &into);
 
-    /// @brief Expand `[encodingVersion, consumeVersion, consumes[]]` MessagePack
+    /// @brief Expand `[encodingVersion, consumeVersion, remotes[]]` MessagePack
     /// into the named JSON consume-manifest shape.
     static bool decodeConsumeManifest(const String &encoded, JsonDocument &into);
 
@@ -170,8 +169,9 @@ public:
     /// invoke, or the Remote-only source configuration operation explicitly.
     ActionResult executeCommand(const String &expression);
 
-    /// @brief Removes the retained resource footprint of a previous identity:
-    /// the manifest and the state of every currently declared managed value.
+    /// @brief Removes retained state for every currently declared managed value
+    /// under a previous identity. Document-topic migration is deliberately
+    /// outside this operation.
     /// Only values declared now can be found, so one declared under the old name
     /// and since removed from the firmware is not reached. True only when every
     /// deletion was accepted for publishing, so a failure can be retried.
@@ -235,8 +235,8 @@ private:
     // Manifests are subscribed once per remote device, not once per resource.
     bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
 
-    bool publishManifest(ManifestFormat format);
-    bool publishConsumeManifest(ManifestFormat format);
+    bool publishManifest(DocumentFormat format);
+    bool publishConsumeManifest(DocumentFormat format);
     // One builder per encoding rather than one with branches: the JSON form is
     // frozen and the compact form is free to change, and keeping them apart is
     // what stops a change to the second quietly altering the first.
@@ -248,8 +248,8 @@ private:
     /// @brief Build this device's manifest in one encoding. The document is the
     /// same either way; MSGPACK writes kind, access and type as their numeric
     /// values rather than their names, which is most of what it saves.
-    bool serializeManifest(String &payload, ManifestFormat format) const;
-    bool serializeConsumeManifest(String &payload, ManifestFormat format) const;
+    bool serializeManifest(String &payload, DocumentFormat format) const;
+    bool serializeConsumeManifest(String &payload, DocumentFormat format) const;
     bool publishState(NetValueResource &resource);
     bool withdrawState(NetValueResource &resource);
     void applyAdvertisementMetadata(const String &deviceName, JsonArrayConst items);

@@ -43,7 +43,7 @@ namespace
         "PublishConsumeManifest",
         "PublishResourceStates",
         "PublishInfo",
-        "PublishHardwareJson",
+        "PublishHardware",
         "PublishTelemetry",
         "Count"};
 
@@ -110,7 +110,7 @@ namespace
 #else
             return true;
 #endif
-        case SystemRequest::PublishHardwareJson:
+        case SystemRequest::PublishHardware:
 #if NM_ENABLE_TELEMETRY
             return Telemetry.publishHardware();
 #else

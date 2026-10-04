@@ -26,7 +26,7 @@ namespace
     constexpr size_t MaxResourceSettingsLength =
         ResourcesManager::MaxResources * (MaxSegmentLength + 80) + 2;
     /// Every device's manifest, for a handler that wants the whole network.
-    constexpr const char *AllManifestsFilter = "+/manifest";
+    constexpr const char *AllManifestsFilter = "+/manifest/json";
     /// The same, in the compact encoding. Taken only when an encoded handler is set.
     constexpr const char *AllEncodedManifestsFilter = "+/manifest/msgpack";
 
@@ -134,7 +134,7 @@ namespace
 #define NM_MANIFEST_FORMAT_STR(x) NM_MANIFEST_FORMAT_STR2(x)
 
     /// @brief "json" or "mpack", case-insensitively. Empty selects the default.
-    bool parseManifestFormat(const String &text, ManifestFormat &format)
+    bool parseDocumentFormat(const String &text, DocumentFormat &format)
     {
         String wanted = text;
         wanted.trim();
@@ -144,12 +144,12 @@ namespace
 
         if (wanted == "json")
         {
-            format = ManifestFormat::JSON;
+            format = DocumentFormat::JSON;
             return true;
         }
         if (wanted == "mpack" || wanted == "msgpack")
         {
-            format = ManifestFormat::MSGPACK;
+            format = DocumentFormat::MSGPACK;
             return true;
         }
         return false;
@@ -560,41 +560,47 @@ bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument
         return false;
 
     JsonArrayConst root = packed.as<JsonArrayConst>();
-    if (root.size() < 3 ||
+    if (root.size() < 3 || !root[0].is<uint8_t>() ||
         root[0].as<uint8_t>() != ConsumeManifestEncodingVersion ||
+        !root[1].is<uint8_t>() ||
         !root[2].is<JsonArrayConst>())
         return false;
 
-    into.clear();
-    into["version"] = root[1].as<int>();
-    JsonArray consumes = into["consumes"].to<JsonArray>();
+    JsonDocument decoded;
+    decoded["version"] = root[1].as<int>();
+    JsonArray remotes = decoded["remotes"].to<JsonArray>();
     for (JsonVariantConst element : root[2].as<JsonArrayConst>())
     {
         JsonArrayConst entry = element.as<JsonArrayConst>();
-        if (entry.size() < 3)
+        if (entry.size() < 5 || !entry[0].is<uint8_t>() ||
+            !entry[1].is<const char *>() || !entry[2].is<bool>() ||
+            !entry[3].is<const char *>() || !entry[4].is<const char *>())
             return false;
         const uint8_t kind = entry[0].as<uint8_t>();
-        JsonObject item = consumes.add<JsonObject>();
-        item["device"] = entry[1].as<const char *>();
-        item["resource"] = entry[2].as<const char *>();
+        JsonObject item = remotes.add<JsonObject>();
+        item["name"] = entry[1].as<const char *>();
+        item["bound"] = entry[2].as<bool>();
+        item["device"] = entry[3].as<const char *>();
+        item["resource"] = entry[4].as<const char *>();
         if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
         {
-            if (entry.size() < 5)
+            if (entry.size() < 7 || !entry[5].is<uint8_t>() || !entry[6].is<uint8_t>())
                 return false;
             item["kind"] = "value";
-            item["access"] = accessName(static_cast<AccessPolicy>(entry[3].as<uint8_t>()));
-            item["type"] = valueTypeName(static_cast<NetValueType>(entry[4].as<uint8_t>()));
+            item["access"] = accessName(static_cast<AccessPolicy>(entry[5].as<uint8_t>()));
+            item["type"] = valueTypeName(static_cast<NetValueType>(entry[6].as<uint8_t>()));
         }
         else if (kind == static_cast<uint8_t>(NetResourceType::ACTION))
         {
-            if (entry.size() < 4 || !entry[3].is<JsonArrayConst>())
+            if (entry.size() < 6 || !entry[5].is<JsonArrayConst>())
                 return false;
             item["kind"] = "action";
             JsonArray args = item["arguments"].to<JsonArray>();
-            for (JsonVariantConst argumentElement : entry[3].as<JsonArrayConst>())
+            for (JsonVariantConst argumentElement : entry[5].as<JsonArrayConst>())
             {
                 JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
-                if (argument.size() < 3)
+                if (argument.size() < 3 || !argument[0].is<const char *>() ||
+                    !argument[1].is<uint8_t>() || !argument[2].is<bool>())
                     return false;
                 JsonObject out = args.add<JsonObject>();
                 out["name"] = argument[0].as<const char *>();
@@ -605,68 +611,20 @@ bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument
         }
         else if (kind == static_cast<uint8_t>(NetResourceType::EVENT))
         {
-            if (entry.size() < 4)
+            if (entry.size() < 6 || !entry[5].is<uint8_t>())
                 return false;
             item["kind"] = "event";
-            item["type"] = valueTypeName(static_cast<NetValueType>(entry[3].as<uint8_t>()));
+            item["type"] = valueTypeName(static_cast<NetValueType>(entry[5].as<uint8_t>()));
         }
         else
             return false;
     }
 
-    // Version 2 appended `remotes`; a version 1 document simply lacks it.
-    if (root.size() > 3 && root[3].is<JsonArrayConst>())
-    {
-        JsonArray remotes = into["remotes"].to<JsonArray>();
-        for (JsonVariantConst element : root[3].as<JsonArrayConst>())
-        {
-            JsonArrayConst entry = element.as<JsonArrayConst>();
-            if (entry.size() < 5)
-                return false;
-            const uint8_t kind = entry[0].as<uint8_t>();
-            JsonObject item = remotes.add<JsonObject>();
-            item["name"] = entry[1].as<const char *>();
-            item["bound"] = entry[2].as<bool>();
-            item["device"] = entry[3].as<const char *>();
-            item["resource"] = entry[4].as<const char *>();
-            if (kind == static_cast<uint8_t>(NetResourceType::VALUE))
-            {
-                if (entry.size() < 7)
-                    return false;
-                item["kind"] = "value";
-                item["access"] = accessName(static_cast<AccessPolicy>(entry[5].as<uint8_t>()));
-                item["type"] = valueTypeName(static_cast<NetValueType>(entry[6].as<uint8_t>()));
-            }
-            else if (kind == static_cast<uint8_t>(NetResourceType::ACTION))
-            {
-                if (entry.size() < 6 || !entry[5].is<JsonArrayConst>())
-                    return false;
-                item["kind"] = "action";
-                JsonArray args = item["arguments"].to<JsonArray>();
-                for (JsonVariantConst argumentElement : entry[5].as<JsonArrayConst>())
-                {
-                    JsonArrayConst argument = argumentElement.as<JsonArrayConst>();
-                    if (argument.size() < 3)
-                        return false;
-                    JsonObject out = args.add<JsonObject>();
-                    out["name"] = argument[0].as<const char *>();
-                    out["type"] = valueTypeName(
-                        static_cast<NetValueType>(argument[1].as<uint8_t>()));
-                    out["required"] = argument[2].as<bool>();
-                }
-            }
-            else if (kind == static_cast<uint8_t>(NetResourceType::EVENT))
-            {
-                if (entry.size() < 6)
-                    return false;
-                item["kind"] = "event";
-                item["type"] = valueTypeName(static_cast<NetValueType>(entry[5].as<uint8_t>()));
-            }
-            else
-                return false;
-        }
-    }
-    return true;
+    if (decoded.overflowed())
+        return false;
+    into.clear();
+    into.set(decoded);
+    return !into.overflowed();
 }
 
 void ResourcesManager::subscribeResource(const NetResource &resource, bool includeManifest)
@@ -679,7 +637,7 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
     if (includeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                                            ManifestFormat::MSGPACK));
+                                                            DocumentFormat::MSGPACK));
     const String ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->subscribe(ingress);
@@ -695,7 +653,7 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
     if (removeManifest && !resource.isOwned() &&
         hasResolvedSource(resource))
         subscriber_->unsubscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                                              ManifestFormat::MSGPACK));
+                                                              DocumentFormat::MSGPACK));
 }
 
 void ResourcesManager::subscribeAll()
@@ -738,7 +696,7 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
             return true;
         if (!resource.isOwned() && hasResolvedSource(resource) &&
             resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
-                                         ManifestFormat::MSGPACK) == topicFilter)
+                                         DocumentFormat::MSGPACK) == topicFilter)
             return true;
     }
     return false;
@@ -1410,7 +1368,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
         if (ownerChanged && DeviceIdentity::validDeviceName(oldOwner.deviceName) &&
             !remoteOwnerInUse(oldOwner.deviceName, nullptr))
             subscriber_->unsubscribe(
-                resolveResourceManifestTopic(oldOwner.deviceName, ManifestFormat::MSGPACK));
+                resolveResourceManifestTopic(oldOwner.deviceName, DocumentFormat::MSGPACK));
     }
 
     if (!sourceConfigured(resource))
@@ -1422,7 +1380,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     {
         if (ownerChanged && !remoteOwnerInUse(newOwner, &resource))
             subscriber_->subscribe(
-                resolveResourceManifestTopic(newOwner, ManifestFormat::MSGPACK));
+                resolveResourceManifestTopic(newOwner, DocumentFormat::MSGPACK));
         const String ingress = ingressTopicFor(resource);
         if (ingress.length() != 0)
             subscriber_->subscribe(ingress);
@@ -1434,27 +1392,24 @@ bool ResourcesManager::publishManifest()
     const String &thisDevice = gDeviceIdentity.getDeviceName();
     bool published = publisher_ != nullptr && DeviceIdentity::validDeviceName(thisDevice);
 
-    // Both encodings, both retained. A reader takes whichever it can decode and
-    // nothing has to negotiate a format. Both must succeed before policy
-    // metadata is considered announced: Remote freshness reads the compact one.
-    // A failure marks the manifest dirty for a rate-limited tick retry.
-    String json;
-    if (published)
-    {
-        published = serializeManifest(json, ManifestFormat::JSON) &&
-                    publisher_->publish(
-                        resolveResourceManifestTopic(thisDevice, ManifestFormat::JSON), json, true);
-    }
+    // MessagePack is canonical. Only its outcome controls dirty/retry state.
     String packed;
     if (published)
-    {
-        published = serializeManifest(packed, ManifestFormat::MSGPACK) &&
+        published = serializeManifest(packed, DocumentFormat::MSGPACK) &&
                     publisher_->publish(
-                        resolveResourceManifestTopic(thisDevice, ManifestFormat::MSGPACK),
+                         resolveResourceManifestTopic(thisDevice, DocumentFormat::MSGPACK),
                         packed, true);
-        if (!published)
-            LOG_WARNING("RM", "Published the JSON manifest but not the MessagePack one");
+
+#if NM_ENABLE_JSON_WIRE
+    if (published)
+    {
+        String json;
+        if (!serializeManifest(json, DocumentFormat::JSON) ||
+            !publisher_->publish(resolveResourceManifestTopic(thisDevice, DocumentFormat::JSON),
+                                 json, true))
+            LOG_WARNING("RM", "Canonical manifest published; optional JSON sibling failed");
     }
+#endif
 
     manifestDirty_ = !published;
     if (!published)
@@ -1462,7 +1417,7 @@ bool ResourcesManager::publishManifest()
     return published;
 }
 
-bool ResourcesManager::publishManifest(ManifestFormat format)
+bool ResourcesManager::publishManifest(DocumentFormat format)
 {
     const String &thisDevice = gDeviceIdentity.getDeviceName();
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
@@ -1478,21 +1433,24 @@ bool ResourcesManager::publishConsumeManifest()
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
 
-    String json;
-    if (!serializeConsumeManifest(json, ManifestFormat::JSON) ||
-        !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice), json, true))
-        return false;
-
     String packed;
-    if (!serializeConsumeManifest(packed, ManifestFormat::MSGPACK) ||
+    if (!serializeConsumeManifest(packed, DocumentFormat::MSGPACK) ||
         !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice,
-                                                                 ManifestFormat::MSGPACK),
+                                                                 DocumentFormat::MSGPACK),
                              packed, true))
-        LOG_WARNING("RM", "Published the JSON consume manifest but not the MessagePack one");
+        return false;
+#if NM_ENABLE_JSON_WIRE
+    String json;
+    if (!serializeConsumeManifest(json, DocumentFormat::JSON) ||
+        !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice,
+                                                                 DocumentFormat::JSON),
+                             json, true))
+        LOG_WARNING("RM", "Canonical consume manifest published; optional JSON sibling failed");
+#endif
     return true;
 }
 
-bool ResourcesManager::publishConsumeManifest(ManifestFormat format)
+bool ResourcesManager::publishConsumeManifest(DocumentFormat format)
 {
     const String &thisDevice = gDeviceIdentity.getDeviceName();
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
@@ -1503,9 +1461,7 @@ bool ResourcesManager::publishConsumeManifest(ManifestFormat format)
                                payload, true);
 }
 
-// The readable JSON manifest uses named fields and spelled-out enums. It is the
-// fallback for readers that cannot decode the compact form; semantic additions
-// bump ResourceManifestVersion and add explicit keys here.
+// The optional readable JSON manifest uses named fields and spelled-out enums.
 void ResourcesManager::buildNamedManifest(JsonDocument &doc) const
 {
     doc["version"] = ResourceManifestVersion;
@@ -1635,40 +1591,6 @@ void ResourcesManager::buildPositionalManifest(JsonDocument &doc) const
 void ResourcesManager::buildNamedConsumeManifest(JsonDocument &doc) const
 {
     doc["version"] = ConsumeManifestVersion;
-    JsonArray consumes = doc["consumes"].to<JsonArray>();
-    for (int i = 0; i < resourceCount_; ++i)
-    {
-        const NetResource &resource = *resources_[i];
-        if (resource.isOwned() || !hasResolvedSource(resource))
-            continue;
-        JsonObject item = consumes.add<JsonObject>();
-        item["device"] = resource.ownerDevice_.deviceName;
-        item["resource"] = resource.sourceResourceName_;
-        item["kind"] = kindName(resource.kind_);
-        if (resource.kind_ == NetResourceType::VALUE)
-        {
-            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
-            item["access"] = accessName(value.access_);
-            item["type"] = valueTypeName(value.valueType_);
-        }
-        else if (resource.kind_ == NetResourceType::EVENT)
-        {
-            item["type"] = valueTypeName(static_cast<const NetEventResource &>(resource).payloadType_);
-        }
-        else
-        {
-            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
-            JsonArray args = item["arguments"].to<JsonArray>();
-            for (size_t a = 0; a < action.argumentCount(); ++a)
-            {
-                JsonObject argument = args.add<JsonObject>();
-                argument["name"] = action.argument(a).name;
-                argument["type"] = valueTypeName(action.argument(a).type);
-                argument["required"] = action.argument(a).required;
-            }
-        }
-    }
-
     // Every Remote Resource, bound or not: a source-less one is not a
     // dependency, but it has to be discoverable or nothing can SOURCE it.
     JsonArray remotes = doc["remotes"].to<JsonArray>();
@@ -1713,42 +1635,7 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
     JsonArray root = doc.to<JsonArray>();
     root.add(ConsumeManifestEncodingVersion);
     root.add(ConsumeManifestVersion);
-    JsonArray consumes = root.add<JsonArray>();
-    for (int i = 0; i < resourceCount_; ++i)
-    {
-        const NetResource &resource = *resources_[i];
-        if (resource.isOwned() || !hasResolvedSource(resource))
-            continue;
-        JsonArray item = consumes.add<JsonArray>();
-        item.add(static_cast<uint8_t>(resource.kind_));
-        item.add(resource.ownerDevice_.deviceName);
-        item.add(resource.sourceResourceName_);
-        if (resource.kind_ == NetResourceType::VALUE)
-        {
-            const NetValueResource &value = static_cast<const NetValueResource &>(resource);
-            item.add(static_cast<uint8_t>(value.access_));
-            item.add(static_cast<uint8_t>(value.valueType_));
-        }
-        else if (resource.kind_ == NetResourceType::EVENT)
-        {
-            item.add(static_cast<uint8_t>(
-                static_cast<const NetEventResource &>(resource).payloadType_));
-        }
-        else
-        {
-            const NetActionResource &action = static_cast<const NetActionResource &>(resource);
-            JsonArray args = item.add<JsonArray>();
-            for (size_t a = 0; a < action.argumentCount(); ++a)
-            {
-                JsonArray argument = args.add<JsonArray>();
-                argument.add(action.argument(a).name);
-                argument.add(static_cast<uint8_t>(action.argument(a).type));
-                argument.add(action.argument(a).required);
-            }
-        }
-    }
-
-    // Appended at position 3 (rule 2): all Remote Resources, bound or not.
+    // Every Remote Resource exactly once. Bound entries derive consume edges.
     JsonArray remotes = root.add<JsonArray>();
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -1787,7 +1674,7 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
     }
 }
 
-bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format) const
+bool ResourcesManager::serializeManifest(String &payload, DocumentFormat format) const
 {
     // ArduinoJson 7 documents size themselves, growing through a chain of small
     // pools instead of one block fixed at construction. That deletes the
@@ -1797,7 +1684,7 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     // overflow, so a manifest can no longer be silently dropped for being
     // larger than a guess made before it was built.
     JsonDocument doc;
-    const bool packed = format == ManifestFormat::MSGPACK;
+    const bool packed = format == DocumentFormat::MSGPACK;
     if (packed)
         buildPositionalManifest(doc);
     else
@@ -1810,7 +1697,7 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     // of date rather than wrong.
     const size_t measured = packed ? measureMsgPack(doc) : measureJson(doc);
     const PayloadResult outcome = serializeWholeDocument(
-        doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON, payload);
+        doc, packed ? DocumentFormat::MSGPACK : DocumentFormat::JSON, payload);
     if (outcome != PayloadResult::Complete)
     {
         LOG_WARNING("RM", "Not publishing the %s manifest (%u bytes): %s "
@@ -1835,15 +1722,15 @@ bool ResourcesManager::serializeManifest(String &payload, ManifestFormat format)
     return true;
 }
 
-bool ResourcesManager::serializeConsumeManifest(String &payload, ManifestFormat format) const
+bool ResourcesManager::serializeConsumeManifest(String &payload, DocumentFormat format) const
 {
     JsonDocument doc;
-    const bool packed = format == ManifestFormat::MSGPACK;
+    const bool packed = format == DocumentFormat::MSGPACK;
     if (packed)
         buildPositionalConsumeManifest(doc);
     else
         buildNamedConsumeManifest(doc);
-    if (serializeWholeDocument(doc, packed ? DocumentEncoding::MSGPACK : DocumentEncoding::JSON,
+    if (serializeWholeDocument(doc, packed ? DocumentFormat::MSGPACK : DocumentFormat::JSON,
                                payload) != PayloadResult::Complete ||
         payload.length() > MaxManifestLength)
     {
@@ -2049,22 +1936,9 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
                                  String(), true))
             withdrawn = false;
     }
-    // Actions and events need nothing: /invoke and /event are never retained.
-    //
-    // Both manifests go, not just the JSON one -- either left behind would
-    // re-announce the old identity to whichever reader prefers that encoding.
-    if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName, ManifestFormat::JSON),
-                             String(), true))
-        withdrawn = false;
-    if (!publisher_->publish(resolveResourceManifestTopic(oldDeviceName, ManifestFormat::MSGPACK),
-                             String(), true))
-        withdrawn = false;
-    if (!publisher_->publish(resolveResourceConsumeManifestTopic(oldDeviceName), String(), true))
-        withdrawn = false;
-    if (!publisher_->publish(resolveResourceConsumeManifestTopic(oldDeviceName,
-                                                                 ManifestFormat::MSGPACK),
-                             String(), true))
-        withdrawn = false;
+    // This protocol pass deliberately adds no document-topic migration or
+    // tombstoning. Actions and events are transient; document cleanup remains
+    // outside this operation.
     return withdrawn;
 }
 
@@ -2410,11 +2284,11 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
                                              : String("Manifest publish failed.")};
             }
 
-            ManifestFormat format = ManifestFormat::JSON;
-            if (!parseManifestFormat(formatArgument, format))
+            DocumentFormat format = DocumentFormat::JSON;
+            if (!parseDocumentFormat(formatArgument, format))
                 return {false, String("Usage: >manifest [publish] [json|msgpack]")};
 
-            if (explicitPublish || format == ManifestFormat::MSGPACK)
+            if (explicitPublish || format == DocumentFormat::MSGPACK)
             {
                 const bool published = publishManifest(format);
                 return {published, published ? String("Republished.")
@@ -2990,10 +2864,8 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
     const uint8_t encoding = root.size() != 0 ? root[0].as<uint8_t>() : 0;
     if (root.size() < 3 || encoding != ManifestEncodingVersion)
     {
-        // Not an error: a device newer than this one. It publishes the JSON
-        // manifest too, which is the whole point of still publishing it.
         LOG_WARNING("RM", "Encoded manifest from '%s' is encoding %u, this build reads %u -- "
-                          "use the JSON manifest instead",
+                          "document rejected",
                     deviceName.c_str(), (unsigned)encoding, (unsigned)ManifestEncodingVersion);
         return;
     }
@@ -3022,7 +2894,7 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
     const String path = topic.substring(firstSlash + 1);
     // Manifests are a sibling subtree of resource, not a member of it, so the
     // two are told apart by prefix and never by counting segments.
-    if (path == "manifest")
+    if (path == "manifest/json")
     {
         // Consumed only when a handler wants every device's manifest. The
         // manager's own verification reads the compact form now, so nothing

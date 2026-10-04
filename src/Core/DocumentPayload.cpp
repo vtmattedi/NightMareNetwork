@@ -53,7 +53,23 @@ const char *describePayloadResult(PayloadResult result)
     }
 }
 
-PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentEncoding encoding,
+const char *documentFormatName(DocumentFormat format)
+{
+    return format == DocumentFormat::MSGPACK ? "msgpack" : "json";
+}
+
+String resolveDocumentTopic(const String &deviceName, const String &documentRoot,
+                            DocumentFormat format)
+{
+    String topic = deviceName;
+    topic += '/';
+    topic += documentRoot;
+    topic += '/';
+    topic += documentFormatName(format);
+    return topic;
+}
+
+PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentFormat format,
                                      String &out)
 {
     out = String();
@@ -62,7 +78,7 @@ PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentEncoding e
     if (doc.overflowed())
         return PayloadResult::DocumentIncomplete;
 
-    const bool packed = encoding == DocumentEncoding::MSGPACK;
+    const bool packed = format == DocumentFormat::MSGPACK;
     const size_t expected = packed ? measureMsgPack(doc) : measureJson(doc);
     if (expected == 0)
         return PayloadResult::Empty;

@@ -103,10 +103,10 @@ That distinction is permanent for the Resource object. Retargeting a Remote Reso
 The network representation is intentionally small:
 
 ```text
-<device>/manifest
 <device>/manifest/msgpack
-<device>/manifest/consume
+<device>/manifest/json                 optional
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json         optional
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
@@ -149,7 +149,7 @@ NightMare separates information by lifecycle.
 <device>/info
     mostly static / boot-scoped description
 
-<device>/hardware
+<device>/hardware/msgpack
     hardware configuration v2: assemblies, reusable definitions, devices,
     connectors, and explicit physical connections; nets are inferred
 

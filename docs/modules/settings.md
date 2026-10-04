@@ -152,12 +152,12 @@ SystemState.clear(SystemFlag::TimeSynced);
 Pending framework work is kept in a separate typed bank:
 
 ```cpp
-SystemState.request(SystemRequest::PublishHardwareJson);
+SystemState.request(SystemRequest::PublishHardware);
 
-if (SystemState.take(SystemRequest::PublishHardwareJson))
+if (SystemState.take(SystemRequest::PublishHardware))
 {
     if (!publishHardwareJson())
-        SystemState.request(SystemRequest::PublishHardwareJson);
+        SystemState.request(SystemRequest::PublishHardware);
 }
 ```
 

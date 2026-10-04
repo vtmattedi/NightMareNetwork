@@ -104,6 +104,109 @@ namespace
         }
     }
 
+    void addOptional(JsonArray dst, const char *value)
+    {
+        if (value != nullptr && value[0] != '\0')
+            dst.add(value);
+        else
+            dst.add(nullptr);
+    }
+
+    void appendPackedEndpoint(JsonArray dst, const NMHardware::EndpointRef &endpoint)
+    {
+        dst.add(endpoint.assembly != nullptr ? endpoint.assembly : "");
+        dst.add(static_cast<uint8_t>(endpoint.kind));
+        dst.add(endpoint.owner != nullptr ? endpoint.owner : "");
+        dst.add(endpoint.endpoint != nullptr ? endpoint.endpoint : "");
+    }
+
+    void appendPackedConnection(JsonArray dst, const NMHardware::Connection &connection)
+    {
+        appendPackedEndpoint(dst.add<JsonArray>(), connection.a);
+        appendPackedEndpoint(dst.add<JsonArray>(), connection.b);
+        const NMHardware::WireMetadata &wire = connection.wire;
+        if ((wire.color == nullptr || wire.color[0] == '\0') &&
+            (wire.gauge == nullptr || wire.gauge[0] == '\0') &&
+            (wire.label == nullptr || wire.label[0] == '\0') && wire.lengthMm == 0)
+        {
+            dst.add(nullptr);
+            return;
+        }
+        JsonArray item = dst.add<JsonArray>();
+        addOptional(item, wire.color);
+        addOptional(item, wire.gauge);
+        addOptional(item, wire.label);
+        item.add(wire.lengthMm);
+    }
+
+    void appendPackedMembers(JsonArray dst, const NMHardware::AssemblyMembers &members);
+
+    void appendPackedAssembly(JsonArray dst, const NMHardware::Assembly &assembly)
+    {
+        dst.add(assembly.id != nullptr ? assembly.id : "");
+        addOptional(dst, assembly.definition);
+        addOptional(dst, assembly.name);
+        dst.add(static_cast<uint8_t>(assembly.kind));
+        addOptional(dst, assembly.model);
+        addOptional(dst, assembly.manufacturer);
+        addOptional(dst, assembly.serialNumber);
+        addOptional(dst, assembly.location);
+        appendPackedMembers(dst.add<JsonArray>(), assembly.members);
+    }
+
+    void appendPackedMembers(JsonArray dst, const NMHardware::AssemblyMembers &members)
+    {
+        JsonArray assemblies = dst.add<JsonArray>();
+        for (size_t i = 0; i < members.assemblyCount; ++i)
+            appendPackedAssembly(assemblies.add<JsonArray>(), members.assemblies[i]);
+
+        JsonArray devices = dst.add<JsonArray>();
+        for (size_t i = 0; i < members.deviceCount; ++i)
+        {
+            const NMHardware::Device &device = members.devices[i];
+            JsonArray item = devices.add<JsonArray>();
+            item.add(device.id != nullptr ? device.id : "");
+            addOptional(item, device.name);
+            addOptional(item, device.kind);
+            addOptional(item, device.model);
+            addOptional(item, device.manufacturer);
+            JsonArray terminals = item.add<JsonArray>();
+            for (size_t terminal = 0; terminal < device.terminalCount; ++terminal)
+            {
+                JsonArray endpoint = terminals.add<JsonArray>();
+                endpoint.add(device.terminals[terminal].id != nullptr
+                                 ? device.terminals[terminal].id : "");
+                endpoint.add(static_cast<uint8_t>(device.terminals[terminal].canonicalNet));
+                addOptional(endpoint, device.terminals[terminal].name);
+            }
+        }
+
+        JsonArray connectors = dst.add<JsonArray>();
+        for (size_t i = 0; i < members.connectorCount; ++i)
+        {
+            const NMHardware::Connector &connector = members.connectors[i];
+            JsonArray item = connectors.add<JsonArray>();
+            item.add(connector.id != nullptr ? connector.id : "");
+            addOptional(item, connector.name);
+            item.add(static_cast<uint8_t>(connector.kind));
+            addOptional(item, connector.model);
+            addOptional(item, connector.manufacturer);
+            JsonArray contacts = item.add<JsonArray>();
+            for (size_t contact = 0; contact < connector.contactCount; ++contact)
+            {
+                JsonArray endpoint = contacts.add<JsonArray>();
+                endpoint.add(connector.contacts[contact].id != nullptr
+                                 ? connector.contacts[contact].id : "");
+                endpoint.add(static_cast<uint8_t>(connector.contacts[contact].canonicalNet));
+                addOptional(endpoint, connector.contacts[contact].name);
+            }
+        }
+
+        JsonArray connections = dst.add<JsonArray>();
+        for (size_t i = 0; i < members.connectionCount; ++i)
+            appendPackedConnection(connections.add<JsonArray>(), members.connections[i]);
+    }
+
     void appendMembers(JsonObject dst, const NMHardware::AssemblyMembers &members);
 
     void appendAssembly(JsonObject dst, const NMHardware::Assembly &assembly)
@@ -169,6 +272,152 @@ namespace
         JsonArray connections = dst["connections"].to<JsonArray>();
         for (size_t i = 0; i < members.connectionCount; ++i)
             appendConnection(connections.add<JsonObject>(), members.connections[i]);
+    }
+
+    bool copyOptional(JsonObject dst, const char *key, JsonVariantConst value)
+    {
+        if (value.isNull())
+            return true;
+        if (!value.is<const char *>())
+            return false;
+        dst[key] = value.as<const char *>();
+        return true;
+    }
+
+    bool decodePackedEndpoint(JsonArrayConst src, JsonObject dst)
+    {
+        if (src.size() < 4 || !src[0].is<const char *>() || !src[1].is<uint8_t>() ||
+            !src[2].is<const char *>() || !src[3].is<const char *>())
+            return false;
+        const uint8_t kind = src[1].as<uint8_t>();
+        if (kind > static_cast<uint8_t>(NMHardware::EndpointKind::ConnectorContact))
+            return false;
+        dst["assembly"] = src[0].as<const char *>();
+        dst["kind"] = NMHardware::endpointKindName(static_cast<NMHardware::EndpointKind>(kind));
+        dst["owner"] = src[2].as<const char *>();
+        dst["endpoint"] = src[3].as<const char *>();
+        return true;
+    }
+
+    bool decodePackedConnection(JsonArrayConst src, JsonObject dst)
+    {
+        if (src.size() < 3 || !src[0].is<JsonArrayConst>() || !src[1].is<JsonArrayConst>() ||
+            (!src[2].isNull() && !src[2].is<JsonArrayConst>()))
+            return false;
+        if (!decodePackedEndpoint(src[0].as<JsonArrayConst>(), dst["a"].to<JsonObject>()) ||
+            !decodePackedEndpoint(src[1].as<JsonArrayConst>(), dst["b"].to<JsonObject>()))
+            return false;
+        if (src[2].isNull())
+            return true;
+        JsonArrayConst wire = src[2].as<JsonArrayConst>();
+        if (wire.size() < 4 || !wire[3].is<uint32_t>())
+            return false;
+        JsonObject out = dst["wire"].to<JsonObject>();
+        if (!copyOptional(out, "color", wire[0]) || !copyOptional(out, "gauge", wire[1]) ||
+            !copyOptional(out, "label", wire[2]))
+            return false;
+        if (wire[3].as<uint32_t>() != 0)
+            out["length_mm"] = wire[3].as<uint32_t>();
+        return true;
+    }
+
+    bool decodePackedMembers(JsonArrayConst src, JsonObject dst);
+
+    bool decodePackedAssembly(JsonArrayConst src, JsonObject dst)
+    {
+        if (src.size() < 9 || !src[0].is<const char *>() || !src[3].is<uint8_t>() ||
+            !src[8].is<JsonArrayConst>())
+            return false;
+        const uint8_t kind = src[3].as<uint8_t>();
+        if (kind > static_cast<uint8_t>(NMHardware::AssemblyKind::Generic))
+            return false;
+        dst["id"] = src[0].as<const char *>();
+        if (!copyOptional(dst, "definition", src[1]) || !copyOptional(dst, "name", src[2]) ||
+            !copyOptional(dst, "model", src[4]) || !copyOptional(dst, "manufacturer", src[5]) ||
+            !copyOptional(dst, "serial_number", src[6]) || !copyOptional(dst, "location", src[7]))
+            return false;
+        if (src[1].isNull() || kind != static_cast<uint8_t>(NMHardware::AssemblyKind::Generic))
+            dst["kind"] = NMHardware::assemblyKindName(static_cast<NMHardware::AssemblyKind>(kind));
+        return decodePackedMembers(src[8].as<JsonArrayConst>(), dst);
+    }
+
+    bool decodePackedMembers(JsonArrayConst src, JsonObject dst)
+    {
+        if (src.size() < 4 || !src[0].is<JsonArrayConst>() || !src[1].is<JsonArrayConst>() ||
+            !src[2].is<JsonArrayConst>() || !src[3].is<JsonArrayConst>())
+            return false;
+        JsonArray assemblies = dst["assemblies"].to<JsonArray>();
+        for (JsonVariantConst value : src[0].as<JsonArrayConst>())
+            if (!value.is<JsonArrayConst>() ||
+                !decodePackedAssembly(value.as<JsonArrayConst>(), assemblies.add<JsonObject>()))
+                return false;
+
+        JsonArray devices = dst["devices"].to<JsonArray>();
+        for (JsonVariantConst value : src[1].as<JsonArrayConst>())
+        {
+            if (!value.is<JsonArrayConst>()) return false;
+            JsonArrayConst item = value.as<JsonArrayConst>();
+            if (item.size() < 6 || !item[0].is<const char *>() || !item[5].is<JsonArrayConst>())
+                return false;
+            JsonObject out = devices.add<JsonObject>();
+            out["id"] = item[0].as<const char *>();
+            if (!copyOptional(out, "name", item[1]) || !copyOptional(out, "kind", item[2]) ||
+                !copyOptional(out, "model", item[3]) || !copyOptional(out, "manufacturer", item[4]))
+                return false;
+            JsonArray terminals = out["terminals"].to<JsonArray>();
+            for (JsonVariantConst endpointValue : item[5].as<JsonArrayConst>())
+            {
+                if (!endpointValue.is<JsonArrayConst>()) return false;
+                JsonArrayConst endpoint = endpointValue.as<JsonArrayConst>();
+                if (endpoint.size() < 3 || !endpoint[0].is<const char *>() ||
+                    !endpoint[1].is<uint8_t>()) return false;
+                const uint8_t net = endpoint[1].as<uint8_t>();
+                if (net > static_cast<uint8_t>(NMHardware::CanonicalNet::ProtectiveEarth)) return false;
+                JsonObject terminal = terminals.add<JsonObject>();
+                terminal["id"] = endpoint[0].as<const char *>();
+                if (!copyOptional(terminal, "name", endpoint[2])) return false;
+                if (net != static_cast<uint8_t>(NMHardware::CanonicalNet::None))
+                    terminal["canonical_net"] = NMHardware::canonicalNetName(static_cast<NMHardware::CanonicalNet>(net));
+            }
+        }
+
+        JsonArray connectors = dst["connectors"].to<JsonArray>();
+        for (JsonVariantConst value : src[2].as<JsonArrayConst>())
+        {
+            if (!value.is<JsonArrayConst>()) return false;
+            JsonArrayConst item = value.as<JsonArrayConst>();
+            if (item.size() < 6 || !item[0].is<const char *>() || !item[2].is<uint8_t>() ||
+                !item[5].is<JsonArrayConst>()) return false;
+            const uint8_t kind = item[2].as<uint8_t>();
+            if (kind > static_cast<uint8_t>(NMHardware::ConnectorKind::Generic)) return false;
+            JsonObject out = connectors.add<JsonObject>();
+            out["id"] = item[0].as<const char *>();
+            if (!copyOptional(out, "name", item[1]) || !copyOptional(out, "model", item[3]) ||
+                !copyOptional(out, "manufacturer", item[4])) return false;
+            out["kind"] = NMHardware::connectorKindName(static_cast<NMHardware::ConnectorKind>(kind));
+            JsonArray contacts = out["contacts"].to<JsonArray>();
+            for (JsonVariantConst endpointValue : item[5].as<JsonArrayConst>())
+            {
+                if (!endpointValue.is<JsonArrayConst>()) return false;
+                JsonArrayConst endpoint = endpointValue.as<JsonArrayConst>();
+                if (endpoint.size() < 3 || !endpoint[0].is<const char *>() ||
+                    !endpoint[1].is<uint8_t>()) return false;
+                const uint8_t net = endpoint[1].as<uint8_t>();
+                if (net > static_cast<uint8_t>(NMHardware::CanonicalNet::ProtectiveEarth)) return false;
+                JsonObject contact = contacts.add<JsonObject>();
+                contact["id"] = endpoint[0].as<const char *>();
+                if (!copyOptional(contact, "name", endpoint[2])) return false;
+                if (net != static_cast<uint8_t>(NMHardware::CanonicalNet::None))
+                    contact["canonical_net"] = NMHardware::canonicalNetName(static_cast<NMHardware::CanonicalNet>(net));
+            }
+        }
+
+        JsonArray connections = dst["connections"].to<JsonArray>();
+        for (JsonVariantConst value : src[3].as<JsonArrayConst>())
+            if (!value.is<JsonArrayConst>() ||
+                !decodePackedConnection(value.as<JsonArrayConst>(), connections.add<JsonObject>()))
+                return false;
+        return true;
     }
 
     // The connection topic of each publishable document; null for query-only sections.
@@ -315,6 +564,33 @@ void TelemetryService::buildNamedHardware(JsonDocument &doc) const
         appendConnection(connections.add<JsonObject>(), profile.connections[i]);
 }
 
+void TelemetryService::buildPositionalHardware(JsonDocument &doc) const
+{
+    const NMHardware::Profile profile = NMHardware::getProfile();
+    JsonArray root = doc.to<JsonArray>();
+    root.add(NMHardware::HardwareEncodingVersion);
+    root.add(NMHardware::HwConfigVersion);
+    root.add(profile.hostAssembly != nullptr ? profile.hostAssembly : "");
+    JsonArray definitions = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.definitionCount; ++i)
+    {
+        const NMHardware::HardwareDefinition &definition = profile.definitions[i];
+        JsonArray item = definitions.add<JsonArray>();
+        item.add(definition.id != nullptr ? definition.id : "");
+        item.add(static_cast<uint8_t>(definition.kind));
+        addOptional(item, definition.name);
+        addOptional(item, definition.model);
+        addOptional(item, definition.manufacturer);
+        appendPackedMembers(item.add<JsonArray>(), definition.members);
+    }
+    JsonArray roots = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.rootCount; ++i)
+        appendPackedAssembly(roots.add<JsonArray>(), profile.roots[i]);
+    JsonArray connections = root.add<JsonArray>();
+    for (size_t i = 0; i < profile.connectionCount; ++i)
+        appendPackedConnection(connections.add<JsonArray>(), profile.connections[i]);
+}
+
 void TelemetryService::appendBuild(JsonObject dst) const
 {
     dst["firmware_version"] = NM_FIRMWARE_VERSION;
@@ -452,7 +728,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     // An ArduinoJson 7 document has no fixed capacity, but it can still lose a
     // value to a failed allocation, and a non-empty payload is no evidence that
     // it did not. A partial document must never be published, retained or not.
-    const PayloadResult outcome = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
+    const PayloadResult outcome = serializeWholeDocument(doc, DocumentFormat::JSON, result.data);
     result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
         LOG_WARNING("TEL", "Not publishing the info document: %s (8bit heap free=%u largest=%u)",
@@ -505,7 +781,7 @@ TelemetryResult TelemetryService::getHardware() const
     JsonDocument doc;
     buildNamedHardware(doc);
     const size_t measured = measureJson(doc);
-    const PayloadResult outcome = serializeWholeDocument(doc, DocumentEncoding::JSON, result.data);
+    const PayloadResult outcome = serializeWholeDocument(doc, DocumentFormat::JSON, result.data);
     result.valid = outcome == PayloadResult::Complete;
     if (!result.valid)
         LOG_WARNING("TEL", "Not publishing the hardware document (%u bytes): %s "
@@ -517,10 +793,84 @@ TelemetryResult TelemetryService::getHardware() const
     return result;
 }
 
+TelemetryResult TelemetryService::getHardwareMessagePack() const
+{
+    TelemetryResult result;
+    const NMHardware::ValidationResult validation = NMHardware::validateHwConfig(NMHardware::getProfile());
+    if (!validation.valid())
+        return result;
+    JsonDocument doc;
+    buildPositionalHardware(doc);
+    result.valid = serializeWholeDocument(doc, DocumentFormat::MSGPACK, result.data) ==
+                   PayloadResult::Complete;
+    return result;
+}
+
+bool TelemetryService::decodeHardware(const String &encoded, JsonDocument &into)
+{
+    JsonDocument packed;
+    if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) || !packed.is<JsonArray>())
+        return false;
+    JsonArrayConst root = packed.as<JsonArrayConst>();
+    if (root.size() < 6 || !root[0].is<uint8_t>() ||
+        root[0].as<uint8_t>() != NMHardware::HardwareEncodingVersion ||
+        !root[1].is<uint8_t>() || root[1].as<uint8_t>() != NMHardware::HwConfigVersion ||
+        !root[2].is<const char *>() || !root[3].is<JsonArrayConst>() ||
+        !root[4].is<JsonArrayConst>() || !root[5].is<JsonArrayConst>())
+        return false;
+
+    JsonDocument decoded;
+    decoded["version"] = root[1].as<uint8_t>();
+    decoded["host_assembly"] = root[2].as<const char *>();
+    JsonArray definitions = decoded["definitions"].to<JsonArray>();
+    for (JsonVariantConst value : root[3].as<JsonArrayConst>())
+    {
+        if (!value.is<JsonArrayConst>()) return false;
+        JsonArrayConst item = value.as<JsonArrayConst>();
+        if (item.size() < 6 || !item[0].is<const char *>() || !item[1].is<uint8_t>() ||
+            !item[5].is<JsonArrayConst>()) return false;
+        const uint8_t kind = item[1].as<uint8_t>();
+        if (kind > static_cast<uint8_t>(NMHardware::AssemblyKind::Generic)) return false;
+        JsonObject out = definitions.add<JsonObject>();
+        out["id"] = item[0].as<const char *>();
+        out["kind"] = NMHardware::assemblyKindName(static_cast<NMHardware::AssemblyKind>(kind));
+        if (!copyOptional(out, "name", item[2]) || !copyOptional(out, "model", item[3]) ||
+            !copyOptional(out, "manufacturer", item[4]) ||
+            !decodePackedMembers(item[5].as<JsonArrayConst>(), out)) return false;
+    }
+    JsonArray roots = decoded["roots"].to<JsonArray>();
+    for (JsonVariantConst value : root[4].as<JsonArrayConst>())
+        if (!value.is<JsonArrayConst>() ||
+            !decodePackedAssembly(value.as<JsonArrayConst>(), roots.add<JsonObject>())) return false;
+    JsonArray connections = decoded["connections"].to<JsonArray>();
+    for (JsonVariantConst value : root[5].as<JsonArrayConst>())
+        if (!value.is<JsonArrayConst>() ||
+            !decodePackedConnection(value.as<JsonArrayConst>(), connections.add<JsonObject>())) return false;
+    if (decoded.overflowed())
+        return false;
+    into.clear();
+    into.set(decoded);
+    return !into.overflowed();
+}
+
 bool TelemetryService::publishHardware()
 {
-    const TelemetryResult hardware = getHardware();
-    return hardware.valid && NightMare::PublishText(gDeviceIdentity.topic("hardware"), hardware.data, true);
+    const TelemetryResult hardware = getHardwareMessagePack();
+    if (!hardware.valid ||
+        !NightMare::Publish(resolveDocumentTopic(gDeviceIdentity.getDeviceName(), "hardware",
+                                                DocumentFormat::MSGPACK).c_str(),
+                            reinterpret_cast<const uint8_t *>(hardware.data.c_str()),
+                            hardware.data.length(), true))
+        return false;
+#if NM_ENABLE_JSON_WIRE
+    const TelemetryResult json = getHardware();
+    if (!json.valid || !NightMare::PublishText(
+                           resolveDocumentTopic(gDeviceIdentity.getDeviceName(), "hardware",
+                                                DocumentFormat::JSON),
+                           json.data, true))
+        LOG_WARNING("TEL", "Canonical hardware published; optional JSON sibling failed");
+#endif
+    return true;
 }
 
 bool TelemetryService::publishAll()

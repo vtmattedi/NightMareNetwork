@@ -51,6 +51,12 @@
 #ifndef NM_ENABLE_TELEMETRY
 #define NM_ENABLE_TELEMETRY 1
 #endif
+// Machine-facing framework documents are canonically MessagePack. Enable this
+// only when a retained human-readable sibling is also required on the wire;
+// commands and local diagnostic generation remain available either way.
+#ifndef NM_ENABLE_JSON_WIRE
+#define NM_ENABLE_JSON_WIRE 0
+#endif
 #ifndef NM_TELEMETRY_INTERVAL_MS
 #define NM_TELEMETRY_INTERVAL_MS 60000UL
 #endif

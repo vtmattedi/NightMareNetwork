@@ -34,7 +34,8 @@ HEARTBEAT
     transient liveness cadence configured at runtime
 ```
 
-INFO, SYSTEM, NETWORK, HEARTBEAT, and hardware configuration have JSON MQTT topics.
+INFO, SYSTEM, NETWORK, and HEARTBEAT keep their existing JSON MQTT topics.
+Hardware configuration is MessagePack-first; its JSON sibling is optional.
 
 ## InfoType
 
@@ -475,13 +476,13 @@ definitions: none
 connections: none
 ```
 
-The retained topic is:
+The canonical retained topic is:
 
 ```text
-<device>/hardware
+<device>/hardware/msgpack
 ```
 
-The readable JSON form is available through:
+The readable JSON form is available on demand through:
 
 ```cpp
 Telemetry.getHardware();
@@ -492,6 +493,10 @@ Publication uses:
 ```cpp
 Telemetry.publishHardware();
 ```
+
+It publishes MessagePack canonically and, only when `NM_ENABLE_JSON_WIRE=1`,
+also publishes `<device>/hardware/json`. Failure of that optional sibling does
+not make canonical publication fail. The bare hardware root carries no payload.
 
 Version 2 stores assemblies, devices, connectors, contacts, terminals, reusable
 definitions, and physical connections. It does not store normal nets. The

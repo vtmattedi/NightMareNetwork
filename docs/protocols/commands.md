@@ -55,7 +55,8 @@ No space after `>` selects an internal ResourceManager operation:
 `>manifest json` returns the readable manifest. `>manifest msgpack` republishes
 the retained compact manifest and returns `Republished to MQTT.` because raw
 MessagePack is not useful on a text command response. `publish` explicitly
-requests MQTT publication; with no format it republishes both encodings.
+requests MQTT publication; with no format it republishes canonical MessagePack
+and the optional JSON sibling only when `NM_ENABLE_JSON_WIRE=1`.
 
 `>raw` sends the supplied MQTT-shaped topic and opaque payload through `ResourcesManager::handleIngressMessage()`.
 
@@ -486,7 +487,8 @@ HW [PUBLISH]
 ```
 
 `HW` (and the accepted explicit alias `HW JSON`) returns the readable hardware
-configuration. `HW PUBLISH` republishes `<device>/hardware` and returns
+configuration. `HW PUBLISH` republishes `<device>/hardware/msgpack` (plus the
+optional `/hardware/json` sibling when enabled) and returns
 `Republished to MQTT.`.
 
 ## TIME

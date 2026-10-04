@@ -92,7 +92,7 @@ void onConnected()
     SystemState.request(SystemRequest::PublishResourceStates);
 #if NM_ENABLE_TELEMETRY
     SystemState.request(SystemRequest::PublishInfo);
-    SystemState.request(SystemRequest::PublishHardwareJson);
+    SystemState.request(SystemRequest::PublishHardware);
     SystemState.request(SystemRequest::PublishTelemetry);
 #endif
 #if NM_ENABLE_CONSOLE

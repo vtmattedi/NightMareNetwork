@@ -117,7 +117,7 @@ NightMare owns the standard device-level information surfaces:
 ```text
 <device>/status
 <device>/info
-<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
 <device>/telemetry/heartbeat

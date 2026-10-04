@@ -36,7 +36,7 @@ symlink://../..
 Once connected, inspect:
 
 ```text
-<device>/manifest
+<device>/manifest/msgpack
 <device>/resource/uptime_s/state
 <device>/resource/brightness/state
 ```

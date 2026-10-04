@@ -87,6 +87,7 @@ A useful explicit default configuration is:
 #define NM_ENABLE_WIFI 1
 #define NM_ENABLE_MQTT 1
 #define NM_ENABLE_TELEMETRY 1
+#define NM_ENABLE_JSON_WIRE 0
 #define NM_ENABLE_SCHEDULER 1
 #define NM_ENABLE_JOBS 1
 #define NM_ENABLE_TIME_SYNC 1
@@ -471,7 +472,7 @@ outsideTemperature.setSource("weather-node", "temperature");
 NightMare automatically subscribes to:
 
 ```text
-weather-node/manifest
+weather-node/manifest/msgpack
 weather-node/resource/temperature/state
 ```
 
@@ -691,7 +692,7 @@ living-room/info
 living-room/telemetry/system
 living-room/telemetry/network
 living-room/telemetry/heartbeat
-living-room/manifest
+living-room/manifest/msgpack
 living-room/resource/temperature/state
 living-room/resource/power/state
 ```

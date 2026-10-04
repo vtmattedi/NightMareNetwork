@@ -298,7 +298,7 @@ Optimism does not change ownership. The remote device remains the source of trut
 The retained topic:
 
 ```text
-<device>/manifest
+<device>/manifest/msgpack
 ```
 
 contains the device's Resource manifest.
@@ -307,9 +307,9 @@ The manifest is descriptive. It exists for discovery, self-description, tooling,
 
 It does not gate Resource state. A missing, stale, incompatible, or withdrawn manifest does not by itself invalidate a `/state` message.
 
-The separate retained `<device>/manifest/consume` document describes valid,
-bound Remote Resource dependencies. It does not add Remote Resources to the
-provider manifest.
+The separate retained `<device>/manifest/consume/msgpack` document represents
+all declared Remote Resources. Bound entries derive active consume edges; it
+does not add Remote Resources to the provider manifest.
 
 ## State
 
@@ -403,7 +403,7 @@ The sections can be queried individually through the INFO interface without crea
 
 ## Hardware configuration
 
-The retained `<device>/hardware` JSON document describes reconstructable
+The retained `<device>/hardware/msgpack` document describes reconstructable
 physical composition and wiring. Assemblies contain assemblies, devices, and
 connectors. Devices expose terminals; connectors expose contacts. Connections
 are physical endpoint-to-endpoint conductors, and electrical nets are inferred

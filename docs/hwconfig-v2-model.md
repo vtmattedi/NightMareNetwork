@@ -168,10 +168,33 @@ ESP32-C3 SuperMini rev1, MycroftY controller rev1, a DS18B20 waterproof probe,
 and a generic one-channel relay module. `standardDefinitions(count)` returns
 the complete catalog; the MycroftY definition composes the ESP32 definition.
 
-Firmware publishes only the source configuration at `<device>/hardware` as
-retained JSON. Inferred nets are a generated view and are not serialized as
-manually maintained source data. A compact hardware encoding is deliberately
-deferred until the schema is stable.
+Firmware publishes the source configuration canonically as retained MessagePack
+at `<device>/hardware/msgpack`. The readable `<device>/hardware/json` sibling is
+published only when `NM_ENABLE_JSON_WIRE=1`; `HW JSON` can generate it on demand
+regardless. Inferred nets are generated views and are never serialized.
+
+The logical schema remains `HwConfigVersion = 2`; the positional wire contract
+starts at `HardwareEncodingVersion = 1`:
+
+```text
+hardware   = [encodingVersion, hwConfigVersion, hostAssembly,
+              definitions[], roots[], connections[]]
+definition = [id, kind, name|null, model|null, manufacturer|null, members]
+assembly   = [id, definition|null, name|null, kind, model|null,
+              manufacturer|null, serialNumber|null, location|null, members]
+members    = [assemblies[], devices[], connectors[], connections[]]
+device     = [id, name|null, kind|null, model|null, manufacturer|null, terminals[]]
+terminal   = [id, canonicalNet, name|null]
+connector  = [id, name|null, kind, model|null, manufacturer|null, contacts[]]
+contact    = [id, canonicalNet, name|null]
+endpoint   = [assembly, kind, owner, endpoint]
+connection = [a, b, wire|null]
+wire       = [color|null, gauge|null, label|null, lengthMm]
+```
+
+Encoding version is always position 0. Positions and enum numbers are
+append-only; optional additions go at the end. Reordering, removing, or
+repurposing a position requires a new `HardwareEncodingVersion`.
 
 ## Serialized member shapes
 

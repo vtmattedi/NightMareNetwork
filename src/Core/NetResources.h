@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "DocumentPayload.h"
 #include <NightMare/Features.h>
 #include "NetCodec.h"
 
@@ -185,10 +186,10 @@ private:
  * name itself without a ResourcesManager, and the Manager builds nothing of its
  * own. These only assemble strings: callers validate the segments first.
  *
- *   <device>/manifest                   manifest, retained
- *   <device>/manifest/msgpack           compact manifest, retained
- *   <device>/manifest/consume           remote dependencies, retained
- *   <device>/manifest/consume/msgpack   compact remote dependencies, retained
+ *   <device>/manifest/msgpack           canonical manifest, retained
+ *   <device>/manifest/json              optional readable manifest, retained
+ *   <device>/manifest/consume/msgpack   canonical remote declarations, retained
+ *   <device>/manifest/consume/json      optional readable sibling, retained
  *   <device>/resource/<name>/state      value state, retained
  *   <device>/resource/<name>/set        write request, transient
  *   <device>/resource/<name>/invoke     action request, transient
@@ -202,30 +203,19 @@ enum class ResourceTopicOperation : uint8_t
     EVENT
 };
 
-/// @brief How a manifest is encoded on the wire. The same document either way:
-/// this chooses the encoding, never the content.
+/// Document formats use explicit topic leaves. MessagePack is canonical;
+/// optional JSON is readable and self-describing.
 ///
-///   JSON     <device>/manifest          readable, self-describing, large
-///   MSGPACK  <device>/manifest/msgpack  compact: positions instead of keys,
-///                                       enums as their value, not their name
-///
-/// Both live under <device>/manifest, which is a sibling of <device>/resource
+/// Both live under the <device>/manifest namespace, a sibling of <device>/resource
 /// and not inside it. What a device declares and what its resources currently
 /// read are two different things, and keeping them in separate subtrees means a
-/// reader can subscribe to one without the other -- `+/manifest` for discovery,
+/// reader can subscribe to one without the other -- `+/manifest/json`,
 /// `+/resource/+/state` for values -- instead of filtering the manifest back
 /// out of a resource wildcard.
 ///
-/// Both are published and both are retained, so a reader picks whichever it can
-/// decode and nothing has to negotiate. A manifest is the largest routine
+/// A manifest is the largest routine
 /// document on the network and the one that arrives while a connection is at
 /// its most expensive, which is what the compact form is for.
-enum class ManifestFormat : uint8_t
-{
-    JSON,
-    MSGPACK
-};
-
 /* ---------------------------------------------------------------------------
  * The MessagePack manifest layout.
  *
@@ -275,35 +265,26 @@ enum class ManifestFormat : uint8_t
  *     not know means "unknown", not "incompatible": it neither bumps the
  *     encoding version nor counts as a mismatch.
  *
- *  5. An unknown encoding version is not an error. The reader ignores the
- *     compact manifest and uses the JSON one, which is always published beside
- *     it. That is what makes rule 3 survivable -- a bump degrades old readers to
- *     JSON instead of breaking them.
+ *  5. An unknown encoding version is rejected. Breaking versions require a
+ *     coordinated protocol update; there is no compatibility reader.
  * ------------------------------------------------------------------------- */
-/// Encoding version 3 introduces the EVENT resource shape (kind 2). Version 2
-/// readers do not know it, so they fall back to the JSON manifest (rule 5).
+/// Encoding version 3 introduces the EVENT resource shape (kind 2).
 /// The VALUE and ACTION shapes are unchanged. The logical ResourceManifestVersion
 /// moves with it because the manifest can now declare a new kind of resource.
 constexpr uint8_t ManifestEncodingVersion = 3;
 constexpr uint8_t ResourceManifestVersion = 6;
-/// Consume encoding version 2 introduces the EVENT entry shapes below. A version 1
-/// reader does not know kind 2, so it falls back to the JSON consume manifest.
-constexpr uint8_t ConsumeManifestEncodingVersion = 2;
-/// Version 2 appended `remotes` (position 3 of the compact form): every Remote
-/// Resource this device declares, bound or not, so a controller can find and
-/// configure them with SOURCE. `consumes` is unchanged and still lists only
-/// dependency edges. Version 3 adds Remote Events to both lists.
+/// Consume encoding version 3 removes the duplicated consumes array.
+constexpr uint8_t ConsumeManifestEncodingVersion = 3;
+/// Version 4 removes the duplicated `consumes` array. Every Remote Resource is
+/// represented once; `bound == true` derives the active consume edge.
 ///
-///   consume := [ 0, device:str, resource:str, access:uint, type:uint ]
-///            | [ 1, device:str, resource:str, arguments:array ]
-///            | [ 2, device:str, resource:str, type:uint ]                  // EVENT
-///
+///   document := [ encodingVersion, consumeVersion, remotes:array ]
 ///   remote := [ 0, localName:str, bound:bool, device:str, resource:str, access:uint, type:uint ]
 ///           | [ 1, localName:str, bound:bool, device:str, resource:str, arguments:array ]
 ///           | [ 2, localName:str, bound:bool, device:str, resource:str, type:uint ]  // EVENT
 ///
 /// device and resource are empty strings while unbound.
-constexpr uint8_t ConsumeManifestVersion = 3;
+constexpr uint8_t ConsumeManifestVersion = 4;
 
 /// Positions within the top-level array. Position 0 is fixed for all time; see
 /// rule 1 above.
@@ -326,21 +307,16 @@ String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation 
 String resolveResourceTopic(const String &deviceName, const String &resourceName,
                             ResourceTopicOperation operation);
 
-/// @brief `<device>/manifest`: the JSON manifest, and the root of the subtree
-/// the compact one hangs below.
-String resolveResourceManifestTopic(const String &deviceName);
-
-/// @brief The manifest topic for one encoding. JSON is the bare
-/// `<device>/manifest`; MSGPACK adds `/msgpack` below it. This encoding-named
-/// path leaves room for siblings such as `/manifest/cbor`.
-String resolveResourceManifestTopic(const String &deviceName, ManifestFormat format);
+/// `<device>/manifest` itself is a namespace and carries no payload.
+/// @brief The manifest topic for one explicit encoding.
+String resolveResourceManifestTopic(const String &deviceName, DocumentFormat format);
 
 /// @brief Retained dependencies derived from bound, resolved Remote Resources.
 String resolveResourceConsumeManifestTopic(const String &deviceName,
-                                           ManifestFormat format = ManifestFormat::JSON);
+                                           DocumentFormat format);
 
 /// @brief `<device>/resource`: the root every resource hangs below. Separate
-/// from the manifest topic, deliberately -- see ManifestFormat.
+/// from the manifest topic, deliberately -- see DocumentFormat.
 String resolveResourceRootTopic(const String &deviceName);
 
 enum class NetSyncStrategy : uint8_t

@@ -12,10 +12,10 @@ Resources are the application-level contract between NightMare devices.
 The current Resource protocol has these topic shapes:
 
 ```text
-<device>/manifest
 <device>/manifest/msgpack
-<device>/manifest/consume
+<device>/manifest/json
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
@@ -68,12 +68,13 @@ A resolved `(device, resource-name)` address may only be represented once in the
 A device publishes its retained manifest at:
 
 ```text
-<device>/manifest
+<device>/manifest/msgpack
+<device>/manifest/json    optional when NM_ENABLE_JSON_WIRE=1
 ```
 
 Only Resources **Managed by that device** appear in its manifest. Remote Resources are local references and are not announced as capabilities of the current device.
 
-A representative manifest is:
+A representative optional JSON rendering is:
 
 ```json
 {
@@ -135,9 +136,9 @@ The current manifest payload limit is:
 16384 bytes
 ```
 
-### Compact manifest
+### Canonical MessagePack manifest
 
-The same manifest is also retained as MessagePack at:
+The canonical manifest is retained as MessagePack at:
 
 ```text
 <device>/manifest/msgpack
@@ -167,8 +168,9 @@ payload type.
 Encoding version `3` is current. Version `2` replaced the former
 enabled/seconds positions; version `3` introduces the `event` shape. Array
 positions and numeric enums are append-only. Readers that do not recognize the
-encoding version, including every reader built before Events existed, use the
-JSON manifest at `<device>/manifest`.
+encoding version reject the document. There is no compatibility fallback or
+old-format reader. The bare `<device>/manifest` root is a namespace and never
+carries a payload.
 
 ## Consume manifest
 
@@ -176,31 +178,19 @@ A separate retained document describes Remote Resources this device currently
 depends on:
 
 ```text
-<device>/manifest/consume
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json    optional when NM_ENABLE_JSON_WIRE=1
 ```
 
-This is not an expansion of the provider manifest. `<device>/manifest` remains
-only what this device implements. The consume manifest version is `2` and is
-built automatically. `consumes` lists only bound Remote Resources with a
-resolved, valid source; source-less or refused ones do not create dependency
-edges. Version 2 added `remotes`: every Remote Resource this device declares,
-bound or not (`name` is the local name, `bound`, `device`/`resource` empty while
-unbound, plus `kind` and `access`/`type` or `arguments`). It exists so a
-controller can discover and configure them with `SOURCE`. Version 3 adds Remote
-Events to both lists.
+This is not an expansion of the provider manifest. The consume manifest version
+is `4`. `remotes` is the only representation: every declared Remote Resource is
+present once. `bound: true` derives an active consume edge; `bound: false`
+describes a configurable input with no edge. `device` and `resource` are empty
+while unbound. There is no serialized `consumes` array.
 
 ```json
 {
-  "version": 3,
-  "consumes": [
-    {"device": "weather-node", "resource": "temperature",
-     "kind": "value", "access": "read", "type": "float"},
-    {"device": "door-node", "resource": "unlock",
-     "kind": "action", "arguments": []},
-    {"device": "Watson", "resource": "acoustic:beep",
-     "kind": "event", "type": "integer"}
-  ],
+  "version": 4,
   "remotes": [
     {"name": "temperature", "bound": true,
      "device": "weather-node", "resource": "temperature",
@@ -221,11 +211,8 @@ A Remote Event entry has no `access`: there is nothing to read or write.
 The compact positional schema is:
 
 ```text
-[encodingVersion, consumeVersion, consumes[], remotes[]]
+[encodingVersion, consumeVersion, remotes[]]
 
-value  = [0, device, resource, accessEnum, typeEnum]
-action = [1, device, resource, arguments[]]
-event  = [2, device, resource, typeEnum]
 arg    = [name, typeEnum, required]
 
 remote value  = [0, localName, bound, device, resource, accessEnum, typeEnum]
@@ -233,12 +220,10 @@ remote action = [1, localName, bound, device, resource, arguments[]]
 remote event  = [2, localName, bound, device, resource, typeEnum]
 ```
 
-Encoding version `2` is current (`remotes[]` was appended without a bump; the
-Event shapes are the reason for version `2`). A reader that does not speak the
-encoding version uses the JSON consume manifest. The
-document is republished when a Remote Resource is bound, retargeted, detached,
-or unbound, and on reconnect. Identity cleanup tombstones both retained
-encodings under the old device name.
+Encoding version `3` is current. Removing the old duplicated positional array
+is incompatible, so readers accept only version `3`. The document is
+republished when a Remote Resource is bound, retargeted, detached, or unbound,
+and on reconnect. Its bare root is only a namespace.
 
 ## Resource dependencies
 
@@ -1103,9 +1088,7 @@ requests separately. Failed requests use the capped exponential-backoff policy.
 
 When a device identity is migrated, Resource cleanup under the old device name publishes tombstones for:
 
-- the old retained state of every **currently declared Managed Value**,
-- the old manifest.
-- the old consume manifest.
+- the old retained state of every **currently declared Managed Value**.
 
 Actions and Events need no separate cleanup because `/invoke` and `/event` are transient.
 

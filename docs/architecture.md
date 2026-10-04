@@ -216,14 +216,15 @@ Current retained families include:
 ```text
 <device>/status
 <device>/info
-<device>/hardware
+<device>/hardware/msgpack
+<device>/hardware/json        optional
 <device>/telemetry/system
 <device>/telemetry/network
 <device>/telemetry/heartbeat
-<device>/manifest
 <device>/manifest/msgpack
-<device>/manifest/consume
+<device>/manifest/json        optional
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json optional
 <device>/resource/<value>/state
 ```
 
@@ -369,8 +370,8 @@ Telemetry is separated by lifecycle rather than by every possible category.
 /info
     mostly static / boot-scoped aggregate
 
-/hardware
-    reconstructable hardware configuration JSON
+/hardware/msgpack
+    canonical reconstructable hardware configuration
 
 /telemetry/system
     regular runtime health
@@ -490,8 +491,8 @@ queued MQTT messages
 project connected callback
 ```
 
-The bounded tick path prevents manifests, Resource states, INFO, and both
-hardware encodings from being built in one MQTT/TLS reconnect burst.
+The bounded tick path prevents manifests, Resource states, INFO, and hardware
+documents from being built in one MQTT/TLS reconnect burst.
 
 This is an example of the project's “register once, participate automatically” rule.
 
@@ -506,8 +507,6 @@ If the network address is already locked for the current boot, the running devic
 Once the new identity is active, cleanup removes retained network state under the old identity, including:
 
 ```text
-old Resource manifest
-old consume manifest
 old retained managed Value states that are still declared
 old status topic
 ```

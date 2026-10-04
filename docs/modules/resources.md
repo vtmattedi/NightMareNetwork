@@ -1033,7 +1033,8 @@ Remote Event its source (`source=-` while unconfigured), and `last_update_ms`.
 `>manifest json` returns the named-key manifest. A MessagePack selection
 republishes `<device>/manifest/msgpack` and responds `Republished to MQTT.`;
 raw binary is not returned through the text command channel. `publish` makes
-publication explicit, and with no format republishes both retained forms.
+publication explicit. With no format it publishes canonical MessagePack and,
+only when enabled, the optional JSON sibling.
 
 `>drop` unbinds the addressed Resource.
 
@@ -1144,10 +1145,11 @@ setManifestHandler(...)
 
 Applications normally call only binding and optional manifest-handler methods.
 
-Bound Remote Resources with valid sources are also published automatically as
-dependencies at `<device>/manifest/consume` and its MessagePack sibling. This
-document is separate from the Managed Resource provider manifest and requires
-no duplicate project declaration.
+Remote Resources are published automatically at
+`<device>/manifest/consume/msgpack`. Each declaration appears once in
+`remotes[]`; `bound: true` derives a dependency edge. This document is separate
+from the Managed Resource provider manifest and requires no duplicate project
+declaration.
 
 The `ResourcePublisher` / `ResourceSubscriber` adapter is injected by
 `NmConnection`; the manager has no MQTT or broker-profile dependency.

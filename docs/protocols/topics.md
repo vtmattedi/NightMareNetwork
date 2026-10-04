@@ -38,15 +38,16 @@ The current standard topic families are:
 <device>/status
 
 <device>/info
-<device>/hardware
+<device>/hardware/msgpack
+<device>/hardware/json
 <device>/telemetry/system
 <device>/telemetry/network
 <device>/telemetry/heartbeat
 
-<device>/manifest
 <device>/manifest/msgpack
-<device>/manifest/consume
+<device>/manifest/json
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json
 <device>/resource/<name>/state
 <device>/resource/<name>/set
 <device>/resource/<name>/invoke
@@ -72,13 +73,14 @@ NightMare uses retained messages for current state and current description.
 |---|---:|---|
 | `<device>/status` | yes | name, hardware signature, timezone + online/offline presence |
 | `<device>/info` | yes | boot-scoped/static device information |
-| `<device>/hardware` | yes | reconstructable hardware configuration JSON |
+| `<device>/hardware/msgpack` | yes | canonical positional hardware configuration |
+| `<device>/hardware/json` | yes | optional readable hardware sibling |
 | `<device>/telemetry/system` | yes | last published runtime system telemetry |
 | `<device>/telemetry/network` | yes | last published network bookkeeping |
-| `<device>/manifest` | yes | Resource manifest |
 | `<device>/manifest/msgpack` | yes | compact positional Resource manifest |
-| `<device>/manifest/consume` | yes | Remote Resources this device consumes |
+| `<device>/manifest/json` | yes | optional readable Resource manifest |
 | `<device>/manifest/consume/msgpack` | yes | compact consume manifest |
+| `<device>/manifest/consume/json` | yes | optional readable consume manifest |
 | `<device>/resource/<name>/state` | yes | authoritative Value state |
 
 An empty retained payload is used as a tombstone where NightMare needs to remove retained state.
@@ -110,23 +112,27 @@ Requests, commands, and command responses are not retained.
 ### Manifest
 
 ```text
-<device>/manifest
+<device>/manifest/msgpack
+<device>/manifest/json
 ```
 
-The manifest is retained and describes the Resources implemented by the device.
+The MessagePack manifest is canonical and retained. The JSON sibling is
+published only when `NM_ENABLE_JSON_WIRE=1`. The bare `manifest` path is a
+namespace, not a payload topic.
 
 It is descriptive metadata. It does not make Value state fresh and does not gate `/state`, `/set`, or `/invoke`.
 
 ### Consume manifest
 
 ```text
-<device>/manifest/consume
 <device>/manifest/consume/msgpack
+<device>/manifest/consume/json
 ```
 
-These retained documents describe the valid, bound Remote Resources consumed
-by the device. They are generated from the Resource registry and remain
-separate from the provider manifest.
+The canonical retained document represents every declared Remote Resource once.
+An entry with `bound: true` derives an active consume edge; an unbound entry is
+still discoverable and configurable. JSON is optional, and the bare consume
+root is a namespace.
 
 ### Value state
 
@@ -193,7 +199,7 @@ also subscribes once to:
 
 per remote owner. The compact manifest is decoded for compatibility diagnostics
 against the local Remote-resource declarations. This verification subscription
-is separate from JSON `+/manifest` discovery/handler subscriptions.
+is separate from optional JSON `+/manifest/json` discovery/handler subscriptions.
 
 These subscriptions are rebuilt after MQTT reconnect.
 

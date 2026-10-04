@@ -13,6 +13,20 @@ This page records decisions that might otherwise look arbitrary when reading the
 
 Each entry states the decision, why it exists, and what it costs.
 
+## Framework documents are MessagePack-first
+
+**Decision:** machine-facing framework documents use explicit `/msgpack`
+topics as their canonical wire form. Document roots are namespaces. Optional
+`/json` siblings are controlled globally by `NM_ENABLE_JSON_WIRE`, which
+defaults to `0`.
+
+**Reason:** one compact canonical contract avoids dual-format success state and
+removes ambiguity at document roots while preserving readable diagnostics.
+
+**Consequence:** publication, retry, and dirty bookkeeping depend only on
+MessagePack. JSON generation remains available to commands and debugging; an
+optional JSON wire failure cannot make canonical publication fail.
+
 ## NetCodec remains the single typed Value boundary
 
 **Decision:** semantic value types such as `TimeType` and `ColourType` integrate
@@ -72,10 +86,10 @@ Examples include:
 ```text
 <device>/status
 <device>/info
-<device>/hardware
+<device>/hardware/msgpack
 <device>/telemetry/system
 <device>/telemetry/network
-<device>/manifest
+<device>/manifest/msgpack
 <device>/resource/<name>/state
 ```
 
@@ -193,13 +207,13 @@ retried with rate limiting before normal Resource housekeeping.
 
 **Decision:** `/info` aggregates identity, hardware facts, build information,
 and boot-scoped information. Physical configuration is published separately as
-retained JSON at `/hardware`.
+canonical retained MessagePack at `/hardware/msgpack`.
 
 **Reason:** physical configuration has its own validation and consumer
 lifecycle, while ordinary device information remains compact device metadata.
 
-**Consequence:** INFO does not contain connections. The previous positional
-MessagePack hardware form is removed while the new schema stabilizes.
+**Consequence:** INFO does not contain connections. Hardware has a separately
+versioned positional encoding; readable JSON remains available for diagnostics.
 
 ## Assemblies and connectors define physical topology
 
@@ -221,16 +235,17 @@ expanded topology before publishing it. The normative contract is
 
 ## Provider and consumer Resource manifests are separate
 
-**Decision:** `<device>/manifest` continues to publish only Managed Resources.
-Bound Remote Resources with valid sources are derived into the separate
-versioned `<device>/manifest/consume` document.
+**Decision:** `<device>/manifest/msgpack` publishes only Managed Resources.
+Remote declarations live in the separate versioned
+`<device>/manifest/consume/msgpack` document.
 
 **Reason:** what a node provides and what it depends on are different graph
 directions and lifecycles. Remote declarations already contain all dependency
 metadata, so requiring a second project declaration would create drift.
 
-**Consequence:** bind, source changes, unbind, reconnect, and identity cleanup
-also maintain the retained JSON and MessagePack consume manifests.
+**Consequence:** bind, source changes, unbind, and reconnect maintain the
+canonical MessagePack consume manifest. `remotes[]` is canonical and `bound`
+derives active consume edges; optional JSON is never part of success state.
 
 ## dependsOn() means authoritative value mirroring
 
@@ -246,7 +261,7 @@ dependency list would describe something the framework cannot act on, and would
 leave the synchronization as project code the declaration was supposed to
 replace. A Remote Resource already has a stable local identity whose source is
 separately configurable, so naming the local Resource keeps provenance
-(`<device>/manifest/consume`) and mirroring (`<device>/manifest`) as one join
+(`<device>/manifest/consume/msgpack`) and mirroring (`<device>/manifest/msgpack`) as one join
 rather than two competing address systems.
 
 **Consequence:** mirroring uses the internal owner path, so a write handler
@@ -388,7 +403,9 @@ the persisted binding, but never renames the local Resource. The canonical
 
 ## Old identity cleanup only knows currently declared Resources
 
-**Decision:** cleanup withdraws retained state for Managed Values that exist in the current firmware plus the old provider manifest, consume manifest, and status.
+**Decision:** cleanup withdraws retained state for Managed Values that exist in
+the current firmware plus old status. Document-topic migration and tombstoning
+are outside the MessagePack-first protocol pass.
 
 **Reason:** the framework has no historical registry of every Resource a previous firmware version might once have published.
 

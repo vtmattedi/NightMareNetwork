@@ -16,8 +16,11 @@ NightMare separates device-level information according to lifecycle:
 /info
     boot-scoped / effectively static description
 
-/hardware
-    reconstructable hardware configuration as JSON
+/hardware/msgpack
+    canonical reconstructable hardware configuration
+
+/hardware/json
+    optional readable hardware configuration
 
 /telemetry/system
     changing runtime system health
@@ -212,9 +215,9 @@ The remaining hardware fields come from the ESP runtime.
 
 ## Hardware configuration
 
-Hardware configuration is not embedded in `/info`. It is retained as JSON at
-`<device>/hardware`. There is no compact hardware encoding while version 2 is
-stabilizing.
+Hardware configuration is not embedded in `/info`. It is retained canonically
+as positional MessagePack at `<device>/hardware/msgpack`. The readable
+`<device>/hardware/json` sibling is optional; the bare root is a namespace.
 
 The top-level shape is:
 
@@ -454,7 +457,7 @@ retained information documents:
 
 ```text
 <device>/info
-<device>/hardware
+<device>/hardware/msgpack
 ```
 
 `tickNightMareESP()` publishes at most one ready document per call. A failed
