@@ -7,6 +7,7 @@
 #include <Core/DeviceIdentity.h>
 #include <Network/NmMessageRouter.h>
 #include <Network/NmConnectionInternal.h>
+#include <Network/WiFiIP/NmWifiService.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <atomic>
@@ -27,11 +28,33 @@ struct QueuedMessage
 QueuedMessage pending[QueueCapacity];
 SemaphoreHandle_t queueMutex = nullptr;
 std::atomic<uint8_t> connectionErrors{0};
+volatile bool serviceEnabled = false;
+volatile NightMare::ConnectivityState serviceState = NightMare::ConnectivityState::STOPPED;
+volatile NightMare::ConnectionType serviceProfile =
+#if NM_NETWORK_MQTT
+    NightMare::ConnectionType::MQTT;
+#else
+    NightMare::ConnectionType::LOCAL_MQTT;
+#endif
+
+void serviceChanged()
+{
+    NightMare::OnConnectivityStateChanged();
+}
 
 bool mqttType(NightMare::ConnectionType type)
 {
     return type == NightMare::ConnectionType::MQTT ||
            type == NightMare::ConnectionType::LOCAL_MQTT;
+}
+
+bool mqttProfileSupported(NightMare::ConnectionType type)
+{
+    if (type == NightMare::ConnectionType::MQTT)
+        return NM_NETWORK_MQTT != 0;
+    if (type == NightMare::ConnectionType::LOCAL_MQTT)
+        return NM_NETWORK_LOCALMQTT != 0;
+    return false;
 }
 
 bool localBroker(NightMare::ConnectionType type)
@@ -84,22 +107,35 @@ void flushQueuedMessages()
 
 void messageReceived(const String &topic, const String &payload, bool retained)
 {
-    NmMessageRouter::handleMessage(topic, payload, retained);
+    if (NightMare::GetActiveConnection() == serviceProfile)
+        NmMessageRouter::handleMessage(topic, payload, retained);
 }
 
 void connected(bool isLocalBroker)
 {
+    if (!serviceEnabled)
+        return;
     connectionErrors.store(0);
     const NightMare::ConnectionType type = connectionType(isLocalBroker);
+    if (type != serviceProfile)
+        return;
+    serviceState = NightMare::ConnectivityState::CONNECTED;
     NightMare::OnConnectedIngress(type);
-    if (NightMare::GetSelectedConnection() == type &&
+    if (NightMare::GetActiveConnection() == type &&
         NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED)
         flushQueuedMessages();
+    serviceChanged();
 }
 
 void disconnected(bool isLocalBroker)
 {
+    if (!serviceEnabled)
+        return;
+    serviceState = NightMare::WiFiIP_state() == NightMare::ConnectivityState::CONNECTED
+                       ? NightMare::ConnectivityState::CONNECTING
+                       : NightMare::ConnectivityState::STARTING;
     NightMare::OnDisconnectedIngress(connectionType(isLocalBroker));
+    serviceChanged();
 }
 
 void connectionError(bool isLocalBroker)
@@ -107,7 +143,9 @@ void connectionError(bool isLocalBroker)
     if (connectionErrors.fetch_add(1) + 1 < ErrorsBeforeSwitchFailure)
         return;
     connectionErrors.store(0);
+    serviceState = NightMare::ConnectivityState::ERROR;
     NightMare::OnConnectionFailedIngress(connectionType(isLocalBroker));
+    serviceChanged();
 }
 }
 
@@ -163,6 +201,28 @@ int8_t state()
     return NmMqttEsp::state();
 }
 
+bool enabled() { return serviceEnabled; }
+NightMare::ConnectivityState connectivityState() { return serviceState; }
+NightMare::ConnectionType profile() { return serviceProfile; }
+
+void onWiFiState(bool connected)
+{
+    if (!serviceEnabled)
+        return;
+    if (!connected)
+    {
+        serviceState = NightMare::ConnectivityState::STARTING;
+        NightMare::OnDisconnectedIngress(serviceProfile);
+        serviceChanged();
+        return;
+    }
+    serviceState = NightMare::ConnectivityState::CONNECTING;
+    const bool accepted = state() == -1 ? begin(serviceProfile) : changeTo(serviceProfile);
+    if (!accepted)
+        serviceState = NightMare::ConnectivityState::ERROR;
+    serviceChanged();
+}
+
 bool queueAsyncMessage(const String &topic, const String &message,
                        bool insertOwner, bool retained)
 {
@@ -189,6 +249,53 @@ bool queueAsyncMessage(const String &topic, const String &message,
     xSemaphoreGive(queueMutex);
     return false;
 }
+}
+
+namespace NightMare
+{
+bool Mqtt_enable(ConnectionType mqttProfile)
+{
+    if (!mqttProfileSupported(mqttProfile) || !WiFiIP_enabled())
+        return false;
+    const bool profileChanged = serviceProfile != mqttProfile;
+    serviceProfile = mqttProfile;
+    if (serviceEnabled && !profileChanged)
+        return true;
+    serviceEnabled = true;
+    serviceState = ConnectivityState::STARTING;
+    if (WiFiIP_state() == ConnectivityState::CONNECTED)
+    {
+        serviceState = ConnectivityState::CONNECTING;
+        const bool accepted = NmMqttConnection::state() == -1
+                                  ? NmMqttConnection::begin(mqttProfile)
+                                  : NmMqttConnection::changeTo(mqttProfile);
+        if (!accepted)
+        {
+            serviceState = ConnectivityState::ERROR;
+            serviceChanged();
+            return false;
+        }
+    }
+    serviceChanged();
+    return true;
+}
+
+bool Mqtt_disable()
+{
+    if (!serviceEnabled)
+        return true;
+    const ConnectionType oldProfile = serviceProfile;
+    serviceEnabled = false;
+    serviceState = ConnectivityState::STOPPED;
+    OnDisconnectedIngress(oldProfile);
+    serviceChanged();
+    NmMqttConnection::end();
+    return true;
+}
+
+bool Mqtt_enabled() { return serviceEnabled; }
+ConnectivityState Mqtt_state() { return serviceState; }
+ConnectionType Mqtt_profile() { return serviceProfile; }
 }
 
 #endif // NM_ENABLE_MQTT

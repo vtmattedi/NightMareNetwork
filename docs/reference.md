@@ -1289,6 +1289,24 @@ enum class ConnectionState : uint8_t
     ERROR
 };
 
+enum class ConnectivityState : uint8_t
+{
+    STOPPED,
+    STARTING,
+    READY,
+    CONNECTING,
+    CONNECTED,
+    SUSPENDED,
+    ERROR
+};
+
+struct ConnectivityStatus
+{
+    bool supported;
+    bool enabled;
+    ConnectivityState state;
+};
+
 extern Config<int> preferredConnection;
 
 using MessageHandler =
@@ -1306,27 +1324,39 @@ bool Unsubscribe(const char *topicFilter);
 void OnMessage(MessageHandler handler);
 
 bool SelectConnection(ConnectionType connection);
-ConnectionType GetSelectedConnection();
+ConnectionType GetActiveConnection();
+ConnectionType GetPreferredConnection();
 ConnectionState GetConnectionState();
+const char *ConnectionTypeName(ConnectionType connection);
+const char *ConnectionStateName(ConnectionState state);
 }
 ```
 
 `MQTT` means Remote MQTT/TLS. The payload pointer and explicit length make the
 generic boundary binary-safe. `ESP_NOW` is available when built with
-`NM_NETWORK_ESPNOW`; `AUTO` selects the base failover order (ESP-NOW, Remote
-MQTT, Local MQTT). `failoverSeconds` (`nightmare:connection:failover_secs`)
-sets how long a connection may stay down before the next profile is tried.
+`NM_NETWORK_ESPNOW`; `AUTO` uses the base failover order (ESP-NOW, Remote MQTT,
+Local MQTT). Selection changes only the preferred routing transport. Active
+routing is restricted to an enabled, connected service.
 
 `OnMessage()` replaces the single application message handler, or unregisters
 it when passed `nullptr`. The handler receives only messages left unconsumed by
 enabled framework routes. Its topic and payload pointers remain valid for the
 duration of the callback.
 
-## MQTT implementation limits
+## MQTT service and implementation limits
 
-MQTT is an implementation behind `NmConnection`; it does not expose a second
-public lifecycle, state, publish, or subscription API. Current implementation
-limits are:
+When `NM_ENABLE_MQTT`:
+
+```cpp
+bool NightMare::Mqtt_enable(ConnectionType profile);
+bool NightMare::Mqtt_disable();
+bool NightMare::Mqtt_enabled();
+ConnectivityState NightMare::Mqtt_state();
+ConnectionType NightMare::Mqtt_profile();
+```
+
+MQTT enable requires WiFiIP enabled and never starts it. The selected broker
+profile is MQTT-owned service state. Current implementation limits are:
 
 ```text
 queued reconnect messages:  5
@@ -1353,11 +1383,13 @@ void WiFiRadio_onState(WiFiRadioStateCallback callback);
 // NightMare integration (Network/WiFiRadio/NmWifiRadioService.h)
 bool NightMare::WiFiRadioBegin();  // start + report; startNightMareESP() calls it
 void NightMare::WiFiRadioEnd();    // stops the station (if any), then the radio
+bool NightMare::WiFiRadio_supported();
+bool NightMare::WiFiRadio_enabled();
+ConnectivityState NightMare::WiFiRadio_state();
 ```
 
-The radio is what ESP-NOW needs; it never configures or joins an AP. It is
-reported to `NmConnection` as radio availability (`OnRadioAvailabilityIngress`),
-which is what starts an ESP-NOW connection. The station netif is created with
+The radio is what ESP-NOW and WiFiIP need; it never configures or joins an AP.
+It reports `READY` while running but does not start either dependent. The station netif is created with
 the driver, before `esp_wifi_start`, because it follows the driver's STA events
 and one created later misses `STA_START`.
 
@@ -1379,7 +1411,10 @@ void WiFi_onState(WiFiStateCallback callback);
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
 int WiFi_scanCount();
+bool WiFi_scanComplete();
 bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result);
+void WiFi_clearScanResults();
+void WiFi_abortScan();
 
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
 const char *WiFi_stateName(NightMare::WiFiState state);
@@ -1390,6 +1425,10 @@ typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 NightMare::WiFiProfile NightMare::WiFiStoredProfile();
 bool NightMare::WiFiBegin();
+bool NightMare::WiFiIP_enable();
+bool NightMare::WiFiIP_disable();
+bool NightMare::WiFiIP_enabled();
+ConnectivityState NightMare::WiFiIP_state();
 bool NightMare::WiFiApplyProfile(const NightMare::WiFiProfile &profile);
 ```
 
@@ -1411,17 +1450,34 @@ three actions and a state.
   every change, from the caller or the station's monitor task -- never the ESP
   event task. `WiFi_startScan()` needs the radio, not a station.
 
-Storage, hostname and first-connection services live in `NmWifiService`:
+Storage, hostname and first-connection services live in `NmWifiService`.
 `WiFiBegin()` starts the radio through `WiFiRadioBegin()` (so it is reported),
 loads the stored profile (defaulting to `creds.h`), uses the device name as
 hostname, starts the station, and on connection starts OTA and SNTP once,
 persists a fallback TX power and then calls the `WiFi_onConnected()` callback.
-Every station state change is reported to `NmConnection` as IP-link
-availability (`OnIpLinkAvailabilityIngress`); Wi-Fi does not start or select
-connections. `NmConnection` starts the preferred connection (then the build's
-default profile) once what it runs on is available and nothing is running.
+Every station state change updates WiFiIP, notifies an already-enabled MQTT
+service, refreshes network telemetry, and asks `NmConnection` to reevaluate
+routing. It does not enable MQTT or change the transport preference.
 `WiFiApplyProfile()` changes the running station and persists on success, or
 only persists while stopped.
+
+## ESP-NOW service
+
+When `NM_NETWORK_ESPNOW`:
+
+```cpp
+enum class ConnectivitySuspendReason : uint8_t { WIFI_SCAN };
+bool NightMare::EspNow_enable();
+bool NightMare::EspNow_disable();
+bool NightMare::EspNow_enabled();
+ConnectivityState NightMare::EspNow_state();
+bool NightMare::EspNow_suspend(ConnectivitySuspendReason reason);
+bool NightMare::EspNow_resume(ConnectivitySuspendReason reason);
+```
+
+ESP-NOW requires WiFiRadio `READY` and never changes WiFiIP or MQTT. A Wi-Fi
+scan uses the runtime-only `WIFI_SCAN` suspension; `enabled` stays true while
+the service reports `SUSPENDED`.
 
 The implementation is under `Network/WiFiIP/` and uses `esp_wifi` directly.
 

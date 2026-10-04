@@ -17,6 +17,12 @@
 #if NM_ENABLE_WIFI
 #include <Network/WiFiIP/NmWifiService.h>
 #endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttConnection.h>
+#endif
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
+#endif
 #if NM_ENABLE_TIME_SYNC
 #include <Util/TimeSyncronization.h>
 #endif
@@ -275,12 +281,33 @@ void startNightMareESP()
         LOG_ERROR("NM", "Wi-Fi radio did not start; ESP-NOW and the IP station cannot run");
 #endif
 #if NM_ENABLE_WIFI && NM_WIFI_AUTO
-    // Then the IP station on top of it -- only if this build joins an AP at all.
+    // Each connectivity service starts independently; preference does not
+    // decide which services exist or run.
     if (!NightMare::WiFiBegin())
         LOG_ERROR("NM", "Wi-Fi station did not start");
 #endif
+#if NM_NETWORK_ESPNOW
+    if (!NightMare::EspNow_enable())
+        LOG_ERROR("NM", "ESP-NOW service did not start");
+#endif
+#if NM_ENABLE_MQTT && NM_WIFI_AUTO
+    {
+        NightMare::ConnectionType profile = NightMare::GetPreferredConnection();
+        if (profile != NightMare::ConnectionType::MQTT &&
+            profile != NightMare::ConnectionType::LOCAL_MQTT)
+        {
+#if NM_NETWORK_MQTT
+            profile = NightMare::ConnectionType::MQTT;
+#else
+            profile = NightMare::ConnectionType::LOCAL_MQTT;
+#endif
+        }
+        if (!NightMare::Mqtt_enable(profile))
+            LOG_ERROR("NM", "MQTT service did not start");
+    }
+#endif
 #if NM_ENABLE_NETWORK
-    // Starts whatever can already run; the rest waits for its radio/IP-link ingress.
+    // Routing observes the services above; it never starts or stops them.
     NightMare::ConnectionBegin();
 #endif
 }
@@ -296,6 +323,9 @@ void tickNightMareESP()
     processOneSystemRequest();
 #if NM_ENABLE_NETWORK
     NightMare::ConnectionTick();
+#endif
+#if NM_ENABLE_WIFI
+    NightMare::WiFiIP_tick();
 #endif
 #if NM_ENABLE_SCHEDULER
     // In TASK mode the Scheduler's own task does this; ticking here too would

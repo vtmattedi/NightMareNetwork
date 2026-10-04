@@ -578,7 +578,7 @@ JOB AFTER <label> <delay_ms> "<command>"
 Example:
 
 ```text
-JOB AFTER reconnect 5000 "NETWORK SET MQTT"
+JOB AFTER prefer_mqtt 5000 "NETWORK TRANSPORT SET MQTT"
 ```
 
 ### Repeat
@@ -642,109 +642,66 @@ See the Scheduler module documentation for the full job model.
 
 ## NETWORK
 
-Selects the connection and manages the WiFi link. `GET`/`STATE` and `SET` need
-Network support; the WiFi subcommands need WiFi support. `SET` selects the same
-enum integer stored by `preferredConnection`.
+Connectivity lifecycle and NMNW routing use explicit namespaces:
 
 ```text
 NETWORK GET
-NETWORK STATE
-NETWORK SET MQTT
-NETWORK SET LOCAL_MQTT
-NETWORK SET ESP_NOW
-NETWORK SET AUTO
+
+NETWORK WIFI GET
+NETWORK WIFI ENABLE
+NETWORK WIFI DISABLE
+NETWORK WIFI IP
+NETWORK WIFI SCAN
+NETWORK WIFI CHANGE <ssid> <password> [dBm|AUTO]
+NETWORK WIFI TXPOWER [dBm|AUTO]
+
+NETWORK ESPNOW GET
+NETWORK ESPNOW ENABLE
+NETWORK ESPNOW DISABLE
+
+NETWORK MQTT GET
+NETWORK MQTT ENABLE [MQTT|LOCAL_MQTT]
+NETWORK MQTT DISABLE
+
+NETWORK TRANSPORT GET
+NETWORK TRANSPORT SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>
 ```
 
-`GET` and `STATE` are identical. They return JSON with the enum integers
-`selected`, `preferred` and `state` (Network support) and the WiFi driver status
-code and readable name as `wifi` and `wifi_name` (WiFi support).
-`MQTT` selects Remote MQTT/TLS. `LOCAL_MQTT` selects the local broker.
-`ESP_NOW` selects the gateway connection when the build includes it, and
-returns an unavailable error otherwise. `AUTO` clears the preference: the base
-failover order (ESP-NOW, Remote MQTT, Local MQTT) applies. Any selection
-restarts that order from its head; how long a connection may stay down before
-the next one is tried is the `nightmare:connection:failover_secs` Config.
+`NETWORK GET` returns readable named states for `transport`, `wifi_radio`,
+`wifi_ip`, `esp_now`, and `mqtt`. `supported`, `enabled`, and `state` are
+independent fields. Transport reports both `preferred` and `active`.
 
-The former `TRANSPORT`, `WIFI`, `MQTT STATE`, `MQTT CONNECT`, `MQTT DISCONNECT`
-and `MQTT SWAP` commands were removed. Connection selection, state and WiFi
-control now have one command surface.
+Lifecycle commands affect only their named service. MQTT enable is rejected
+when WiFiIP is disabled, and WiFiIP disable is rejected while MQTT is enabled:
 
-### WiFi
-
-Available when WiFi support is enabled.
-
-#### IP
-
-```text
-NETWORK IP
+```json
+{"ok":false,"reason":"wifi_ip_disabled","state":"STOPPED"}
 ```
 
-#### Scan
-
-Start an asynchronous scan:
-
-```text
-NETWORK SCAN -s
-NETWORK SCAN start
+```json
+{"ok":false,"reason":"mqtt_enabled","state":"CONNECTED"}
 ```
 
-Read scan state/results:
+Successful lifecycle requests include the resulting requested/runtime state,
+for example `{"ok":true,"state":"CONNECTING"}`. ESP-NOW does not block WiFiIP
+disable. MQTT disable leaves WiFiIP unchanged, and ESP-NOW enable/disable leaves
+WiFiIP and MQTT unchanged.
 
-```text
-NETWORK SCAN
-```
+`NETWORK TRANSPORT SET` changes only the persisted NMNW routing preference. It
+does not enable, disable, connect, or disconnect a service. An unavailable but
+compiled transport may still be preferred; the current usable active transport
+remains until routing policy can use the preference.
 
-The JSON response uses a `control` field:
+`NETWORK WIFI SCAN` starts an asynchronous scan when no results are present,
+reports `SCANNING` while active, and returns `DONE` plus `networks` afterward.
+Each entry contains `ssid`, `rssi`, `mac`, `channel`, and `encryptionType`.
+When ESP-NOW is enabled, it is temporarily suspended and is resumed after scan
+completion, failure, abort, or timeout without changing its enable state or the
+transport preference.
 
-```text
-scan_started
-scan_start_failed
-scan_in_progress
-scan_done
-```
-
-When done, `networks` entries contain:
-
-```text
-ssid
-rssi
-mac
-channel
-encryptionType
-```
-
-#### Change credentials
-
-```text
-NETWORK CHANGE <ssid> <password> [dBm|AUTO]
-```
-
-Quote arguments containing spaces. The optional last argument sets the TX power; omitted, the stored power is kept.
-
-The implementation attempts the new connection (SSID, password and TX power together) before persisting anything, in a single write, and falls back to the previous profile if the change fails.
-
-#### TX power
-
-```text
-NETWORK TXPOWER
-NETWORK TXPOWER <dBm|AUTO>
-```
-
-With no argument, reports the live and configured power. `AUTO` means the library never sets the TX power and the driver default applies. Otherwise the value must be an exact driver level: `-1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5` dBm. Anything else is rejected, not rounded. The change reconnects and is persisted only if the connection succeeds; otherwise the previous profile is restored.
-
-#### Reconnect
-
-```text
-NETWORK RECONNECT
-```
-
-The command currently returns:
-
-```text
-not implemented yet
-```
-
-It is present in the command grammar but is not an implemented reconnect operation.
+The ambiguous pre-decoupling forms `NETWORK SET`, `NETWORK STATE`, `NETWORK IP`,
+`NETWORK SCAN`, `NETWORK CHANGE`, `NETWORK TXPOWER`, and `NETWORK RECONNECT` are
+not aliases and return `unknown_network_command`.
 
 ## CONFIG
 

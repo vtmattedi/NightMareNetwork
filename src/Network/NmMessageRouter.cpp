@@ -41,7 +41,7 @@ bool validControlId(const String &id)
 // the source says which one -- not always MQTT.
 CommandSource activeSource()
 {
-    return NightMare::GetSelectedConnection() == NightMare::ConnectionType::ESP_NOW
+    return NightMare::GetActiveConnection() == NightMare::ConnectionType::ESP_NOW
                ? NM_CMD_SRC_ESPNOW
                : NM_CMD_SRC_MQTT;
 }

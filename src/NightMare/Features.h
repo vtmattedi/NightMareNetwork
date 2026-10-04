@@ -182,6 +182,9 @@
 #if NM_ENABLE_MQTT && !NM_ENABLE_NETWORK
 #error "NM_ENABLE_MQTT requires NM_ENABLE_NETWORK"
 #endif
+#if NM_ENABLE_MQTT && !NM_ENABLE_WIFI
+#error "NM_ENABLE_MQTT requires NM_ENABLE_WIFI: MQTT depends on the WiFiIP service"
+#endif
 #if NM_NETWORK_MQTT && !NM_ENABLE_MQTT
 #error "NM_NETWORK_MQTT requires NM_ENABLE_MQTT"
 #endif

@@ -11,6 +11,9 @@
 #if NM_ENABLE_NETWORK
 #include <Network/NmConnectionInternal.h>
 #endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttConnection.h>
+#endif
 #if NM_ENABLE_OTA
 #include <Util/OTA.h>
 #endif
@@ -27,6 +30,7 @@ namespace
 {
 bool servicesStarted = false;
 bool stationPrepared = false;
+bool stationEnabled = false;
 bool firstConnection = true;
 WiFiConnectedCallback connectedCallback = nullptr;
 
@@ -56,11 +60,12 @@ void startFrameworkServices()
 
 void onWiFiState(NightMare::WiFiState state)
 {
+#if NM_ENABLE_MQTT
+    NmMqttConnection::onWiFiState(state == NightMare::WiFiState::CONNECTED);
+#endif
 #if NM_ENABLE_NETWORK
-    // The IP link, not the radio: MQTT needs this, ESP-NOW does not (it was
-    // already told about the radio by NmWifiRadioService). Availability only;
-    // NmConnection decides what to do with it.
     NightMare::OnIpLinkAvailabilityIngress(state == NightMare::WiFiState::CONNECTED);
+    NightMare::OnConnectivityStateChanged();
 #endif
     if (state != NightMare::WiFiState::CONNECTED)
         return;
@@ -114,25 +119,63 @@ bool WiFiBegin()
 {
     if (!prepareStation())
         return false;
-#if NM_ENABLE_NETWORK
-    // NmConnection starts the station when it selects a connection that needs an IP link.
-    return true;
-#else
-    return WiFiStationResume();
-#endif
+    return WiFiIP_enable();
 }
 
-bool WiFiStationResume()
+bool WiFiIP_enable()
 {
+    if (stationEnabled && WiFi_state() != WiFiState::STOPPED)
+        return true;
     if (!stationPrepared && !prepareStation())
         return false;
-    return WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str());
+    if (WiFiRadio_state() != ConnectivityState::READY)
+        return false;
+    stationEnabled = true;
+    if (!WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str()))
+    {
+        stationEnabled = false;
+#if NM_ENABLE_NETWORK
+        OnConnectivityStateChanged();
+#endif
+        return false;
+    }
+#if NM_ENABLE_NETWORK
+    OnConnectivityStateChanged();
+#endif
+    return true;
 }
 
-void WiFiStationSuspend()
+bool WiFiIP_disable()
 {
+#if NM_ENABLE_MQTT
+    if (NmMqttConnection::enabled())
+        return false;
+#endif
+    if (!stationEnabled)
+        return true;
+    stationEnabled = false;
     if (WiFi_state() != WiFiState::STOPPED)
         WiFi_stop();
+#if NM_ENABLE_NETWORK
+    OnConnectivityStateChanged();
+#endif
+    return true;
+}
+
+bool WiFiIP_enabled() { return stationEnabled; }
+
+ConnectivityState WiFiIP_state()
+{
+    if (!stationEnabled)
+        return ConnectivityState::STOPPED;
+    switch (WiFi_state())
+    {
+    case WiFiState::STOPPED: return ConnectivityState::STARTING;
+    case WiFiState::CONNECTING: return ConnectivityState::CONNECTING;
+    case WiFiState::CONNECTED: return ConnectivityState::CONNECTED;
+    case WiFiState::DISCONNECTED: return ConnectivityState::CONNECTING;
+    }
+    return ConnectivityState::ERROR;
 }
 
 bool WiFiApplyProfile(const WiFiProfile &profile)
@@ -140,6 +183,32 @@ bool WiFiApplyProfile(const WiFiProfile &profile)
     if (WiFi_state() == WiFiState::STOPPED)
         return WiFi_isValidTxPower(profile.txPower) && saveProfile(profile);
     return WiFi_changeProfile(profile) && saveProfile(profile);
+}
+
+void WiFiIP_tick()
+{
+    // Scan finalization lives in the driver so every completion, abort, and
+    // timeout follows the same ESP-NOW resume path.
+    WiFi_scanTick();
+}
+
+void WiFiIP_onRadioState(bool ready)
+{
+    if (!stationEnabled)
+        return;
+    if (!ready)
+    {
+        if (WiFi_state() != WiFiState::STOPPED)
+            WiFi_stop();
+        return;
+    }
+    if (WiFi_state() == WiFiState::STOPPED &&
+        !WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str()))
+    {
+#if NM_ENABLE_NETWORK
+        OnConnectivityStateChanged();
+#endif
+    }
 }
 }
 

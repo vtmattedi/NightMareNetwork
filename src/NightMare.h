@@ -11,6 +11,7 @@
 #include <Core/Config.h>
 #include <Core/NetResources.h>
 #include <Core/Logs.h>
+#include <Network/Connectivity.h>
 #include <Plataform/ESP32/NightMareESP.h>
 
 #if NM_ENABLE_SETTINGS
@@ -21,6 +22,12 @@
 #endif
 #if NM_ENABLE_NETWORK
 #include <Network/NmConnection.h>
+#endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttConnection.h>
+#endif
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
 #endif
 #if NM_ENABLE_CONSOLE
 #include <Core/NightMareCommand.h>

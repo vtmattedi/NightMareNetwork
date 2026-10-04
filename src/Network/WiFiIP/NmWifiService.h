@@ -3,6 +3,7 @@
 #if NM_ENABLE_WIFI
 
 #include "NmWifiEsp.h"
+#include <Network/Connectivity.h>
 
 // NightMare-side IP station integration: stored profile, device hostname, the
 // IP-link report to NmConnection and the services that follow the first
@@ -15,15 +16,16 @@ void WiFi_onConnected(WiFiConnectedCallback callback);
 namespace NightMare
 {
 WiFiProfile WiFiStoredProfile();
-// Prepares the station (radio, state reporting). With the network layer built, NmConnection
-// owns when the station runs -- only while an IP-based connection is selected -- so this does
-// not join the AP itself. Without it, it starts the station straight away.
+// Prepares and enables the independent WiFiIP service. It does not start MQTT.
 bool WiFiBegin();
-// Joins the AP with the stored profile. Idempotent while connecting/connected.
-bool WiFiStationResume();
-// Leaves the AP and stops the station; the stored profile is kept and the radio stays up.
-// Frees the channel, so ESP-NOW may hop.
-void WiFiStationSuspend();
+bool WiFiIP_enable();
+bool WiFiIP_disable();
+bool WiFiIP_enabled();
+ConnectivityState WiFiIP_state();
+// Services scan completion/timeout cleanup, including ESP-NOW resume.
+void WiFiIP_tick();
+// Dependency fact from WiFiRadio; not an application lifecycle command.
+void WiFiIP_onRadioState(bool ready);
 // Applies the profile to the running stack and persists it once it works.
 // While the stack is stopped it is only persisted.
 bool WiFiApplyProfile(const WiFiProfile &profile);

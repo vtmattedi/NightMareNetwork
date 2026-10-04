@@ -84,6 +84,16 @@ static_assert(std::is_same<NightMare::MessageHandler,
 static_assert(std::is_same<decltype(&NightMare::OnMessage),
                            void (*)(NightMare::MessageHandler)>::value,
               "OnMessage must remain part of the public connection API");
+static_assert(std::is_same<decltype(&NightMare::WiFiIP_enable), bool (*)()>::value,
+              "WiFiIP must expose an independent enable lifecycle");
+static_assert(std::is_same<decltype(&NightMare::Mqtt_enable),
+                           bool (*)(NightMare::ConnectionType)>::value,
+              "MQTT must expose an independent profile-aware lifecycle");
+#if NM_NETWORK_ESPNOW
+static_assert(std::is_same<decltype(&NightMare::EspNow_suspend),
+                           bool (*)(NightMare::ConnectivitySuspendReason)>::value,
+              "ESP-NOW must expose scan suspension");
+#endif
 
 ManagedSensor<int> managedSensor("managed_sensor");
 ManagedSensor<TimeType> managedTime("managed_time");
@@ -314,6 +324,35 @@ void setup()
         HeartbeatEnabled.value();
     smokeState.setFlag("heartbeat_config", heartbeatDefaults && heartbeatBounds &&
                                                 heartbeatToggle);
+    const bool wifiBeforeTransport = NightMare::WiFiIP_enabled();
+    const bool mqttBeforeTransport = NightMare::Mqtt_enabled();
+#if NM_NETWORK_ESPNOW
+    const bool espNowBeforeTransport = NightMare::EspNow_enabled();
+#endif
+    const NightMareResults networkGet = handleNightMareCommand("NETWORK GET");
+    const NightMareResults mqttDependency =
+        handleNightMareCommand("NETWORK MQTT ENABLE MQTT");
+    const NightMareResults preferenceOnly =
+        handleNightMareCommand("NETWORK TRANSPORT SET MQTT");
+    const NightMareResults oldSet = handleNightMareCommand("NETWORK SET MQTT");
+    const NightMareResults oldIp = handleNightMareCommand("NETWORK IP");
+    const bool connectivityCommands =
+        networkGet.result && networkGet.response.indexOf("\"transport\"") >= 0 &&
+        networkGet.response.indexOf("\"wifi_radio\"") >= 0 &&
+        networkGet.response.indexOf("\"wifi_ip\"") >= 0 &&
+        networkGet.response.indexOf("\"esp_now\"") >= 0 &&
+        networkGet.response.indexOf("\"mqtt\"") >= 0 &&
+        !mqttDependency.result &&
+        mqttDependency.response.indexOf("wifi_ip_disabled") >= 0 &&
+        preferenceOnly.result &&
+        NightMare::WiFiIP_enabled() == wifiBeforeTransport &&
+        NightMare::Mqtt_enabled() == mqttBeforeTransport &&
+#if NM_NETWORK_ESPNOW
+        NightMare::EspNow_enabled() == espNowBeforeTransport &&
+#endif
+        !oldSet.result && oldSet.response.indexOf("unknown_network_command") >= 0 &&
+        !oldIp.result && oldIp.response.indexOf("unknown_network_command") >= 0;
+    smokeState.setFlag("connectivity_commands", connectivityCommands);
     managedState.onWrite = acceptStateWrite;
     const bool localStateUsesWritePolicy = managedState.setValue(7) && writeCalls == 1 &&
                                            managedState.getValue() == 7;

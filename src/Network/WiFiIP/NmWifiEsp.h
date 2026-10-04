@@ -80,7 +80,12 @@ NightMare::WiFiInfo WiFi_info();
 bool WiFi_startScan();
 bool WiFi_scanInProgress();
 int WiFi_scanCount();
+bool WiFi_scanComplete();
 bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result);
+void WiFi_clearScanResults();
+// Aborts an outstanding asynchronous scan. Safe when no scan is running.
+void WiFi_abortScan();
+void WiFi_scanTick();
 
 const char *WiFi_getAuthTypeName(wifi_auth_mode_t authType);
 const char *WiFi_stateName(NightMare::WiFiState status);

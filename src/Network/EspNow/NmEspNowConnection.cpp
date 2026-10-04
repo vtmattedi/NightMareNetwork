@@ -8,6 +8,7 @@
 #include <Core/Logs.h>
 #include <Network/NmMessageRouter.h>
 #include <Network/NmConnectionInternal.h>
+#include <Network/WiFiRadio/NmWifiRadioService.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -34,6 +35,14 @@ TaskHandle_t worker = nullptr;
 volatile bool workerRun = false;
 volatile bool workerExited = true;
 bool connectedReported = false;
+volatile bool serviceEnabled = false;
+volatile bool serviceSuspended = false;
+volatile NightMare::ConnectivityState serviceState = NightMare::ConnectivityState::STOPPED;
+
+void serviceChanged()
+{
+    NightMare::OnConnectivityStateChanged();
+}
 
 void post(Event *event)
 {
@@ -89,7 +98,8 @@ void handle(const Event &event)
         LOG("ESPNOW", "Gateway state: %s", NightMare::EspNowClient::stateName(event.state));
     if (event.isMessage)
     {
-        NmMessageRouter::handleMessage(event.topic, event.payload, event.retained);
+        if (NightMare::GetActiveConnection() == NightMare::ConnectionType::ESP_NOW)
+            NmMessageRouter::handleMessage(event.topic, event.payload, event.retained);
         return;
     }
     if (event.state == State::CONNECTED)
@@ -98,12 +108,22 @@ void handle(const Event &event)
         // which can change while running.
         refreshLastWill();
         connectedReported = true;
+        serviceState = NightMare::ConnectivityState::CONNECTED;
         NightMare::OnConnectedIngress(NightMare::ConnectionType::ESP_NOW);
+        serviceChanged();
     }
-    else if (connectedReported)
+    else
     {
-        connectedReported = false;
-        NightMare::OnDisconnectedIngress(NightMare::ConnectionType::ESP_NOW);
+        if (connectedReported)
+        {
+            connectedReported = false;
+            NightMare::OnDisconnectedIngress(NightMare::ConnectionType::ESP_NOW);
+        }
+        if (serviceEnabled && !serviceSuspended)
+            serviceState = event.state == State::STOPPED
+                               ? NightMare::ConnectivityState::ERROR
+                               : NightMare::ConnectivityState::CONNECTING;
+        serviceChanged();
     }
 }
 
@@ -185,6 +205,41 @@ bool running()
     return workerRun;
 }
 
+bool enabled() { return serviceEnabled; }
+NightMare::ConnectivityState connectivityState() { return serviceState; }
+
+bool suspend(NightMare::ConnectivitySuspendReason reason)
+{
+    if (reason != NightMare::ConnectivitySuspendReason::WIFI_SCAN || !serviceEnabled)
+        return false;
+    if (serviceSuspended)
+        return true;
+    serviceSuspended = true;
+    serviceState = NightMare::ConnectivityState::SUSPENDED;
+    serviceChanged();
+    end();
+    return true;
+}
+
+bool resume(NightMare::ConnectivitySuspendReason reason)
+{
+    if (reason != NightMare::ConnectivitySuspendReason::WIFI_SCAN || !serviceEnabled)
+        return false;
+    if (!serviceSuspended)
+        return true;
+    serviceSuspended = false;
+    serviceState = NightMare::ConnectivityState::STARTING;
+    if (!begin())
+    {
+        serviceState = NightMare::ConnectivityState::ERROR;
+        serviceChanged();
+        return false;
+    }
+    serviceState = NightMare::ConnectivityState::CONNECTING;
+    serviceChanged();
+    return true;
+}
+
 bool publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
 {
     return NightMare::EspNowClient::publish(topic, payload, length, retained);
@@ -198,6 +253,70 @@ bool subscribe(const char *topicFilter)
 bool unsubscribe(const char *topicFilter)
 {
     return NightMare::EspNowClient::unsubscribe(topicFilter);
+}
+}
+
+namespace NightMare
+{
+bool EspNow_enable()
+{
+    if (serviceEnabled)
+        return true;
+    if (WiFiRadio_state() != ConnectivityState::READY)
+        return false;
+    serviceEnabled = true;
+    serviceSuspended = false;
+    serviceState = ConnectivityState::STARTING;
+    if (!NmEspNowConnection::begin())
+    {
+        serviceEnabled = false;
+        serviceState = ConnectivityState::ERROR;
+        serviceChanged();
+        return false;
+    }
+    serviceState = ConnectivityState::CONNECTING;
+    serviceChanged();
+    return true;
+}
+
+bool EspNow_disable()
+{
+    if (!serviceEnabled)
+        return true;
+    serviceEnabled = false;
+    serviceSuspended = false;
+    serviceState = ConnectivityState::STOPPED;
+    OnDisconnectedIngress(ConnectionType::ESP_NOW);
+    serviceChanged();
+    NmEspNowConnection::end();
+    return true;
+}
+
+bool EspNow_enabled() { return serviceEnabled; }
+ConnectivityState EspNow_state() { return serviceState; }
+bool EspNow_suspend(ConnectivitySuspendReason reason) { return NmEspNowConnection::suspend(reason); }
+bool EspNow_resume(ConnectivitySuspendReason reason) { return NmEspNowConnection::resume(reason); }
+void EspNow_onRadioState(bool ready)
+{
+    if (!serviceEnabled || serviceSuspended)
+        return;
+    if (!ready)
+    {
+        serviceState = ConnectivityState::STARTING;
+        OnDisconnectedIngress(ConnectionType::ESP_NOW);
+        serviceChanged();
+        NmEspNowConnection::end();
+        return;
+    }
+    if (!NmEspNowConnection::running())
+    {
+        serviceState = ConnectivityState::STARTING;
+        if (!NmEspNowConnection::begin())
+            serviceState = ConnectivityState::ERROR;
+        else
+            serviceState = ConnectivityState::CONNECTING;
+        serviceChanged();
+    }
 }
 }
 

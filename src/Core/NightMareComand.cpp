@@ -4,6 +4,7 @@
 #include "ConfigManager.h"
 #include "DeviceIdentity.h"
 #include "Time.h"
+#include <Network/Connectivity.h>
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
 #endif
@@ -15,6 +16,16 @@
 #endif
 #if NM_ENABLE_NETWORK
 #include <Network/NmConnectionInternal.h>
+#endif
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadioService.h>
+#endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttConnection.h>
+#endif
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
+#include <Network/EspNow/EspNowClient.h>
 #endif
 #if NM_CONSOLE_BUILTINS
 #include <LittleFS.h>
@@ -924,123 +935,153 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_NETWORK || NM_ENABLE_WIFI
     else if (parsedMsg.command == "NETWORK")
     {
-        if (false)
+        auto finishJson = [&](JsonDocument &doc, bool ok)
         {
-        }
+            result.result = ok;
+            result.response = "";
+            serializeJson(doc, result.response);
+        };
+        auto lifecycleResult = [&](bool ok, const char *reason,
+                                   NightMare::ConnectivityState state)
+        {
+            JsonDocument doc;
+            doc["ok"] = ok;
+            if (!ok && reason != nullptr)
+                doc["reason"] = reason;
+            doc["state"] = NightMare::ConnectivityStateName(state);
+            finishJson(doc, ok);
+        };
 #if NM_ENABLE_NETWORK
-        else if (parsedMsg.subcommand == "SET")
+        auto parseConnection = [](String value, NightMare::ConnectionType &connection)
         {
-            String requested = parsedMsg.args[1];
-            requested.toUpperCase();
-            NightMare::ConnectionType connection = NightMare::ConnectionType::AUTO;
-            bool known = true;
-            if (requested == "MQTT")
-                connection = NightMare::ConnectionType::MQTT;
-            else if (requested == "LOCAL_MQTT")
-                connection = NightMare::ConnectionType::LOCAL_MQTT;
-            else if (requested == "ESP_NOW")
-                connection = NightMare::ConnectionType::ESP_NOW;
-            else if (requested != "AUTO")
-                known = false;
-            result.result = known && NightMare::SelectConnection(connection);
-            result.response = result.result ? "Connection change started."
-                                            : "Connection unavailable or invalid.";
-        }
+            value.toUpperCase();
+            if (value == "MQTT") connection = NightMare::ConnectionType::MQTT;
+            else if (value == "LOCAL_MQTT") connection = NightMare::ConnectionType::LOCAL_MQTT;
+            else if (value == "ESP_NOW") connection = NightMare::ConnectionType::ESP_NOW;
+            else if (value == "AUTO") connection = NightMare::ConnectionType::AUTO;
+            else return false;
+            return true;
+        };
 #endif
-        else if (parsedMsg.subcommand == "GET" ||
-                 parsedMsg.subcommand == "STATE")
+
+        if (parsedMsg.subcommand == "GET" && parsedMsg.argc == 1)
         {
             JsonDocument doc;
 #if NM_ENABLE_NETWORK
-            doc["selected"] = static_cast<uint8_t>(NightMare::GetSelectedConnection());
-            doc["preferred"] = NightMare::preferredConnection.value();
-            doc["state"] = static_cast<uint8_t>(NightMare::GetConnectionState());
+            JsonObject transport = doc["transport"].to<JsonObject>();
+            transport["preferred"] = NightMare::ConnectionTypeName(NightMare::GetPreferredConnection());
+            transport["active"] = NightMare::ConnectionTypeName(NightMare::GetActiveConnection());
+            transport["state"] = NightMare::ConnectionStateName(NightMare::GetConnectionState());
 #endif
+            JsonObject radio = doc["wifi_radio"].to<JsonObject>();
+#if NM_ENABLE_WIFI_RADIO
+            radio["supported"] = NightMare::WiFiRadio_supported();
+            radio["enabled"] = NightMare::WiFiRadio_enabled();
+            radio["state"] = NightMare::ConnectivityStateName(NightMare::WiFiRadio_state());
+#else
+            radio["supported"] = false; radio["enabled"] = false; radio["state"] = "STOPPED";
+#endif
+            JsonObject wifiIp = doc["wifi_ip"].to<JsonObject>();
 #if NM_ENABLE_WIFI
-            const NightMare::WiFiState status = WiFi_state();
-            doc["wifi"] = static_cast<int>(status);
-            doc["wifi_name"] = WiFi_stateName(status);
+            wifiIp["supported"] = true;
+            wifiIp["enabled"] = NightMare::WiFiIP_enabled();
+            wifiIp["state"] = NightMare::ConnectivityStateName(NightMare::WiFiIP_state());
+#else
+            wifiIp["supported"] = false; wifiIp["enabled"] = false; wifiIp["state"] = "STOPPED";
 #endif
-            serializeJson(doc, result.response);
-            result.result = true;
+            JsonObject espNow = doc["esp_now"].to<JsonObject>();
+#if NM_NETWORK_ESPNOW
+            espNow["supported"] = true;
+            espNow["enabled"] = NightMare::EspNow_enabled();
+            espNow["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state());
+#else
+            espNow["supported"] = false; espNow["enabled"] = false; espNow["state"] = "STOPPED";
+#endif
+            JsonObject mqtt = doc["mqtt"].to<JsonObject>();
+#if NM_ENABLE_MQTT
+            mqtt["supported"] = true;
+            mqtt["enabled"] = NightMare::Mqtt_enabled();
+            mqtt["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile());
+            mqtt["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state());
+#else
+            mqtt["supported"] = false; mqtt["enabled"] = false;
+            mqtt["profile"] = "MQTT"; mqtt["state"] = "STOPPED";
+#endif
+            finishJson(doc, true);
         }
 #if NM_ENABLE_WIFI
-        else if (parsedMsg.subcommand == "IP")
+        else if (parsedMsg.subcommand == "WIFI")
         {
-            result.response = WiFi_info().ip.c_str();
-        }
-        else if (parsedMsg.subcommand == "TXPOWER")
-        {
-            if (parsedMsg.args[1].length() == 0)
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            if (action == "GET")
             {
-                const int cfg = NightMare::WiFiStoredProfile().txPower;
-                result.response = "TX power: " + String(WiFi_info().txPowerDbm) + " dBm (" +
-                                  (cfg == NightMare::NM_TX_POWER_AUTO ? String("auto") : "configured " + String(cfg / 4.0f) + " dBm") + ")";
+                JsonDocument doc;
+                doc["supported"] = true;
+                doc["enabled"] = NightMare::WiFiIP_enabled();
+                doc["state"] = NightMare::ConnectivityStateName(NightMare::WiFiIP_state());
+                finishJson(doc, true);
             }
-            else
+            else if (action == "ENABLE")
+                lifecycleResult(NightMare::WiFiIP_enable(), "radio_not_ready", NightMare::WiFiIP_state());
+            else if (action == "DISABLE")
             {
-                int quarter = 0;
-                if (!parseTxPowerArg(parsedMsg.args[1], quarter))
+                if (
+#if NM_ENABLE_MQTT
+                    NightMare::Mqtt_enabled()
+#else
+                    false
+#endif
+                )
+                    lifecycleResult(false, "mqtt_enabled", NightMare::WiFiIP_state());
+                else
+                    lifecycleResult(NightMare::WiFiIP_disable(), "disable_failed", NightMare::WiFiIP_state());
+            }
+            else if (action == "IP")
+            {
+                JsonDocument doc; doc["ok"] = true; doc["ip"] = WiFi_info().ip.c_str(); finishJson(doc, true);
+            }
+            else if (action == "TXPOWER")
+            {
+                if (parsedMsg.args[2].length() == 0)
                 {
-                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5, 20, 20.5, 21 dBm.";
-                    result.result = false;
+                    JsonDocument doc; doc["ok"] = true; doc["tx_power_dbm"] = WiFi_info().txPowerDbm;
+                    finishJson(doc, true);
                 }
                 else
                 {
+                    int quarter = 0;
+                    if (!parseTxPowerArg(parsedMsg.args[2], quarter))
+                    { lifecycleResult(false, "invalid_tx_power", NightMare::WiFiIP_state()); }
+                    else
+                    {
                     NightMare::WiFiProfile profile = NightMare::WiFiStoredProfile();
                     profile.txPower = quarter;
-                    result.result = NightMare::WiFiApplyProfile(profile);
-                    result.response = result.result
-                                          ? "TX power set."
-                                          : "TX power change failed; previous settings restored.";
+                        lifecycleResult(NightMare::WiFiApplyProfile(profile), "profile_change_failed", NightMare::WiFiIP_state());
+                    }
                 }
             }
-        }
-        else if (parsedMsg.subcommand == "RECONNECT")
-        {
-            result.response = "not implemented yet";
-        }
-
-        else if (parsedMsg.subcommand == "SCAN")
-        {
-            bool start = parsedMsg.args[1] == "-s" || parsedMsg.args[1] == "start";
-            int res = WiFi_scanCount();
-            JsonDocument doc;
-#if NM_ENABLE_NETWORK && NM_NETWORK_ESPNOW
-            // A scan retunes the radio away from the gateway's channel; only a connection change
-            // or a failure may take ESP-NOW down.
-            const bool espNowConnected =
-                NightMare::GetSelectedConnection() == NightMare::ConnectionType::ESP_NOW &&
-                NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED;
-#else
-            const bool espNowConnected = false;
-#endif
-            if (espNowConnected && (start || (res == 0 && !WiFi_scanInProgress())))
+            else if (action == "SCAN")
             {
-                doc["control"] = "scan_refused_espnow_connected";
-            }
-            else if (start || (res == 0 && !WiFi_scanInProgress()))
-            {
-                if (WiFi_startScan())
+                WiFi_scanTick();
+                const int count = WiFi_scanCount();
+                JsonDocument doc;
+                if (!WiFi_scanComplete() && !WiFi_scanInProgress())
                 {
-                    doc["control"] = "scan_started";
+                    const bool started = WiFi_startScan();
+                    doc["ok"] = started;
+                    doc["state"] = started ? "SCANNING" : "ERROR";
+                    if (!started) doc["reason"] = "scan_start_failed";
+                    finishJson(doc, started);
+                }
+                else if (WiFi_scanInProgress())
+                {
+                    doc["ok"] = true; doc["state"] = "SCANNING"; finishJson(doc, true);
                 }
                 else
                 {
-                    doc["control"] = "scan_start_failed";
-                }
-            }
-            else
-            {
-                if (WiFi_scanInProgress())
-                {
-                    doc["control"] = "scan_in_progress";
-                }
-                else
-                {
-                    doc["control"] = "scan_done";
+                    doc["ok"] = true; doc["state"] = "DONE";
                     JsonArray networks = doc["networks"].to<JsonArray>();
-                    for (int i = 0; i < res; i++)
+                    for (int i = 0; i < count; ++i)
                     {
                         NightMare::WiFiScanResult scan;
                         if (!WiFi_scanResult(i, scan))
@@ -1052,61 +1093,121 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                         net["channel"] = scan.channel;
                         net["encryptionType"] = WiFi_getAuthTypeName(scan.authMode);
                     }
+                    WiFi_clearScanResults();
+                    finishJson(doc, true);
                 }
             }
-            String resStr = "";
-            serializeJson(doc, resStr);
-            result.response = resStr;
-        }
-
-        else if (parsedMsg.subcommand == "CHANGE")
-        {
-            if (parsedMsg.args[1].length() == 0)
+            else if (action == "CHANGE")
             {
-                result.response = "No SSID provided to CHANGE.";
+                if (parsedMsg.args[2].length() == 0)
+                { lifecycleResult(false, "ssid_required", NightMare::WiFiIP_state()); }
+                else
+                {
+                NightMare::WiFiProfile profile = NightMare::WiFiStoredProfile();
+                    profile.ssid = parsedMsg.args[2].c_str();
+                    profile.password = parsedMsg.args[3].c_str();
+                    if (parsedMsg.args[4].length() > 0 && !parseTxPowerArg(parsedMsg.args[4], profile.txPower))
+                    { lifecycleResult(false, "invalid_tx_power", NightMare::WiFiIP_state()); }
+                    else
+                {
+                        lifecycleResult(NightMare::WiFiApplyProfile(profile), "profile_change_failed", NightMare::WiFiIP_state());
+                    }
+                }
+            }
+            else { JsonDocument doc; doc["ok"] = false; doc["reason"] = "unknown_wifi_command"; finishJson(doc, false); }
+        }
+#else
+        else if (parsedMsg.subcommand == "WIFI")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            JsonDocument doc;
+            if (action == "GET")
+            {
+                doc["supported"] = false; doc["enabled"] = false; doc["state"] = "STOPPED";
+                finishJson(doc, true);
             }
             else
             {
-                String ssid = parsedMsg.args[1];
-                NightMare::WiFiProfile profile = NightMare::WiFiStoredProfile();
-                profile.ssid = ssid.c_str();
-                profile.password = parsedMsg.args[2].c_str();
-                if (parsedMsg.args[3].length() > 0 &&
-                    !parseTxPowerArg(parsedMsg.args[3], profile.txPower))
-                {
-                    result.response = "Invalid TX power. Use AUTO or one of: -1, 2, 5, 7, 8.5, 11, 13, 15, 17, 18.5, 19, 19.5 dBm.";
-                    result.result = false;
-                    return result;
-                }
-                bool changeResult = NightMare::WiFiApplyProfile(profile);
-                result.response = String("WiFi credentials change ") +
-                                  (changeResult ? "successful." : "failed.");
-#if NM_ENABLE_NETWORK
-                // The change may drop whichever connection carried the command
-                // (MQTT loses its IP link, ESP-NOW may follow the AP to another
-                // channel), so the reply waits for the next connect if needed.
-                if (context.msgSource == NM_CMD_SRC_MQTT ||
-                    context.msgSource == NM_CMD_SRC_ESPNOW)
-                {
-                    context.msgSource = NM_CMD_ANS_DO_NOT_RESPOND;
-                    NightMare::PublishTextWhenConnected(context.sourceIdentifier,
-                                                        result.response, false);
-                }
-#endif
+                doc["ok"] = false; doc["reason"] = "unsupported"; finishJson(doc, false);
             }
+        }
+#endif
+#if NM_NETWORK_ESPNOW
+        else if (parsedMsg.subcommand == "ESPNOW")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            if (action == "GET")
+            { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::EspNow_enabled(); doc["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state()); finishJson(doc, true); }
+            else if (action == "ENABLE") lifecycleResult(NightMare::EspNow_enable(), "radio_not_ready", NightMare::EspNow_state());
+            else if (action == "DISABLE") lifecycleResult(NightMare::EspNow_disable(), "disable_failed", NightMare::EspNow_state());
+            else { JsonDocument doc; doc["ok"] = false; doc["reason"] = "unknown_espnow_command"; finishJson(doc, false); }
+        }
+#else
+        else if (parsedMsg.subcommand == "ESPNOW")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            JsonDocument doc;
+            if (action == "GET")
+            { doc["supported"] = false; doc["enabled"] = false; doc["state"] = "STOPPED"; finishJson(doc, true); }
+            else
+            { doc["ok"] = false; doc["reason"] = "unsupported"; finishJson(doc, false); }
+        }
+#endif
+#if NM_ENABLE_MQTT
+        else if (parsedMsg.subcommand == "MQTT")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            if (action == "GET")
+            { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::Mqtt_enabled(); doc["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile()); doc["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state()); finishJson(doc, true); }
+            else if (action == "ENABLE")
+            {
+                NightMare::ConnectionType profile = NightMare::Mqtt_profile();
+                const bool known = parsedMsg.args[2].length() == 0 || parseConnection(parsedMsg.args[2], profile);
+                if (!known || (profile != NightMare::ConnectionType::MQTT && profile != NightMare::ConnectionType::LOCAL_MQTT))
+                    lifecycleResult(false, "invalid_mqtt_profile", NightMare::Mqtt_state());
+                else if (!NightMare::WiFiIP_enabled())
+                    lifecycleResult(false, "wifi_ip_disabled", NightMare::Mqtt_state());
+                else
+                    lifecycleResult(NightMare::Mqtt_enable(profile), "enable_failed", NightMare::Mqtt_state());
+            }
+            else if (action == "DISABLE") lifecycleResult(NightMare::Mqtt_disable(), "disable_failed", NightMare::Mqtt_state());
+            else { JsonDocument doc; doc["ok"] = false; doc["reason"] = "unknown_mqtt_command"; finishJson(doc, false); }
+        }
+#else
+        else if (parsedMsg.subcommand == "MQTT")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            JsonDocument doc;
+            if (action == "GET")
+            { doc["supported"] = false; doc["enabled"] = false; doc["profile"] = "MQTT"; doc["state"] = "STOPPED"; finishJson(doc, true); }
+            else
+            { doc["ok"] = false; doc["reason"] = "unsupported"; finishJson(doc, false); }
+        }
+#endif
+#if NM_ENABLE_NETWORK
+        else if (parsedMsg.subcommand == "TRANSPORT")
+        {
+            String action = parsedMsg.args[1]; action.toUpperCase();
+            if (action == "GET")
+            { JsonDocument doc; doc["preferred"] = NightMare::ConnectionTypeName(NightMare::GetPreferredConnection()); doc["active"] = NightMare::ConnectionTypeName(NightMare::GetActiveConnection()); doc["state"] = NightMare::ConnectionStateName(NightMare::GetConnectionState()); finishJson(doc, true); }
+            else if (action == "SET")
+            {
+                NightMare::ConnectionType connection;
+                const bool known = parseConnection(parsedMsg.args[2], connection);
+                JsonDocument doc;
+                const bool ok = known && NightMare::SelectConnection(connection);
+                doc["ok"] = ok;
+                if (!ok) doc["reason"] = known ? "unsupported_transport" : "invalid_transport";
+                doc["preferred"] = NightMare::ConnectionTypeName(ok ? connection : NightMare::GetPreferredConnection());
+                doc["active"] = NightMare::ConnectionTypeName(NightMare::GetActiveConnection());
+                finishJson(doc, ok);
+            }
+            else { JsonDocument doc; doc["ok"] = false; doc["reason"] = "unknown_transport_command"; finishJson(doc, false); }
         }
 #endif
         else
         {
-            result.result = false;
-            result.response = "Unknown NETWORK subcommand available: [GET"
-#if NM_ENABLE_NETWORK
-                              ", SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>"
-#endif
-#if NM_ENABLE_WIFI
-                              ", IP, SCAN <-s|-start>, CHANGE <ssid> <password> [dBm|AUTO], TXPOWER [dBm|AUTO], RECONNECT"
-#endif
-                              "].";
+            JsonDocument doc; doc["ok"] = false; doc["reason"] = "unknown_network_command"; finishJson(doc, false);
         }
     }
 #endif

@@ -383,38 +383,60 @@ Topic:
 
 The document is retained.
 
-When WiFi is enabled and connected, the document contains:
+The document represents every connectivity service independently:
 
 ```json
 {
-  "wifi_connected": true,
-  "ip": "192.168.1.50",
-  "rssi_dbm": -55,
-  "mqtt_connected": true,
-  "broker": "remote"
+  "transport": {
+    "preferred": "ESP_NOW",
+    "active": "ESP_NOW",
+    "state": "CONNECTED"
+  },
+  "wifi_radio": {"supported": true, "enabled": true, "state": "READY"},
+  "wifi_ip": {
+    "supported": true,
+    "enabled": true,
+    "state": "CONNECTED",
+    "ssid": "example",
+    "ip": "192.168.1.50",
+    "rssi": -55,
+    "channel": 6,
+    "tx_power_dbm": 20.0
+  },
+  "esp_now": {
+    "supported": true,
+    "enabled": true,
+    "state": "CONNECTED",
+    "gateway_connected": true,
+    "channel": 6,
+    "rtt_ms": 12,
+    "session_id": 41
+  },
+  "mqtt": {
+    "supported": true,
+    "enabled": true,
+    "state": "CONNECTED",
+    "profile": "MQTT"
+  }
 }
 ```
 
-When WiFi is enabled but disconnected:
+The schema can also represent an unavailable preference without contradiction:
 
 ```json
 {
-  "wifi_connected": false,
-  "mqtt_connected": false,
-  "broker": "remote"
+  "transport": {"preferred": "MQTT", "active": "ESP_NOW", "state": "CONNECTED"},
+  "wifi_radio": {"supported": true, "enabled": true, "state": "READY"},
+  "wifi_ip": {"supported": true, "enabled": false, "state": "STOPPED"},
+  "esp_now": {"supported": true, "enabled": true, "state": "CONNECTED"},
+  "mqtt": {"supported": true, "enabled": false, "state": "STOPPED", "profile": "MQTT"}
 }
 ```
 
-`ip` and `rssi_dbm` are only present while WiFi reports connected.
-
-If the library is built without WiFi support, the WiFi-specific fields are not emitted.
-
-`broker` is one of:
-
-```text
-local
-remote
-```
+`wifi_ip.ssid`, `ip`, `rssi`, `channel`, and `tx_power_dbm` are present only
+while WiFiIP is connected. ESP-NOW session details are included from already
+available state; telemetry does not initiate discovery. Unsupported services
+remain present with `supported=false`, `enabled=false`, and `state=STOPPED`.
 
 Network telemetry is normally refreshed every:
 
@@ -435,7 +457,7 @@ Network telemetry is retained, but it is not the authoritative presence signal.
 If a device disappears unexpectedly, its last retained network telemetry may still say:
 
 ```json
-"mqtt_connected": true
+"mqtt": {"state": "CONNECTED"}
 ```
 
 because the device cannot rewrite telemetry after it has disappeared.
@@ -450,9 +472,9 @@ for presence.
 
 Use network telemetry as last-known bookkeeping.
 
-## Publication on MQTT connection
+## Publication on active transport and state changes
 
-Every MQTT connection or broker switch requests a refresh of the two static
+Every active NMNW transport connection requests a refresh of the static
 retained information documents:
 
 ```text
@@ -467,7 +489,11 @@ allocations across cooperative ticks instead of the connection callback.
 
 Each document is attempted even if publication of another document fails.
 
-SYSTEM and NETWORK telemetry are refreshed by their periodic Scheduler jobs.
+Meaningful WiFiIP, MQTT, ESP-NOW, preferred-transport, and active-transport
+changes also request a network telemetry refresh. Duplicate requests are
+coalesced; publication failure never changes connectivity state.
+
+SYSTEM and NETWORK telemetry are additionally refreshed by periodic Scheduler jobs.
 HEARTBEAT is published by its runtime-configured Scheduler job when enabled.
 
 ## Periodic publication

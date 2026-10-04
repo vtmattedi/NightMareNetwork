@@ -11,13 +11,17 @@
 #include <Network/NmConnectionInternal.h>
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
-#include <Network/WiFiIP/NmWifiEsp.h>
+#include <Network/WiFiIP/NmWifiService.h>
 #endif
 #if NM_ENABLE_WIFI_RADIO
-#include <Network/WiFiRadio/NmWifiRadio.h>
+#include <Network/WiFiRadio/NmWifiRadioService.h>
 #endif
 #if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
 #include <Network/EspNow/EspNowClient.h>
+#endif
+#if NM_ENABLE_MQTT
+#include <Network/MQTT/NmMqttConnection.h>
 #endif
 
 namespace
@@ -438,17 +442,6 @@ namespace
         }
     }
 
-    const char *connectionName(NightMare::ConnectionType connection)
-    {
-        switch (connection)
-        {
-        case NightMare::ConnectionType::AUTO: return "auto";
-        case NightMare::ConnectionType::MQTT: return "mqtt";
-        case NightMare::ConnectionType::LOCAL_MQTT: return "local_mqtt";
-        case NightMare::ConnectionType::ESP_NOW: return "esp_now";
-        }
-        return "unknown";
-    }
 }
 
 TelemetryService Telemetry;
@@ -636,50 +629,70 @@ void TelemetryService::appendSystem(JsonObject dst) const
 // Last-known bookkeeping once the device is gone; /status owns presence.
 void TelemetryService::appendNetwork(JsonObject dst) const
 {
+    JsonObject transport = dst["transport"].to<JsonObject>();
+    transport["preferred"] = NightMare::ConnectionTypeName(NightMare::GetPreferredConnection());
+    transport["active"] = NightMare::ConnectionTypeName(NightMare::GetActiveConnection());
+    transport["state"] = NightMare::ConnectionStateName(NightMare::GetConnectionState());
+
+    JsonObject radio = dst["wifi_radio"].to<JsonObject>();
+#if NM_ENABLE_WIFI_RADIO
+    radio["supported"] = NightMare::WiFiRadio_supported();
+    radio["enabled"] = NightMare::WiFiRadio_enabled();
+    radio["state"] = NightMare::ConnectivityStateName(NightMare::WiFiRadio_state());
+#else
+    radio["supported"] = false;
+    radio["enabled"] = false;
+    radio["state"] = "STOPPED";
+#endif
+
+    JsonObject wifiIp = dst["wifi_ip"].to<JsonObject>();
 #if NM_ENABLE_WIFI
     const NightMare::WiFiInfo wifi = WiFi_info();
     const bool wifiConnected = wifi.state == NightMare::WiFiState::CONNECTED;
-    dst["wifi_connected"] = wifiConnected;
+    wifiIp["supported"] = true;
+    wifiIp["enabled"] = NightMare::WiFiIP_enabled();
+    wifiIp["state"] = NightMare::ConnectivityStateName(NightMare::WiFiIP_state());
     if (wifiConnected)
     {
-        dst["ip"] = wifi.ip.c_str();
-        dst["rssi_dbm"] = wifi.rssi;
-        dst["wifi_channel"] = wifi.channel;
-        dst["tx_power_dbm"] = wifi.txPowerDbm;
+        wifiIp["ssid"] = wifi.ssid.c_str();
+        wifiIp["ip"] = wifi.ip.c_str();
+        wifiIp["rssi"] = wifi.rssi;
+        wifiIp["channel"] = wifi.channel;
+        wifiIp["tx_power_dbm"] = wifi.txPowerDbm;
     }
+#else
+    wifiIp["supported"] = false;
+    wifiIp["enabled"] = false;
+    wifiIp["state"] = "STOPPED";
 #endif
-    const NightMare::ConnectionType connection = NightMare::GetSelectedConnection();
-    const NightMare::ConnectionState state = NightMare::GetConnectionState();
-    dst["connection"] = connectionName(connection);
-    dst["connected"] = state == NightMare::ConnectionState::CONNECTED;
-    dst["connection_state"] = static_cast<uint8_t>(state);
-#if NM_ENABLE_WIFI_RADIO
-    // The radio channel is meaningful without an AP too: it is where ESP-NOW
-    // found the gateway.
-    if (WiFiRadio_running())
-        dst["radio_channel"] = WiFiRadio_channel();
-#endif
-    // "broker" names whatever carries this device's topics, so a consumer can
-    // tell the three apart; mqtt_connected stays for existing dashboards.
-    switch (connection)
-    {
-    case NightMare::ConnectionType::MQTT:
-    case NightMare::ConnectionType::LOCAL_MQTT:
-        dst["mqtt_connected"] = state == NightMare::ConnectionState::CONNECTED;
-        dst["broker"] = connection == NightMare::ConnectionType::LOCAL_MQTT
-                            ? "local"
-                            : "remote";
-        break;
-    case NightMare::ConnectionType::ESP_NOW:
-        dst["mqtt_connected"] = false;
-        dst["broker"] = "espnow";
+
+    JsonObject espNow = dst["esp_now"].to<JsonObject>();
 #if NM_NETWORK_ESPNOW
-        dst["espnow_rtt_ms"] = NightMare::EspNowClient::rttMs();
+    espNow["supported"] = true;
+    espNow["enabled"] = NightMare::EspNow_enabled();
+    espNow["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state());
+    espNow["gateway_connected"] = NightMare::EspNow_state() == NightMare::ConnectivityState::CONNECTED;
+    espNow["channel"] = WiFiRadio_channel();
+    espNow["rtt_ms"] = NightMare::EspNowClient::rttMs();
+    espNow["session_id"] = NightMare::EspNowClient::sessionId();
+#else
+    espNow["supported"] = false;
+    espNow["enabled"] = false;
+    espNow["state"] = "STOPPED";
 #endif
-        break;
-    case NightMare::ConnectionType::AUTO:
-        break;
-    }
+
+    JsonObject mqtt = dst["mqtt"].to<JsonObject>();
+#if NM_ENABLE_MQTT
+    mqtt["supported"] = true;
+    mqtt["enabled"] = NightMare::Mqtt_enabled();
+    mqtt["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state());
+    mqtt["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile());
+#else
+    mqtt["supported"] = false;
+    mqtt["enabled"] = false;
+    mqtt["state"] = "STOPPED";
+    mqtt["profile"] = "MQTT";
+#endif
 }
 
 TelemetryResult TelemetryService::getInfo(InfoType type) const

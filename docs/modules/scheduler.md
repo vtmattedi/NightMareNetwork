@@ -122,7 +122,7 @@ Example:
 ```cpp
 gScheduler.after(
     "reconnect",
-    "NETWORK SET MQTT",
+    "NETWORK TRANSPORT SET MQTT",
     5000);
 ```
 

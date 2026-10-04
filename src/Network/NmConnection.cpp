@@ -8,15 +8,14 @@
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
 #include <Core/ResourcesManager.h>
+#include <Core/SystemState.h>
 #include <Network/NmMessageRouter.h>
+#include <Network/Connectivity.h>
 #if NM_ENABLE_MQTT
 #include <Network/MQTT/NmMqttConnection.h>
 #endif
 #if NM_NETWORK_ESPNOW
 #include <Network/EspNow/NmEspNowConnection.h>
-#endif
-#if NM_ENABLE_WIFI
-#include <Network/WiFiIP/NmWifiService.h>
 #endif
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
@@ -40,10 +39,9 @@ namespace NightMare
 #endif
         }
     }
-    //@NightMare:Config Prefered Connection
-    // The connection type the application prefers, which is the head of the failover order.
-    // Also the first connection tried when the radio or an IP link comes up. AUTO is the default, which
-    // is the base failover order: ESP-NOW, MQTT, LOCAL_MQTT
+    //@NightMare:Config Preferred Connection
+    // Routing intent only. It never enables or disables a connectivity service.
+    // AUTO uses the base order: ESP-NOW, MQTT, LOCAL_MQTT.
     /* enum class ConnectionType : uint8_t
     {
         AUTO = 0,
@@ -54,11 +52,6 @@ namespace NightMare
     */
     Config<int> preferredConnection("nightmare:connection:preferred_connection",
                                     static_cast<int>(defaultConnection()));
-
-    //@NightMare:Config Failover Seconds
-    // How long a connection may stay down before the next profile in the failover order is tried.
-    // 0 disables failover: the selected profile keeps retrying on its own.
-    Config<int> failoverSeconds("nightmare:connection:failover_secs", 60);
 
     namespace
     {
@@ -79,19 +72,7 @@ namespace NightMare
         SemaphoreHandle_t subscriptionMutex = nullptr;
         bool frameworkSubscriptionsRegistered = false;
         bool resourceConnectionAttached = false;
-        // What the drivers below have reported; see NmConnectionInternal.h.
-        bool radioAvailable = false;
-        bool ipLinkAvailable = false;
-        // An MQTT profile is selected but its client waits for the IP station to get an address.
-        bool mqttStartPending = false;
-        // Failover state, see ConnectionTick(): the position in failoverOrder() of the profile started
-        // last, when the connection was last seen down, and when we last switched.
-        size_t candidateIndex = 0;
-        uint32_t notConnectedSinceMs = 0;
-        uint32_t lastSwitchMs = 0;
-        // Never switch more often than this, so a profile that errors instantly cannot make the tick
-        // cycle through every profile on every call.
-        constexpr uint32_t MinSwitchIntervalMs = 5000;
+        bool coordinatorBegun = false;
         std::atomic<MessageHandler> applicationMessageHandler{nullptr};
 
         // PublishTextWhenConnected() backlog, flushed on every connect whatever the
@@ -160,32 +141,52 @@ namespace NightMare
             return false;
         }
 
-        // Whether what a connection runs on is there yet:
-        //   MQTT, LOCAL_MQTT   an IP link -- or, with the station built, the radio to bring one up on:
-        //                      the station only runs while an MQTT profile is selected
-        //   ESP_NOW            the radio alone -- no AP, no IP
-        bool requirementsMet(ConnectionType connection)
+        bool transportEnabled(ConnectionType connection)
         {
             switch (connection)
             {
             case ConnectionType::MQTT:
             case ConnectionType::LOCAL_MQTT:
-#if NM_ENABLE_WIFI
-                return ipLinkAvailable || radioAvailable;
+#if NM_ENABLE_MQTT
+                return Mqtt_enabled() && Mqtt_profile() == connection;
 #else
-                return ipLinkAvailable;
+                return false;
 #endif
             case ConnectionType::ESP_NOW:
-                return radioAvailable;
+#if NM_NETWORK_ESPNOW
+                return EspNow_enabled();
+#else
+                return false;
+#endif
             case ConnectionType::AUTO:
                 return false;
             }
             return false;
         }
 
-        const char *requirementName(ConnectionType connection)
+        bool transportUsable(ConnectionType connection)
         {
-            return connection == ConnectionType::ESP_NOW ? "the Wi-Fi radio" : "an IP link";
+            if (!transportEnabled(connection))
+                return false;
+            switch (connection)
+            {
+            case ConnectionType::MQTT:
+            case ConnectionType::LOCAL_MQTT:
+#if NM_ENABLE_MQTT
+                return Mqtt_state() == ConnectivityState::CONNECTED;
+#else
+                return false;
+#endif
+            case ConnectionType::ESP_NOW:
+#if NM_NETWORK_ESPNOW
+                return EspNow_state() == ConnectivityState::CONNECTED;
+#else
+                return false;
+#endif
+            case ConnectionType::AUTO:
+                return false;
+            }
+            return false;
         }
 
         bool validTopicFilter(const char *topicFilter)
@@ -317,109 +318,15 @@ namespace NightMare
             xSemaphoreGive(subscriptionMutex);
         }
 
-#if NM_NETWORK_ESPNOW
-        bool startEspNow()
+        void removeSubscriptionsFromActive()
         {
-            if (selectedConnection == ConnectionType::ESP_NOW &&
-                (connectionState == ConnectionState::CONNECTING ||
-                 connectionState == ConnectionState::CONNECTED))
-                return true;
-            // esp_now_init needs a started driver. Without it, wait: the radio
-            // ingress starts ESP-NOW as soon as it comes up.
-            if (!radioAvailable)
-            {
-                LOG("NET", "ESP-NOW waits for the Wi-Fi radio");
-                return false;
-            }
-
-            attachResourceConnection();
-            registerFrameworkSubscriptions();
-
-            const ConnectionType previousConnection = selectedConnection;
-            const ConnectionState previousState = connectionState;
-#if NM_ENABLE_MQTT
-            // One connection at a time: stop the MQTT client before ESP-NOW takes over.
-            if (isMqtt(previousConnection) && NmMqttConnection::state() != -1)
-                NmMqttConnection::end();
-#endif
-            mqttStartPending = false;
-#if NM_ENABLE_WIFI
-            // The gateway may be on any channel, and an AP pins the radio to its own. ESP-NOW owns the
-            // radio while it is selected -- searching and connected alike -- so the station stays down
-            // until an explicit selection or a failover picks an MQTT profile again.
-            if (WiFi_state() != WiFiState::STOPPED)
-                LOG("NET", "IP station suspended while ESP-NOW is selected");
-            WiFiStationSuspend();
-#endif
-            selectedConnection = ConnectionType::ESP_NOW;
-            connectionState = ConnectionState::CONNECTING;
-            if (NmEspNowConnection::begin())
-                return true;
-            selectedConnection = previousConnection;
-            connectionState = previousState;
-            return false;
-        }
-#endif
-
-#if NM_ENABLE_MQTT
-        bool beginMqttClient(ConnectionType connection)
-        {
-            return NmMqttConnection::state() == -1 ? NmMqttConnection::begin(connection)
-                                                   : NmMqttConnection::changeTo(connection);
-        }
-#endif
-
-        bool startConnection(ConnectionType connection)
-        {
-            if (!connectionEnabled(connection))
-                return false;
-#if NM_NETWORK_ESPNOW
-            if (connection == ConnectionType::ESP_NOW)
-                return startEspNow();
-            if (NmEspNowConnection::running())
-                NmEspNowConnection::end();
-#endif
-            if (!isMqtt(connection))
-                return false;
-#if NM_ENABLE_MQTT
-            if (selectedConnection == connection &&
-                (connectionState == ConnectionState::CONNECTING ||
-                 connectionState == ConnectionState::CONNECTED))
-                return true;
-
-            attachResourceConnection();
-            registerFrameworkSubscriptions();
-
-            const ConnectionType previousConnection = selectedConnection;
-            const ConnectionState previousState = connectionState;
-#if NM_ENABLE_WIFI
-            if (!ipLinkAvailable)
-            {
-                // No address yet: bring the station up and start the client from the IP-link ingress.
-                if (!WiFiStationResume())
-                    return false;
-                selectedConnection = connection;
-                connectionState = ConnectionState::CONNECTING;
-                mqttStartPending = true;
-                LOG("NET", "Connection %u waits for the IP station", static_cast<unsigned>(connection));
-                return true;
-            }
-#endif
-            mqttStartPending = false;
-            selectedConnection = connection;
-            connectionState = ConnectionState::CONNECTING;
-
-            const bool accepted = beginMqttClient(connection);
-            if (!accepted)
-            {
-                selectedConnection = previousConnection;
-                connectionState = previousState;
-            }
-            return accepted;
-#else
-            (void)connection;
-            return false;
-#endif
+            if (connectionState != ConnectionState::CONNECTED || subscriptionMutex == nullptr)
+                return;
+            xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
+            for (const Subscription &subscription : subscriptions)
+                if (subscription.references != 0)
+                    driverUnsubscribe(subscription.filter.c_str());
+            xSemaphoreGive(subscriptionMutex);
         }
 
         constexpr ConnectionType BaseOrder[] = {ConnectionType::ESP_NOW, ConnectionType::MQTT,
@@ -442,56 +349,70 @@ namespace NightMare
             return count;
         }
 
-        size_t failoverOrder(ConnectionType (&order)[MaxProfiles])
+        void requestNetworkTelemetry()
         {
-            return failoverOrder(static_cast<ConnectionType>(preferredConnection.value()), order);
+#if NM_ENABLE_TELEMETRY
+            SystemState.request(SystemRequest::PublishTelemetry);
+#endif
         }
 
-        // Start policy, used whenever the radio or the IP link comes up and nothing runs: the head of
-        // the failover order. A head this build supports but can't run *yet* is waited for, not
-        // skipped -- with MQTT preferred the radio comes up before the IP link, and skipping then would
-        // start ESP-NOW instead. A wait that outlasts failover_secs is ended by ConnectionTick().
-        bool startPreferredConnection()
+        void activate(ConnectionType connection)
         {
+            const ConnectionType previous = selectedConnection;
+            const ConnectionState previousState = connectionState;
+            if (connection != previous && previousState == ConnectionState::CONNECTED)
+                removeSubscriptionsFromActive();
+            selectedConnection = connection;
+            connectionState = connection == ConnectionType::AUTO
+                                  ? ConnectionState::STOPPED
+                                  : ConnectionState::CONNECTED;
+            if (coordinatorBegun && connection != ConnectionType::AUTO &&
+                (connection != previous || previousState != ConnectionState::CONNECTED))
+            {
+                restoreSubscriptions();
+                NmMessageRouter::onConnected();
+                flushDeferred();
+            }
+            if (connection != previous || connectionState != previousState)
+                requestNetworkTelemetry();
+        }
+
+        void reevaluateRouting(ConnectionType preference)
+        {
+            if (preference != ConnectionType::AUTO && transportUsable(preference))
+            {
+                activate(preference);
+                return;
+            }
+            const ConnectionType current = static_cast<ConnectionType>(selectedConnection);
+            if (transportUsable(current))
+                return;
             ConnectionType order[MaxProfiles];
-            const size_t count = failoverOrder(order);
+            const size_t count = failoverOrder(preference, order);
             for (size_t i = 0; i < count; ++i)
             {
-                if (!requirementsMet(order[i]))
-                    return false;
-                if (startConnection(order[i]))
+                if (transportUsable(order[i]))
                 {
-                    candidateIndex = i;
-                    return true;
+                    activate(order[i]);
+                    return;
                 }
             }
-            return false;
+            activate(ConnectionType::AUTO);
         }
 
-        bool nothingRunning()
+        void reevaluateRouting()
         {
-            return connectionState == ConnectionState::STOPPED || connectionState == ConnectionState::ERROR;
+            reevaluateRouting(static_cast<ConnectionType>(preferredConnection.value()));
         }
 
-        // An explicit choice restarts the failover order from its new head. The Config still holds the
-        // old value while this runs, so the order is built from the requested one.
         bool changePreferredConnection(Config<int> &, const int &requested)
         {
             const ConnectionType connection = static_cast<ConnectionType>(requested);
             if (connection != ConnectionType::AUTO && !connectionEnabled(connection))
                 return false;
-            ConnectionType order[MaxProfiles];
-            if (failoverOrder(connection, order) == 0 || !startConnection(order[0]))
-                return false;
-            candidateIndex = 0;
-            notConnectedSinceMs = millis();
-            lastSwitchMs = notConnectedSinceMs;
+            reevaluateRouting(connection);
+            requestNetworkTelemetry();
             return true;
-        }
-
-        bool acceptFailoverSeconds(Config<int> &, const int &requested)
-        {
-            return requested >= 0 && requested <= 86400;
         }
 
         struct PreferredConnectionHandlerInstaller
@@ -499,7 +420,6 @@ namespace NightMare
             PreferredConnectionHandlerInstaller()
             {
                 preferredConnection.onWrite = changePreferredConnection;
-                failoverSeconds.onWrite = acceptFailoverSeconds;
             }
         };
 
@@ -629,9 +549,13 @@ namespace NightMare
         return configManager().handle(request) == "OK";
     }
 
-    ConnectionType GetSelectedConnection()
+    ConnectionType GetActiveConnection()
     {
         return static_cast<ConnectionType>(selectedConnection);
+    }
+    ConnectionType GetPreferredConnection()
+    {
+        return static_cast<ConnectionType>(preferredConnection.value());
     }
 
     ConnectionState GetConnectionState()
@@ -639,137 +563,87 @@ namespace NightMare
         return static_cast<ConnectionState>(connectionState);
     }
 
+    const char *ConnectionTypeName(ConnectionType connection)
+    {
+        switch (connection)
+        {
+        case ConnectionType::AUTO: return "AUTO";
+        case ConnectionType::MQTT: return "MQTT";
+        case ConnectionType::LOCAL_MQTT: return "LOCAL_MQTT";
+        case ConnectionType::ESP_NOW: return "ESP_NOW";
+        }
+        return "AUTO";
+    }
+
+    const char *ConnectionStateName(ConnectionState state)
+    {
+        switch (state)
+        {
+        case ConnectionState::STOPPED: return "STOPPED";
+        case ConnectionState::DISCOVERING: return "DISCOVERING";
+        case ConnectionState::CONNECTING: return "CONNECTING";
+        case ConnectionState::CONNECTED: return "CONNECTED";
+        case ConnectionState::ERROR: return "ERROR";
+        }
+        return "ERROR";
+    }
+
     void OnConnectedIngress(ConnectionType connection)
     {
-        if (connection != selectedConnection)
-            return;
-        connectionState = ConnectionState::CONNECTED;
-        restoreSubscriptions();
-        NmMessageRouter::onConnected();
-        flushDeferred();
+        (void)connection;
+        reevaluateRouting();
     }
 
     void OnDisconnectedIngress(ConnectionType connection)
     {
-        if (connection == selectedConnection && connectionState != ConnectionState::STOPPED)
-            connectionState = ConnectionState::CONNECTING;
+        (void)connection;
+        reevaluateRouting();
     }
 
     void OnConnectionFailedIngress(ConnectionType connection)
     {
-        // Only a state: ConnectionTick() decides what runs next.
-        if (connection == selectedConnection)
-            connectionState = ConnectionState::ERROR;
+        (void)connection;
+        reevaluateRouting();
     }
 
     void ConnectionTick()
     {
-        const int seconds = failoverSeconds.value();
-        if (seconds <= 0)
-            return;
-        const uint32_t now = millis();
-        if (connectionState == ConnectionState::CONNECTED)
-        {
-            notConnectedSinceMs = 0;
-            return;
-        }
-        if (notConnectedSinceMs == 0)
-        {
-            notConnectedSinceMs = now; // the loss starts counting now
-            return;
-        }
-        const bool failed = connectionState == ConnectionState::ERROR;
-        if (!failed && now - notConnectedSinceMs < static_cast<uint32_t>(seconds) * 1000UL)
-            return;
-        if (now - lastSwitchMs < MinSwitchIntervalMs)
-            return;
-
-        ConnectionType order[MaxProfiles];
-        const size_t count = failoverOrder(order);
-        if (count == 0)
-            return;
-        lastSwitchMs = now;
-        notConnectedSinceMs = now; // whatever starts next gets a full window
-        // The next runnable profile after the current one. Wrapping all the way round lands on the
-        // current one, which is then simply restarted.
-        for (size_t step = 1; step <= count; ++step)
-        {
-            const size_t index = (candidateIndex + step) % count;
-            if (!requirementsMet(order[index]))
-                continue;
-            LOG_WARNING("NET", "Connection %u %s; trying %u",
-                        static_cast<unsigned>(static_cast<ConnectionType>(selectedConnection)),
-                        failed ? "failed" : "stayed down", static_cast<unsigned>(order[index]));
-            if (startConnection(order[index]))
-            {
-                candidateIndex = index;
-                return;
-            }
-        }
+        reevaluateRouting();
     }
 
     bool ConnectionBegin()
     {
-        if (!nothingRunning())
-            return true;
-        // The failover window counts from here, so a head that never becomes runnable is skipped.
-        notConnectedSinceMs = millis();
-        lastSwitchMs = notConnectedSinceMs;
-        // Whatever can run now starts now. Anything still waiting on the radio or
-        // an IP link starts from the matching ingress when that arrives.
-        if (startPreferredConnection())
-            return true;
-        ConnectionType wanted = static_cast<ConnectionType>(preferredConnection.value());
-        if (!connectionEnabled(wanted))
-            wanted = defaultConnection();
-        if (connectionEnabled(wanted) && !requirementsMet(wanted))
-            LOG("NET", "Connection %u waits for %s", static_cast<unsigned>(wanted),
-                requirementName(wanted));
-        return false;
+        attachResourceConnection();
+        registerFrameworkSubscriptions();
+        const ConnectionType before = static_cast<ConnectionType>(selectedConnection);
+        const ConnectionState beforeState = static_cast<ConnectionState>(connectionState);
+        coordinatorBegun = true;
+        reevaluateRouting();
+        if (before == selectedConnection && beforeState == ConnectionState::CONNECTED &&
+            connectionState == ConnectionState::CONNECTED)
+        {
+            NmMessageRouter::onConnected();
+            flushDeferred();
+        }
+        return true;
     }
 
     void OnRadioAvailabilityIngress(bool available)
     {
-        radioAvailable = available;
-        if (!available)
-        {
-#if NM_NETWORK_ESPNOW
-            // ESP-NOW runs on the radio. The radio reports going down before it
-            // stops, so this ends ESP-NOW while the driver still works, and back
-            // to STOPPED lets the next radio-up start it again.
-            if (selectedConnection == ConnectionType::ESP_NOW && NmEspNowConnection::running())
-            {
-                NmEspNowConnection::end();
-                connectionState = ConnectionState::STOPPED;
-            }
-#endif
-            return;
-        }
-        if (nothingRunning())
-            startPreferredConnection();
+        (void)available;
+        OnConnectivityStateChanged();
     }
 
     void OnIpLinkAvailabilityIngress(bool available)
     {
-        ipLinkAvailable = available;
-        if (!available)
-            return;
-        // An IP link implies a running radio, whatever did or didn't report it.
-        radioAvailable = true;
-#if NM_ENABLE_MQTT
-        if (mqttStartPending && isMqtt(static_cast<ConnectionType>(selectedConnection)))
-        {
-            mqttStartPending = false;
-            if (!beginMqttClient(static_cast<ConnectionType>(selectedConnection)))
-                connectionState = ConnectionState::ERROR;
-            return;
-        }
-#endif
-        if (!nothingRunning())
-            return;
-        // No enabled profile means there is nothing to start, which is not an error.
-        if (!startPreferredConnection() && defaultConnection() != ConnectionType::AUTO)
-            LOG_ERROR("NET", "Could not start the preferred connection");
+        (void)available;
+        reevaluateRouting();
+    }
+
+    void OnConnectivityStateChanged()
+    {
+        reevaluateRouting();
+        requestNetworkTelemetry();
     }
 
     bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,

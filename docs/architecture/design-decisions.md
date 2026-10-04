@@ -106,27 +106,39 @@ while more than one type may reuse one driver implementation. Remote `MQTT` and
 **Reason:** Local and Remote MQTT can differ in endpoint, credentials, TLS, and
 availability policy without justifying duplicated MQTT client code.
 
-**Consequence:** Config and commands store/select `ConnectionType` integers.
-MQTT reconnects the selected broker profile but cannot silently change the
-selected connection type; only `NmConnection` may do that.
+**Consequence:** `ConnectionType` is the NMNW routing enum, not a connectivity
+service enum. MQTT owns its broker profile. Changing the preferred transport
+does not enable or disable MQTT, WiFiIP, or ESP-NOW.
 
-## Failover is one ordered list, and never rewrites the preference
+## Connectivity lifecycle is separate from transport preference
 
-**Decision:** `NmConnection` keeps one failover order -- ESP-NOW, Remote MQTT,
-Local MQTT, with the preferred profile moved to the top -- and moves to the
-next runnable profile after `failover_secs` of down time or on `ERROR`. `AUTO`
-is that order with no preference. The earlier one-shot rollback after a failed
-explicit switch is removed.
+**Decision:** WiFiRadio, WiFiIP, MQTT, and ESP-NOW own independent lifecycle
+state. `NmConnection` observes them and chooses one active connected NMNW
+transport; it never starts or stops a service.
 
-**Reason:** a rollback and a failover policy would be two competing answers to
-"what runs next". One ordered list answers it for boot, for an explicit switch
-and for a connection lost later, and the preference stays the operator's
-statement of intent.
+**Reason:** transport preference describes where framework traffic should go.
+It does not describe whether an AP association, broker client, or gateway
+session should consume resources. Hidden lifecycle side effects made
+coexistence and dependency errors impossible to represent truthfully.
 
-**Consequence:** failover is not persisted, so each boot starts from the
-preference. A failed explicit switch moves on through the order instead of
-reverting to the previous profile. There is no return to a higher-priority
-profile while a lower one stays connected.
+**Consequence:** MQTT enable is denied when WiFiIP is disabled, and WiFiIP
+disable is denied while MQTT is enabled. ESP-NOW and WiFiIP may coexist.
+Failover skips disabled or disconnected services, never rewrites the persisted
+preference, and returns to the preferred transport when it becomes usable.
+
+## Wi-Fi scans suspend ESP-NOW without disabling it
+
+**Decision:** a Wi-Fi scan temporarily suspends an enabled ESP-NOW service with
+the runtime-only `WIFI_SCAN` reason and resumes it through one finalization path.
+
+**Reason:** ESP-IDF scans retune the shared radio, but refusing every scan while
+a gateway session exists makes WiFi administration depend on the selected
+transport.
+
+**Consequence:** scan completion, startup failure, abort, and timeout all resume
+ESP-NOW. Its enable state, WiFiIP/MQTT lifecycle, and transport preference are
+unchanged. While WiFiIP is associated, the AP continues to own the resulting
+radio channel.
 
 ## Generic application ingress runs after framework routing
 

@@ -58,8 +58,8 @@ before it reaches the application's generic connection callback.
 It manages:
 
 - Local MQTT vs Remote MQTT selection,
-- complete connection-type selection,
-- MQTT client lifecycle,
+- preferred and active NMNW transport routing,
+- independent WiFiIP, MQTT, and ESP-NOW service lifecycles,
 - framework subscriptions,
 - Resource connection integration,
 - console/control routing,

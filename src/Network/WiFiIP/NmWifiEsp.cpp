@@ -5,6 +5,9 @@
 
 #include <Core/Logs.h>
 #include <Network/WiFiRadio/NmWifiRadio.h>
+#if NM_NETWORK_ESPNOW
+#include <Network/EspNow/NmEspNowConnection.h>
+#endif
 #include <esp_event.h>
 #include <esp_netif.h>
 #include <esp_timer.h>
@@ -34,6 +37,11 @@ std::string hostname;
 NightMare::WiFiScanResult scanResults[MaxScanResults];
 size_t scanResultCount = 0;
 bool scanRunning = false;
+bool scanCompleted = false;
+bool scanResumePending = false;
+bool scanSuspendedEspNow = false;
+uint32_t scanStartedMs = 0;
+constexpr uint32_t ScanTimeoutMs = 30000;
 bool handlersRegistered = false;
 bool keepMonitoring = false;
 std::string currentIp;
@@ -244,6 +252,8 @@ void handleWiFiEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
             }
         }
         scanRunning = false;
+        scanCompleted = true;
+        scanResumePending = scanSuspendedEspNow;
     }
 }
 
@@ -463,10 +473,15 @@ void WiFi_stop()
         wifi_config_t none = {};
         esp_wifi_set_config(WIFI_IF_STA, &none);
     }
-    Lock lock;
-    currentIp.clear();
-    scanResultCount = 0;
-    scanRunning = false;
+    {
+        Lock lock;
+        currentIp.clear();
+        scanResultCount = 0;
+        scanRunning = false;
+        scanCompleted = false;
+        scanResumePending = scanSuspendedEspNow;
+    }
+    WiFi_scanTick();
 }
 
 bool WiFi_start(const NightMare::WiFiProfile &profile, const char *stationHostname)
@@ -551,16 +566,77 @@ bool WiFi_startScan()
         Lock lock;
         if (scanRunning)
             return false;
+    }
+#if NM_NETWORK_ESPNOW
+    const bool suspended = NmEspNowConnection::enabled() &&
+                           NmEspNowConnection::suspend(
+                               NightMare::ConnectivitySuspendReason::WIFI_SCAN);
+#else
+    const bool suspended = false;
+#endif
+    {
+        Lock lock;
         scanRunning = true;
         scanResultCount = 0;
+        scanCompleted = false;
+        scanSuspendedEspNow = suspended;
+        scanResumePending = false;
+        scanStartedMs = nowMs();
     }
     wifi_scan_config_t config = {};
     config.show_hidden = true;
     if (esp_wifi_scan_start(&config, false) == ESP_OK)
         return true;
-    Lock lock;
-    scanRunning = false;
+    {
+        Lock lock;
+        scanRunning = false;
+        scanResumePending = scanSuspendedEspNow;
+    }
+    WiFi_scanTick();
     return false;
+}
+
+void WiFi_abortScan()
+{
+    bool wasRunning;
+    {
+        Lock lock;
+        wasRunning = scanRunning;
+        scanRunning = false;
+        scanResumePending = scanSuspendedEspNow;
+    }
+    if (wasRunning)
+        esp_wifi_scan_stop();
+    WiFi_scanTick();
+}
+
+void WiFi_scanTick()
+{
+    bool timeout = false;
+    bool resume = false;
+    {
+        Lock lock;
+        timeout = scanRunning && nowMs() - scanStartedMs >= ScanTimeoutMs;
+        if (timeout)
+        {
+            scanRunning = false;
+            scanResumePending = scanSuspendedEspNow;
+        }
+        resume = scanResumePending;
+        if (resume)
+        {
+            scanResumePending = false;
+            scanSuspendedEspNow = false;
+        }
+    }
+    if (timeout)
+        esp_wifi_scan_stop();
+#if NM_NETWORK_ESPNOW
+    if (resume)
+        NmEspNowConnection::resume(NightMare::ConnectivitySuspendReason::WIFI_SCAN);
+#else
+    (void)resume;
+#endif
 }
 
 bool WiFi_scanInProgress()
@@ -575,6 +651,12 @@ int WiFi_scanCount()
     return scanRunning ? -1 : static_cast<int>(scanResultCount);
 }
 
+bool WiFi_scanComplete()
+{
+    Lock lock;
+    return scanCompleted && !scanRunning;
+}
+
 bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result)
 {
     Lock lock;
@@ -582,6 +664,16 @@ bool WiFi_scanResult(size_t index, NightMare::WiFiScanResult &result)
     if (exists)
         result = scanResults[index];
     return exists;
+}
+
+void WiFi_clearScanResults()
+{
+    Lock lock;
+    if (!scanRunning)
+    {
+        scanResultCount = 0;
+        scanCompleted = false;
+    }
 }
 
 const char *WiFi_stateName(NightMare::WiFiState status)

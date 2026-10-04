@@ -198,42 +198,32 @@ free_psram_bytes
 
 ## NETWORK contents
 
-Current fields include:
+The document has five independent objects:
 
 ```text
-wifi_connected
-ip
-rssi_dbm
-wifi_channel
-tx_power_dbm
-connection
-connected
-connection_state
-radio_channel
-mqtt_connected
-broker
-espnow_rtt_ms
+transport.preferred / active / state
+wifi_radio.supported / enabled / state
+wifi_ip.supported / enabled / state
+esp_now.supported / enabled / state
+mqtt.supported / enabled / state / profile
 ```
 
-`ip`, `rssi_dbm` and `wifi_channel` are emitted only while WiFi is connected.
-`radio_channel` is emitted whenever the radio runs, AP or not.
+Connected WiFiIP additionally reports `ssid`, `ip`, `rssi`, `channel`, and
+`tx_power_dbm`. ESP-NOW reports already-available gateway/session facts without
+starting discovery. Unsupported services remain explicit with
+`supported=false`.
 
-If WiFi support is disabled, WiFi-specific fields are omitted.
-
-`connection` is one of:
+Readable transport names are:
 
 ```text
-auto
-mqtt
-local_mqtt
-esp_now
+AUTO
+MQTT
+LOCAL_MQTT
+ESP_NOW
 ```
 
-`auto` is reported only while no concrete connection is active. `connection_state`
-is the integer value of `ConnectionState`. `broker` names what carries the
-device's topics: `local` or `remote` for MQTT, `espnow` for the ESP-NOW gateway.
-`mqtt_connected` is false on ESP-NOW. `espnow_rtt_ms` (ESP-NOW only) is the
-round trip of the last answered heartbeat.
+Preference and active transport are separate so a disabled/unavailable
+preferred service can coexist with a connected fallback.
 
 ## HEARTBEAT contents
 
@@ -395,7 +385,7 @@ Default:
 
 The slower cadence is deliberate because network telemetry is bookkeeping.
 
-## MQTT reconnect publication
+## Active-transport reconnect and state-change publication
 
 Every MQTT connection requests cooperative publication of:
 
@@ -408,8 +398,10 @@ when telemetry is enabled.
 
 `tickNightMareESP()` processes one request per call, so the two
 allocation-heavy static documents are not built during the MQTT/TLS connection
-callback. SYSTEM and NETWORK continue on their periodic schedules. HEARTBEAT
-continues on its runtime-configured schedule when enabled.
+callback. Meaningful connectivity-service, preferred-transport, and
+active-transport changes request a coalesced NETWORK refresh. SYSTEM and
+NETWORK also continue on their periodic schedules. HEARTBEAT continues on its
+runtime-configured schedule when enabled.
 
 ## Why network telemetry can look stale after disconnect
 
@@ -418,7 +410,7 @@ Network telemetry is retained.
 If a device disappears unexpectedly, the retained document may still contain:
 
 ```json
-"mqtt_connected": true
+"mqtt": {"state": "CONNECTED"}
 ```
 
 because the device is no longer available to rewrite it.

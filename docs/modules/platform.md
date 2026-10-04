@@ -460,9 +460,9 @@ OTA
 SNTP time synchronization
 ```
 
-in that order. Wi-Fi also reports IP-link availability to `NmConnection`
-(the radio reports its own availability separately), which starts the preferred
-connection itself; that is not a Wi-Fi service.
+in that order. WiFiIP also reports its state to an already-enabled MQTT service
+and to `NmConnection`. The router may select an active usable transport, but it
+never starts or stops a connectivity service.
 
 Specifically:
 

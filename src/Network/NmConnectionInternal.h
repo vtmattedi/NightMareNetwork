@@ -12,16 +12,18 @@ namespace NightMare
 void OnConnectedIngress(ConnectionType connection);
 void OnDisconnectedIngress(ConnectionType connection);
 void OnConnectionFailedIngress(ConnectionType connection);
-// Failover: once the connection has been down for failover_secs (or is in ERROR), starts the
-// next runnable profile in the failover order. Called from tickNightMareESP().
+// Reconsiders routing among already-enabled, connected services. Called from
+// tickNightMareESP(); it never starts or stops a connectivity service.
 void ConnectionTick();
 // Two separate capabilities, which used to be one "link":
 //   radio    the Wi-Fi driver is started -- enough for ESP-NOW
 //   IP link  the station joined an AP and has an address -- needed by MQTT
-// Both only report availability; starting, selecting and failing over stay in
-// NmConnection.
+// Both only report availability; their owning services control lifecycle.
 void OnRadioAvailabilityIngress(bool available);
 void OnIpLinkAvailabilityIngress(bool available);
+// Any connectivity-service transition asks telemetry to refresh and makes the
+// router reconsider which already-connected service should be active.
+void OnConnectivityStateChanged();
 // Called by NmMessageRouter only after framework-owned routes decline a
 // message. Returns whether an application handler was installed and invoked.
 bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,

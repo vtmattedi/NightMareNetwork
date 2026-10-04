@@ -164,20 +164,32 @@ persistent storage initialization and before normal framework services start.
 Networking is deliberately split into a NightMare connection coordinator and
 protocol drivers.
 
+Connectivity services form this dependency graph:
+
+```text
+WiFiRadio
+ ├─ WiFiIP
+ │   └─ MQTT
+ └─ ESP-NOW
+```
+
+Each service owns only its lifecycle and reports `supported`, `enabled`, and a
+common `ConnectivityState`. Transport preference is routing intent, not a
+connectivity lifecycle request.
+
 ### NmConnection
 
-`NmConnection` owns connection-type selection, binary-safe generic publication,
-connection subscriptions, application message-handler registration, and
-Resource connection injection. It is the boundary used by Resources,
-connection-neutral framework publishers, and applications that need custom
-transport topics.
+`NmConnection` owns preferred and active NMNW transport selection, routing
+failover, binary-safe generic publication, the shared subscription registry,
+application message-handler registration, and Resource connection injection.
+It observes connectivity state and never starts or stops WiFiIP, MQTT, or
+ESP-NOW. Only one usable transport is active for framework traffic at a time.
 
 ### NmMqttConnection
 
-`NmMqttConnection` adapts the `MQTT` and `LOCAL_MQTT` connection types to the
-shared ESP-IDF MQTT driver. It owns MQTT-specific lifecycle adaptation and the
-small reconnect delivery queue. Connection selection, generic publish/state,
-and subscription ownership remain in `NmConnection`.
+`NmMqttConnection` owns the independently enabled MQTT service and adapts its
+`MQTT` or `LOCAL_MQTT` broker profile to the shared ESP-IDF driver. WiFiIP is a
+dependency: MQTT waits for it but never enables or disables it.
 
 ### NmMqttEsp
 
@@ -428,11 +440,23 @@ pending identity cleanup retry
 Telemetry.start()
     installs periodic callback jobs
 
-NightMare::WiFiBegin()
-    starts the WiFi/network path
+WiFiRadioBegin()
+    starts the shared driver/radio
+
+WiFiBegin() / WiFiIP_enable()
+    starts the explicitly enabled STA/IP service
+
+Mqtt_enable() and EspNow_enable()
+    start each independently when its dependency is ready
+
+ConnectionBegin()
+    selects one active usable NMNW transport without changing service lifecycle
 ```
 
-The WiFi first-connect path starts other enabled network services according to feature configuration. Automatic time synchronization now starts the asynchronous ESP32 SNTP client; MQTT-assisted `Control/time` synchronization remains available as an auxiliary path.
+The WiFi first-connect path reports IP state. MQTT reacts only when it is
+already enabled. Automatic time synchronization starts the asynchronous ESP32
+SNTP client; MQTT-assisted `Control/time` synchronization remains available as
+an auxiliary path.
 
 ## Runtime lifecycle
 
@@ -463,7 +487,8 @@ The SNTP network callback itself runs on lwIP's task; `tickNightMareESP()` moves
 the time-synchronized flag transition and the application time-sync callback
 back into the normal cooperative context.
 
-It does not otherwise poll systems that already own their own lifecycle, such as MQTT or WiFi.
+It also services Wi-Fi scan finalization so an ESP-NOW suspension is always
+released after completion, failure, abort, or timeout.
 
 ## Reconnect lifecycle
 
