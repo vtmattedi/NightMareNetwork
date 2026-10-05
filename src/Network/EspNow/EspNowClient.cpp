@@ -72,6 +72,7 @@ namespace NightMare::EspNowClient
         State currentState = State::STOPPED;
         bool gatewayKnown = false;
         uint8_t gatewayMac[6] = {};
+        char selectedGatewayId[65] = {};
         uint16_t cid = 0;
         uint32_t lastRttMs = 0;
         uint16_t nextMessageId = 1;
@@ -461,6 +462,15 @@ namespace NightMare::EspNowClient
             return true;
         }
 
+        void setGatewayIdentity(const Frame &beacon)
+        {
+            char id[sizeof(selectedGatewayId)] = {};
+            beaconGatewayId(beacon, id, sizeof(id));
+            portENTER_CRITICAL(&lock);
+            memcpy(selectedGatewayId, id, sizeof(selectedGatewayId));
+            portEXIT_CRITICAL(&lock);
+        }
+
         void forgetGateway()
         {
             uint8_t mac[6];
@@ -470,6 +480,7 @@ namespace NightMare::EspNowClient
             esp_now_del_peer(mac);
             portENTER_CRITICAL(&lock);
             gatewayKnown = false;
+            selectedGatewayId[0] = '\0';
             portEXIT_CRITICAL(&lock);
             hs.peerEncrypted = false;
         }
@@ -803,7 +814,10 @@ namespace NightMare::EspNowClient
                 }
                 LOG(TagRx, "BEACON from %s, connecting", macText(rx.mac).text);
                 if (setGateway(rx.mac))
+                {
+                    setGatewayIdentity(rx.frame);
                     startHandshake();
+                }
                 return;
             case FrameType::CHALLENGE:
                 onChallenge(rx.mac, rx.frame);
@@ -1114,6 +1128,7 @@ namespace NightMare::EspNowClient
 
         portENTER_CRITICAL(&lock);
         gatewayKnown = false;
+        selectedGatewayId[0] = '\0';
         cid = 0;
         lastRttMs = 0;
         portEXIT_CRITICAL(&lock);
@@ -1154,6 +1169,7 @@ namespace NightMare::EspNowClient
         esp_now_deinit(); // drops every peer, the session key with them
         portENTER_CRITICAL(&lock);
         gatewayKnown = false;
+        selectedGatewayId[0] = '\0';
         cid = 0;
         portEXIT_CRITICAL(&lock);
         Auth::wipe(&hs, sizeof(hs));
@@ -1179,6 +1195,15 @@ namespace NightMare::EspNowClient
     uint16_t sessionId()
     {
         return currentCid();
+    }
+
+    String gatewayId()
+    {
+        char id[sizeof(selectedGatewayId)] = {};
+        portENTER_CRITICAL(&lock);
+        memcpy(id, selectedGatewayId, sizeof(id));
+        portEXIT_CRITICAL(&lock);
+        return String(id);
     }
 
     void onState(StateCallback callback)

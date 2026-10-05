@@ -660,15 +660,15 @@ NETWORK ESPNOW ENABLE
 NETWORK ESPNOW DISABLE
 
 NETWORK MQTT GET
-NETWORK MQTT ENABLE [MQTT|LOCAL_MQTT]
+NETWORK MQTT ENABLE [REMOTE|LOCAL]
 NETWORK MQTT DISABLE
 
 NETWORK TRANSPORT GET
-NETWORK TRANSPORT SET <MQTT|LOCAL_MQTT|ESP_NOW|AUTO>
+NETWORK TRANSPORT SET <MQTT|ESP_NOW|AUTO>
 ```
 
 `NETWORK GET` returns readable named states for `transport`, `wifi_radio`,
-`wifi_ip`, `esp_now`, and `mqtt`. `supported`, `enabled`, and `state` are
+`wifi_ip`, `esp_now`, `mqtt`, and `gateway_candidate`. `supported`, `enabled`, and `state` are
 independent fields. Transport reports both `preferred` and `active`.
 
 Lifecycle commands affect only their named service. MQTT enable is rejected
@@ -691,6 +691,8 @@ WiFiIP and MQTT unchanged.
 does not enable, disable, connect, or disconnect a service. An unavailable but
 compiled transport may still be preferred; the current usable active transport
 remains until routing policy can use the preference.
+`LOCAL_MQTT` is not a transport or command alias. Local versus remote broker
+selection belongs to the single MQTT service profile.
 
 `NETWORK WIFI SCAN` starts an asynchronous scan when no results are present,
 reports `SCANNING` while active, and returns `DONE` plus `networks` afterward.

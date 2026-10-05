@@ -16,6 +16,7 @@
 #endif
 #if NM_ENABLE_NETWORK
 #include <Network/NmConnectionInternal.h>
+#include <Network/GatewayCandidate.h>
 #endif
 #if NM_ENABLE_WIFI_RADIO
 #include <Network/WiFiRadio/NmWifiRadioService.h>
@@ -956,7 +957,6 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         {
             value.toUpperCase();
             if (value == "MQTT") connection = NightMare::ConnectionType::MQTT;
-            else if (value == "LOCAL_MQTT") connection = NightMare::ConnectionType::LOCAL_MQTT;
             else if (value == "ESP_NOW") connection = NightMare::ConnectionType::ESP_NOW;
             else if (value == "AUTO") connection = NightMare::ConnectionType::AUTO;
             else return false;
@@ -1001,12 +1001,27 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_MQTT
             mqtt["supported"] = true;
             mqtt["enabled"] = NightMare::Mqtt_enabled();
-            mqtt["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile());
+            mqtt["profile"] = NightMare::MqttProfileName(NightMare::Mqtt_profile());
             mqtt["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state());
 #else
             mqtt["supported"] = false; mqtt["enabled"] = false;
             mqtt["profile"] = "MQTT"; mqtt["state"] = "STOPPED";
 #endif
+            const NightMare::GatewayCandidateStatus candidate = NightMare::GatewayCandidateGet();
+            JsonObject gateway = doc["gateway_candidate"].to<JsonObject>();
+            gateway["known"] = candidate.known;
+            gateway["id"] = candidate.id;
+#if NM_ENABLE_MQTT
+            gateway["probable"] = NightMare::GatewayCandidateIsProbable(NightMare::Mqtt_profile());
+#else
+            gateway["probable"] = false;
+#endif
+            gateway["esp_now_ready"] = candidate.espNowReady;
+            gateway["remote_mqtt_ready"] = candidate.remoteMqttReady;
+            gateway["local_mqtt_ready"] = candidate.localMqttReady;
+            gateway["ssid"] = candidate.ssid;
+            gateway["bssid"] = candidate.bssid;
+            gateway["channel"] = candidate.channel;
             finishJson(doc, true);
         }
 #if NM_ENABLE_WIFI
@@ -1158,12 +1173,15 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         {
             String action = parsedMsg.args[1]; action.toUpperCase();
             if (action == "GET")
-            { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::Mqtt_enabled(); doc["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile()); doc["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state()); finishJson(doc, true); }
+            { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::Mqtt_enabled(); doc["profile"] = NightMare::MqttProfileName(NightMare::Mqtt_profile()); doc["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state()); finishJson(doc, true); }
             else if (action == "ENABLE")
             {
-                NightMare::ConnectionType profile = NightMare::Mqtt_profile();
-                const bool known = parsedMsg.args[2].length() == 0 || parseConnection(parsedMsg.args[2], profile);
-                if (!known || (profile != NightMare::ConnectionType::MQTT && profile != NightMare::ConnectionType::LOCAL_MQTT))
+                NightMare::MqttProfile profile = NightMare::Mqtt_profile();
+                String requested = parsedMsg.args[2]; requested.toUpperCase();
+                const bool known = requested.length() == 0 || requested == "REMOTE" || requested == "LOCAL";
+                if (requested == "REMOTE") profile = NightMare::MqttProfile::REMOTE;
+                else if (requested == "LOCAL") profile = NightMare::MqttProfile::LOCAL;
+                if (!known)
                     lifecycleResult(false, "invalid_mqtt_profile", NightMare::Mqtt_state());
                 else if (!NightMare::WiFiIP_enabled())
                     lifecycleResult(false, "wifi_ip_disabled", NightMare::Mqtt_state());

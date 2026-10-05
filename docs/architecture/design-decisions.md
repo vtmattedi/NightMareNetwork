@@ -99,15 +99,17 @@ Examples include:
 
 ## Connection type is separate from driver implementation
 
-**Decision:** public `ConnectionType` values describe complete connection types,
-while more than one type may reuse one driver implementation. Remote `MQTT` and
-`LOCAL_MQTT` both adapt the existing `NmMqttEsp` implementation.
+**Decision:** public `ConnectionType` values describe routing transports only:
+`AUTO=0`, `MQTT=1`, and `ESP_NOW=3`. Value 2 is reserved and not reused.
+`MqttProfile::{REMOTE, LOCAL}` selects the broker policy inside the one MQTT
+service and one MQTT client.
 
 **Reason:** Local and Remote MQTT can differ in endpoint, credentials, TLS, and
 availability policy without justifying duplicated MQTT client code.
 
-**Consequence:** `ConnectionType` is the NMNW routing enum, not a connectivity
-service enum. MQTT owns its broker profile. Changing the preferred transport
+**Consequence:** Remote and Local MQTT are never simultaneously available
+routing transports. `ConnectionType` is the NMNW routing enum, not a connectivity
+service enum. MQTT owns profile selection and broker fallback. Changing the preferred transport
 does not enable or disable MQTT, WiFiIP, or ESP-NOW.
 
 ## Connectivity lifecycle is separate from transport preference
@@ -125,6 +127,20 @@ coexistence and dependency errors impossible to represent truthfully.
 disable is denied while MQTT is enabled. ESP-NOW and WiFiIP may coexist.
 Failover skips disabled or disconnected services, never rewrites the persisted
 preference, and returns to the preferred transport when it becomes usable.
+
+## Healthy fallback is sticky until preferred ESP-NOW is eligible
+
+**Decision:** a connected fallback remains active until the preferred path is
+both eligible and connected. ESP-NOW eligibility requires a retained gateway
+announcement for the selected MQTT route class, plausible radio compatibility,
+and a secure session whose beacon identity matches the announcement.
+
+**Reason:** gateway reachability alone does not prove its required MQTT uplink,
+and an announcement does not authenticate the ESP-NOW peer.
+
+**Consequence:** probing or a failed handshake cannot interrupt healthy MQTT.
+When the active path is lost, the coordinator walks the normal preference
+queue. `NmConnection` still performs no service lifecycle or profile changes.
 
 ## Wi-Fi scans suspend ESP-NOW without disabling it
 

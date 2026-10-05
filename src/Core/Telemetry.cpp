@@ -8,6 +8,7 @@
 #include "DocumentPayload.h"
 #include <NightMare/HardwareProfile.h>
 #include <Network/NmConnection.h>
+#include <Network/GatewayCandidate.h>
 #include <Network/NmConnectionInternal.h>
 #include <esp_system.h>
 #if NM_ENABLE_WIFI
@@ -686,13 +687,29 @@ void TelemetryService::appendNetwork(JsonObject dst) const
     mqtt["supported"] = true;
     mqtt["enabled"] = NightMare::Mqtt_enabled();
     mqtt["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state());
-    mqtt["profile"] = NightMare::ConnectionTypeName(NightMare::Mqtt_profile());
+    mqtt["profile"] = NightMare::MqttProfileName(NightMare::Mqtt_profile());
 #else
     mqtt["supported"] = false;
     mqtt["enabled"] = false;
     mqtt["state"] = "STOPPED";
     mqtt["profile"] = "MQTT";
 #endif
+
+    const NightMare::GatewayCandidateStatus candidate = NightMare::GatewayCandidateGet();
+    JsonObject gateway = dst["gateway_candidate"].to<JsonObject>();
+    gateway["known"] = candidate.known;
+    gateway["id"] = candidate.id;
+#if NM_ENABLE_MQTT
+    gateway["probable"] = NightMare::GatewayCandidateIsProbable(NightMare::Mqtt_profile());
+#else
+    gateway["probable"] = false;
+#endif
+    gateway["esp_now_ready"] = candidate.espNowReady;
+    gateway["remote_mqtt_ready"] = candidate.remoteMqttReady;
+    gateway["local_mqtt_ready"] = candidate.localMqttReady;
+    gateway["ssid"] = candidate.ssid;
+    gateway["bssid"] = candidate.bssid;
+    gateway["channel"] = candidate.channel;
 }
 
 TelemetryResult TelemetryService::getInfo(InfoType type) const

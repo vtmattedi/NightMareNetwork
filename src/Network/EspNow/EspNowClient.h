@@ -59,6 +59,9 @@ State state();
 uint32_t rttMs();
 // The current session id, 0 when not in a session.
 uint16_t sessionId();
+// Stable id advertised by the authenticated gateway's beacon. Empty when the
+// gateway predates the identity extension or no gateway is selected.
+String gatewayId();
 
 void onState(StateCallback callback);
 void onMessage(MessageCallback callback);

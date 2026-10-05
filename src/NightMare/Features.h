@@ -22,7 +22,7 @@
 #define NM_ENABLE_CONSOLE 1
 #endif
 // The Wi-Fi IP station (Network/WiFiIP): join an AP and get an IP. Needed by
-// MQTT/LOCAL_MQTT, SNTP and OTA -- not by ESP-NOW, which only needs the radio.
+// MQTT, SNTP and OTA -- not by ESP-NOW, which only needs the radio.
 #ifndef NM_ENABLE_WIFI
 #define NM_ENABLE_WIFI 1
 #endif

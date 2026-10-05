@@ -41,7 +41,7 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
 
 | Value | Type        | Direction | cid | Data | Encrypted |
 |------:|-------------|-----------|-----|------|-----------|
-| 0  | BEACON      | gateway → broadcast | 0 | `[count][EspNowFrameVersion…]` | no |
+| 0  | BEACON      | gateway → broadcast | 0 | `[count][EspNowFrameVersion…][idLength][gatewayId]` | no |
 | 1  | CONNECT     | client → broadcast  | 0 | `ConnectPayload` (10) | no |
 | 2  | CHALLENGE   | gateway → client    | 0 | `ChallengePayload` (8) | no |
 | 3  | AUTH        | client → gateway    | 0 | `AuthPayload` (16) | no |
@@ -94,6 +94,9 @@ The client always broadcasts CONNECT. This does two jobs:
 - It is the discovery probe: a CHALLENGE reply reveals the gateway's address.
 - It reaches a gateway that still holds an encrypted peer for this MAC from a
   session the client has lost, for example because the client rebooted.
+- The appended stable gateway id is the same id used by MQTT gateway topics.
+  It correlates discovery with retained readiness but is public metadata, not
+  authentication; only the PSK handshake authenticates the peer.
 
 **An existing session survives the handshake; only a verified AUTH replaces
 it.** A CONNECT proves nothing — anyone in radio range can send one — so it

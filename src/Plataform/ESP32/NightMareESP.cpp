@@ -292,16 +292,12 @@ void startNightMareESP()
 #endif
 #if NM_ENABLE_MQTT && NM_WIFI_AUTO
     {
-        NightMare::ConnectionType profile = NightMare::GetPreferredConnection();
-        if (profile != NightMare::ConnectionType::MQTT &&
-            profile != NightMare::ConnectionType::LOCAL_MQTT)
-        {
+        NightMare::MqttProfile profile =
 #if NM_NETWORK_MQTT
-            profile = NightMare::ConnectionType::MQTT;
+            NightMare::MqttProfile::REMOTE;
 #else
-            profile = NightMare::ConnectionType::LOCAL_MQTT;
+            NightMare::MqttProfile::LOCAL;
 #endif
-        }
         if (!NightMare::Mqtt_enable(profile))
             LOG_ERROR("NM", "MQTT service did not start");
     }

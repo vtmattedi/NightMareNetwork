@@ -1,5 +1,6 @@
 #include <NightMareNetwork.h>
 #include <Network/NmMessageRouter.h>
+#include <Network/NmRoutingPolicy.h>
 #include <Core/DocumentPayload.h>
 
 #include <type_traits>
@@ -75,6 +76,11 @@ static_assert(static_cast<uint8_t>(NightMare::ConnectionType::AUTO) == 0,
               "ConnectionType persistence values must remain stable");
 static_assert(static_cast<uint8_t>(NightMare::ConnectionType::MQTT) == 1,
               "Remote MQTT is the first concrete connection");
+static_assert(static_cast<uint8_t>(NightMare::ConnectionType::ESP_NOW) == 3,
+              "ConnectionType value 2 remains reserved after profile unification");
+static_assert(static_cast<uint8_t>(NightMare::MqttProfile::REMOTE) == 0 &&
+                  static_cast<uint8_t>(NightMare::MqttProfile::LOCAL) == 1,
+              "MQTT profile persistence values must remain stable");
 static_assert(std::is_same<decltype(&NightMare::Publish),
                            bool (*)(const char *, const uint8_t *, size_t, bool)>::value,
               "The generic connection publication boundary must remain binary-safe");
@@ -87,7 +93,7 @@ static_assert(std::is_same<decltype(&NightMare::OnMessage),
 static_assert(std::is_same<decltype(&NightMare::WiFiIP_enable), bool (*)()>::value,
               "WiFiIP must expose an independent enable lifecycle");
 static_assert(std::is_same<decltype(&NightMare::Mqtt_enable),
-                           bool (*)(NightMare::ConnectionType)>::value,
+                           bool (*)(NightMare::MqttProfile)>::value,
               "MQTT must expose an independent profile-aware lifecycle");
 #if NM_NETWORK_ESPNOW
 static_assert(std::is_same<decltype(&NightMare::EspNow_suspend),
@@ -331,7 +337,7 @@ void setup()
 #endif
     const NightMareResults networkGet = handleNightMareCommand("NETWORK GET");
     const NightMareResults mqttDependency =
-        handleNightMareCommand("NETWORK MQTT ENABLE MQTT");
+        handleNightMareCommand("NETWORK MQTT ENABLE REMOTE");
     const NightMareResults preferenceOnly =
         handleNightMareCommand("NETWORK TRANSPORT SET MQTT");
     const NightMareResults oldSet = handleNightMareCommand("NETWORK SET MQTT");
@@ -342,6 +348,7 @@ void setup()
         networkGet.response.indexOf("\"wifi_ip\"") >= 0 &&
         networkGet.response.indexOf("\"esp_now\"") >= 0 &&
         networkGet.response.indexOf("\"mqtt\"") >= 0 &&
+        networkGet.response.indexOf("\"gateway_candidate\"") >= 0 &&
         !mqttDependency.result &&
         mqttDependency.response.indexOf("wifi_ip_disabled") >= 0 &&
         preferenceOnly.result &&
@@ -353,6 +360,57 @@ void setup()
         !oldSet.result && oldSet.response.indexOf("unknown_network_command") >= 0 &&
         !oldIp.result && oldIp.response.indexOf("unknown_network_command") >= 0;
     smokeState.setFlag("connectivity_commands", connectivityCommands);
+    NightMare::GatewayCandidateStatus candidate;
+    candidate.known = true;
+    candidate.id = "nmnw-gateway-aabbcc";
+    candidate.espNowReady = true;
+    candidate.remoteMqttReady = true;
+    candidate.localMqttReady = false;
+    candidate.ssid = "lab";
+    candidate.bssid = "aa:bb:cc:dd:ee:ff";
+    candidate.channel = 6;
+    NightMare::GatewayRadioContext radio;
+    radio.ssid = "lab";
+    radio.bssid = "aa:bb:cc:dd:ee:ff";
+    radio.channel = 6;
+    const bool remoteProbable = NightMare::GatewayCandidateProbable(
+        candidate, NightMare::MqttProfile::REMOTE, radio);
+    const bool localUplinkRequired = !NightMare::GatewayCandidateProbable(
+        candidate, NightMare::MqttProfile::LOCAL, radio);
+    candidate.remoteMqttReady = false;
+    const bool downUplinkIneligible = !NightMare::GatewayCandidateProbable(
+        candidate, NightMare::MqttProfile::REMOTE, radio);
+    candidate.remoteMqttReady = true;
+    radio.bssid = "11:22:33:44:55:66";
+    const bool bssidPreferred = !NightMare::GatewayCandidateProbable(
+        candidate, NightMare::MqttProfile::REMOTE, radio);
+    candidate.bssid = "";
+    const bool ssidChannelFallback = NightMare::GatewayCandidateProbable(
+        candidate, NightMare::MqttProfile::REMOTE, radio);
+    smokeState.setFlag("gateway_candidate_policy", remoteProbable && localUplinkRequired &&
+                       downUplinkIneligible && bssidPreferred && ssidChannelFallback);
+    const bool stickyWithoutTarget = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::MQTT,
+        true, false, false) == NightMare::ConnectionType::MQTT;
+    const bool probableDoesNotSwitchBeforeConnect = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::MQTT,
+        true, false, true) == NightMare::ConnectionType::MQTT;
+    const bool connectedEligibleSwitches = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::MQTT,
+        true, true, true) == NightMare::ConnectionType::ESP_NOW;
+    const bool uplinkDownLeavesFallback = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::MQTT,
+        true, true, false) == NightMare::ConnectionType::MQTT;
+    const bool failedRecoveryLeavesFallback = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::MQTT,
+        true, false, true) == NightMare::ConnectionType::MQTT;
+    const bool activeLossRequeues = NightMare::ResolveNetworkRoute(
+        NightMare::ConnectionType::ESP_NOW, NightMare::ConnectionType::ESP_NOW,
+        true, false, false) == NightMare::ConnectionType::MQTT;
+    smokeState.setFlag("routing_recovery_policy",
+                       stickyWithoutTarget && probableDoesNotSwitchBeforeConnect &&
+                       connectedEligibleSwitches && uplinkDownLeavesFallback &&
+                       failedRecoveryLeavesFallback && activeLossRequeues);
     managedState.onWrite = acceptStateWrite;
     const bool localStateUsesWritePolicy = managedState.setValue(7) && writeCalls == 1 &&
                                            managedState.getValue() == 7;

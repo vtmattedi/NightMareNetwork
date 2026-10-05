@@ -188,7 +188,8 @@ ESP-NOW. Only one usable transport is active for framework traffic at a time.
 ### NmMqttConnection
 
 `NmMqttConnection` owns the independently enabled MQTT service and adapts its
-`MQTT` or `LOCAL_MQTT` broker profile to the shared ESP-IDF driver. WiFiIP is a
+`REMOTE` or `LOCAL` broker profile to the shared ESP-IDF driver. Both profiles
+belong to the single `MQTT` routing transport. WiFiIP is a
 dependency: MQTT waits for it but never enables or disables it.
 
 ### NmMqttEsp

@@ -416,7 +416,18 @@ The document represents every connectivity service independently:
     "supported": true,
     "enabled": true,
     "state": "CONNECTED",
-    "profile": "MQTT"
+    "profile": "REMOTE"
+  },
+  "gateway_candidate": {
+    "known": true,
+    "id": "nmnw-gateway-a1b2c3",
+    "probable": true,
+    "esp_now_ready": true,
+    "remote_mqtt_ready": true,
+    "local_mqtt_ready": false,
+    "ssid": "example",
+    "bssid": "aa:bb:cc:dd:ee:ff",
+    "channel": 6
   }
 }
 ```
@@ -429,7 +440,7 @@ The schema can also represent an unavailable preference without contradiction:
   "wifi_radio": {"supported": true, "enabled": true, "state": "READY"},
   "wifi_ip": {"supported": true, "enabled": false, "state": "STOPPED"},
   "esp_now": {"supported": true, "enabled": true, "state": "CONNECTED"},
-  "mqtt": {"supported": true, "enabled": false, "state": "STOPPED", "profile": "MQTT"}
+  "mqtt": {"supported": true, "enabled": false, "state": "STOPPED", "profile": "REMOTE"}
 }
 ```
 

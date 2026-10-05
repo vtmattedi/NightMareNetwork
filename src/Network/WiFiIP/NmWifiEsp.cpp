@@ -550,6 +550,11 @@ NightMare::WiFiInfo WiFi_info()
     {
         info.rssi = record.rssi;
         info.channel = record.primary;
+        char bssid[18] = {};
+        snprintf(bssid, sizeof(bssid), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 record.bssid[0], record.bssid[1], record.bssid[2],
+                 record.bssid[3], record.bssid[4], record.bssid[5]);
+        info.bssid = bssid;
     }
     return info;
 }

@@ -12,9 +12,16 @@ namespace NightMare
 enum class ConnectionType : uint8_t
 {
     AUTO = 0,
-    MQTT,
-    LOCAL_MQTT,
-    ESP_NOW
+    MQTT = 1,
+    // 2 was the pre-freeze LOCAL_MQTT routing value. It is deliberately not
+    // reused: local/remote is now an MQTT service profile, not a transport.
+    ESP_NOW = 3
+};
+
+enum class MqttProfile : uint8_t
+{
+    REMOTE = 0,
+    LOCAL = 1
 };
 
 enum class ConnectionState : uint8_t
@@ -52,6 +59,7 @@ ConnectionType GetActiveConnection();
 ConnectionType GetPreferredConnection();
 ConnectionState GetConnectionState();
 const char *ConnectionTypeName(ConnectionType connection);
+const char *MqttProfileName(MqttProfile profile);
 const char *ConnectionStateName(ConnectionState state);
 }
 

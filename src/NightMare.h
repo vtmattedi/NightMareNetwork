@@ -12,6 +12,7 @@
 #include <Core/NetResources.h>
 #include <Core/Logs.h>
 #include <Network/Connectivity.h>
+#include <Network/GatewayCandidate.h>
 #include <Plataform/ESP32/NightMareESP.h>
 
 #if NM_ENABLE_SETTINGS

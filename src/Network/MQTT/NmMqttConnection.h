@@ -9,8 +9,8 @@
 // this independently enabled service is connected.
 namespace NmMqttConnection
 {
-bool begin(NightMare::ConnectionType type);
-bool changeTo(NightMare::ConnectionType type);
+bool begin(NightMare::MqttProfile profile);
+bool changeTo(NightMare::MqttProfile profile);
 void end();
 void finish();
 
@@ -21,7 +21,7 @@ bool unsubscribe(const char *topicFilter);
 int8_t state();
 bool enabled();
 NightMare::ConnectivityState connectivityState();
-NightMare::ConnectionType profile();
+NightMare::MqttProfile profile();
 void onWiFiState(bool connected);
 
 // MQTT-specific delivery queue used when a command response must survive a
@@ -32,10 +32,10 @@ bool queueAsyncMessage(const String &topic, const String &message,
 
 namespace NightMare
 {
-bool Mqtt_enable(ConnectionType mqttProfile);
+bool Mqtt_enable(MqttProfile mqttProfile);
 bool Mqtt_disable();
 bool Mqtt_enabled();
 ConnectivityState Mqtt_state();
-ConnectionType Mqtt_profile();
+MqttProfile Mqtt_profile();
 }
 #endif // NM_ENABLE_MQTT

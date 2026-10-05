@@ -902,7 +902,8 @@ enum CommandSource
 ```
 
 Console topics are labelled by the connection that delivered them:
-`NM_CMD_SRC_MQTT` for MQTT/LOCAL_MQTT, `NM_CMD_SRC_ESPNOW` for ESP-NOW.
+`NM_CMD_SRC_MQTT` for either MQTT broker profile and `NM_CMD_SRC_ESPNOW` for
+ESP-NOW.
 
 Context:
 
@@ -1275,9 +1276,14 @@ namespace NightMare
 enum class ConnectionType : uint8_t
 {
     AUTO = 0,
-    MQTT,
-    LOCAL_MQTT,
-    ESP_NOW
+    MQTT = 1,
+    ESP_NOW = 3
+};
+
+enum class MqttProfile : uint8_t
+{
+    REMOTE = 0,
+    LOCAL = 1
 };
 
 enum class ConnectionState : uint8_t
@@ -1334,8 +1340,8 @@ const char *ConnectionStateName(ConnectionState state);
 
 `MQTT` means Remote MQTT/TLS. The payload pointer and explicit length make the
 generic boundary binary-safe. `ESP_NOW` is available when built with
-`NM_NETWORK_ESPNOW`; `AUTO` uses the base failover order (ESP-NOW, Remote MQTT,
-Local MQTT). Selection changes only the preferred routing transport. Active
+`NM_NETWORK_ESPNOW`; `AUTO` uses the base failover order (ESP-NOW, MQTT).
+Local versus remote MQTT is an `MqttProfile`, not another transport. Selection changes only the preferred routing transport. Active
 routing is restricted to an enabled, connected service.
 
 `OnMessage()` replaces the single application message handler, or unregisters
@@ -1348,11 +1354,11 @@ duration of the callback.
 When `NM_ENABLE_MQTT`:
 
 ```cpp
-bool NightMare::Mqtt_enable(ConnectionType profile);
+bool NightMare::Mqtt_enable(MqttProfile profile);
 bool NightMare::Mqtt_disable();
 bool NightMare::Mqtt_enabled();
 ConnectivityState NightMare::Mqtt_state();
-ConnectionType NightMare::Mqtt_profile();
+MqttProfile NightMare::Mqtt_profile();
 ```
 
 MQTT enable requires WiFiIP enabled and never starts it. The selected broker

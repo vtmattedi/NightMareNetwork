@@ -30,11 +30,11 @@ SemaphoreHandle_t queueMutex = nullptr;
 std::atomic<uint8_t> connectionErrors{0};
 volatile bool serviceEnabled = false;
 volatile NightMare::ConnectivityState serviceState = NightMare::ConnectivityState::STOPPED;
-volatile NightMare::ConnectionType serviceProfile =
+volatile NightMare::MqttProfile serviceProfile =
 #if NM_NETWORK_MQTT
-    NightMare::ConnectionType::MQTT;
+    NightMare::MqttProfile::REMOTE;
 #else
-    NightMare::ConnectionType::LOCAL_MQTT;
+    NightMare::MqttProfile::LOCAL;
 #endif
 
 void serviceChanged()
@@ -42,30 +42,18 @@ void serviceChanged()
     NightMare::OnConnectivityStateChanged();
 }
 
-bool mqttType(NightMare::ConnectionType type)
+bool mqttProfileSupported(NightMare::MqttProfile profile)
 {
-    return type == NightMare::ConnectionType::MQTT ||
-           type == NightMare::ConnectionType::LOCAL_MQTT;
-}
-
-bool mqttProfileSupported(NightMare::ConnectionType type)
-{
-    if (type == NightMare::ConnectionType::MQTT)
+    if (profile == NightMare::MqttProfile::REMOTE)
         return NM_NETWORK_MQTT != 0;
-    if (type == NightMare::ConnectionType::LOCAL_MQTT)
+    if (profile == NightMare::MqttProfile::LOCAL)
         return NM_NETWORK_LOCALMQTT != 0;
     return false;
 }
 
-bool localBroker(NightMare::ConnectionType type)
+bool localBroker(NightMare::MqttProfile profile)
 {
-    return type == NightMare::ConnectionType::LOCAL_MQTT;
-}
-
-NightMare::ConnectionType connectionType(bool isLocalBroker)
-{
-    return isLocalBroker ? NightMare::ConnectionType::LOCAL_MQTT
-                         : NightMare::ConnectionType::MQTT;
+    return profile == NightMare::MqttProfile::LOCAL;
 }
 
 bool ensureQueueMutex()
@@ -107,7 +95,7 @@ void flushQueuedMessages()
 
 void messageReceived(const String &topic, const String &payload, bool retained)
 {
-    if (NightMare::GetActiveConnection() == serviceProfile)
+    if (NightMare::GetActiveConnection() == NightMare::ConnectionType::MQTT)
         NmMessageRouter::handleMessage(topic, payload, retained);
 }
 
@@ -116,12 +104,14 @@ void connected(bool isLocalBroker)
     if (!serviceEnabled)
         return;
     connectionErrors.store(0);
-    const NightMare::ConnectionType type = connectionType(isLocalBroker);
-    if (type != serviceProfile)
+    const NightMare::MqttProfile profile = isLocalBroker
+                                               ? NightMare::MqttProfile::LOCAL
+                                               : NightMare::MqttProfile::REMOTE;
+    if (profile != serviceProfile)
         return;
     serviceState = NightMare::ConnectivityState::CONNECTED;
-    NightMare::OnConnectedIngress(type);
-    if (NightMare::GetActiveConnection() == type &&
+    NightMare::OnConnectedIngress(NightMare::ConnectionType::MQTT);
+    if (NightMare::GetActiveConnection() == NightMare::ConnectionType::MQTT &&
         NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED)
         flushQueuedMessages();
     serviceChanged();
@@ -134,7 +124,7 @@ void disconnected(bool isLocalBroker)
     serviceState = NightMare::WiFiIP_state() == NightMare::ConnectivityState::CONNECTED
                        ? NightMare::ConnectivityState::CONNECTING
                        : NightMare::ConnectivityState::STARTING;
-    NightMare::OnDisconnectedIngress(connectionType(isLocalBroker));
+    NightMare::OnDisconnectedIngress(NightMare::ConnectionType::MQTT);
     serviceChanged();
 }
 
@@ -144,31 +134,31 @@ void connectionError(bool isLocalBroker)
         return;
     connectionErrors.store(0);
     serviceState = NightMare::ConnectivityState::ERROR;
-    NightMare::OnConnectionFailedIngress(connectionType(isLocalBroker));
+    NightMare::OnConnectionFailedIngress(NightMare::ConnectionType::MQTT);
     serviceChanged();
 }
 }
 
 namespace NmMqttConnection
 {
-bool begin(NightMare::ConnectionType type)
+bool begin(NightMare::MqttProfile profile)
 {
-    if (!mqttType(type))
+    if (!mqttProfileSupported(profile))
         return false;
 
     gDeviceIdentity.begin();
     gDeviceIdentity.lockAddress();
     connectionErrors.store(0);
     NmMqttEsp::setHandlers(messageReceived, connected, disconnected, connectionError);
-    return NmMqttEsp::begin(localBroker(type));
+    return NmMqttEsp::begin(localBroker(profile));
 }
 
-bool changeTo(NightMare::ConnectionType type)
+bool changeTo(NightMare::MqttProfile profile)
 {
-    if (!mqttType(type))
+    if (!mqttProfileSupported(profile))
         return false;
     connectionErrors.store(0);
-    return NmMqttEsp::changeTo(localBroker(type));
+    return NmMqttEsp::changeTo(localBroker(profile));
 }
 
 void end()
@@ -203,7 +193,7 @@ int8_t state()
 
 bool enabled() { return serviceEnabled; }
 NightMare::ConnectivityState connectivityState() { return serviceState; }
-NightMare::ConnectionType profile() { return serviceProfile; }
+NightMare::MqttProfile profile() { return serviceProfile; }
 
 void onWiFiState(bool connected)
 {
@@ -212,7 +202,7 @@ void onWiFiState(bool connected)
     if (!connected)
     {
         serviceState = NightMare::ConnectivityState::STARTING;
-        NightMare::OnDisconnectedIngress(serviceProfile);
+        NightMare::OnDisconnectedIngress(NightMare::ConnectionType::MQTT);
         serviceChanged();
         return;
     }
@@ -253,7 +243,7 @@ bool queueAsyncMessage(const String &topic, const String &message,
 
 namespace NightMare
 {
-bool Mqtt_enable(ConnectionType mqttProfile)
+bool Mqtt_enable(MqttProfile mqttProfile)
 {
     if (!mqttProfileSupported(mqttProfile) || !WiFiIP_enabled())
         return false;
@@ -284,10 +274,9 @@ bool Mqtt_disable()
 {
     if (!serviceEnabled)
         return true;
-    const ConnectionType oldProfile = serviceProfile;
     serviceEnabled = false;
     serviceState = ConnectivityState::STOPPED;
-    OnDisconnectedIngress(oldProfile);
+    OnDisconnectedIngress(ConnectionType::MQTT);
     serviceChanged();
     NmMqttConnection::end();
     return true;
@@ -295,7 +284,7 @@ bool Mqtt_disable()
 
 bool Mqtt_enabled() { return serviceEnabled; }
 ConnectivityState Mqtt_state() { return serviceState; }
-ConnectionType Mqtt_profile() { return serviceProfile; }
+MqttProfile Mqtt_profile() { return serviceProfile; }
 }
 
 #endif // NM_ENABLE_MQTT

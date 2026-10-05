@@ -39,6 +39,7 @@ struct WiFiInfo
 {
     WiFiState state = WiFiState::STOPPED;
     std::string ssid;
+    std::string bssid;
     std::string ip;
     int txPower = NM_TX_POWER_AUTO; // in use; a fallback level replaces the requested one
     float txPowerDbm = 0;

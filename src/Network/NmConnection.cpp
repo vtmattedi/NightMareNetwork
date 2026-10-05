@@ -3,6 +3,7 @@
 
 #include "NmConnection.h"
 #include "NmConnectionInternal.h"
+#include "NmRoutingPolicy.h"
 
 #include <Core/ConfigManager.h>
 #include <Core/DeviceIdentity.h>
@@ -11,11 +12,13 @@
 #include <Core/SystemState.h>
 #include <Network/NmMessageRouter.h>
 #include <Network/Connectivity.h>
+#include <Network/GatewayCandidate.h>
 #if NM_ENABLE_MQTT
 #include <Network/MQTT/NmMqttConnection.h>
 #endif
 #if NM_NETWORK_ESPNOW
 #include <Network/EspNow/NmEspNowConnection.h>
+#include <Network/EspNow/EspNowClient.h>
 #endif
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
@@ -31,7 +34,7 @@ namespace NightMare
 #if NM_NETWORK_MQTT
             return ConnectionType::MQTT;
 #elif NM_NETWORK_LOCALMQTT
-            return ConnectionType::LOCAL_MQTT;
+            return ConnectionType::MQTT;
 #elif NM_NETWORK_ESPNOW
             return ConnectionType::ESP_NOW;
 #else
@@ -41,15 +44,7 @@ namespace NightMare
     }
     //@NightMare:Config Preferred Connection
     // Routing intent only. It never enables or disables a connectivity service.
-    // AUTO uses the base order: ESP-NOW, MQTT, LOCAL_MQTT.
-    /* enum class ConnectionType : uint8_t
-    {
-        AUTO = 0,
-        MQTT,
-        LOCAL_MQTT,
-        ESP_NOW
-    };
-    */
+    // AUTO uses the base order: ESP-NOW, MQTT.
     Config<int> preferredConnection("nightmare:connection:preferred_connection",
                                     static_cast<int>(defaultConnection()));
 
@@ -119,20 +114,12 @@ namespace NightMare
             }
         }
 
-        bool isMqtt(ConnectionType connection)
-        {
-            return connection == ConnectionType::MQTT ||
-                   connection == ConnectionType::LOCAL_MQTT;
-        }
-
         bool connectionEnabled(ConnectionType connection)
         {
             switch (connection)
             {
             case ConnectionType::MQTT:
-                return NM_NETWORK_MQTT != 0;
-            case ConnectionType::LOCAL_MQTT:
-                return NM_NETWORK_LOCALMQTT != 0;
+                return (NM_NETWORK_MQTT || NM_NETWORK_LOCALMQTT) != 0;
             case ConnectionType::ESP_NOW:
                 return NM_NETWORK_ESPNOW != 0;
             case ConnectionType::AUTO:
@@ -146,9 +133,8 @@ namespace NightMare
             switch (connection)
             {
             case ConnectionType::MQTT:
-            case ConnectionType::LOCAL_MQTT:
 #if NM_ENABLE_MQTT
-                return Mqtt_enabled() && Mqtt_profile() == connection;
+                return Mqtt_enabled();
 #else
                 return false;
 #endif
@@ -171,7 +157,6 @@ namespace NightMare
             switch (connection)
             {
             case ConnectionType::MQTT:
-            case ConnectionType::LOCAL_MQTT:
 #if NM_ENABLE_MQTT
                 return Mqtt_state() == ConnectivityState::CONNECTED;
 #else
@@ -187,6 +172,23 @@ namespace NightMare
                 return false;
             }
             return false;
+        }
+
+        bool routeEligible(ConnectionType connection)
+        {
+            if (!transportUsable(connection))
+                return false;
+            if (connection != ConnectionType::ESP_NOW)
+                return true;
+#if NM_ENABLE_MQTT && NM_NETWORK_ESPNOW
+            // A build with an enabled MQTT service knows which route class it
+            // needs. The retained announcement proves readiness; the matching
+            // authenticated ESP-NOW session proves the actual peer.
+            if (Mqtt_enabled())
+                return GatewayCandidateIsProbable(Mqtt_profile()) &&
+                       GatewayCandidateMatchesAuthenticated(EspNowClient::gatewayId().c_str());
+#endif
+            return true;
         }
 
         bool validTopicFilter(const char *topicFilter)
@@ -226,7 +228,7 @@ namespace NightMare
                 return NmEspNowConnection::subscribe(topicFilter);
 #endif
 #if NM_ENABLE_MQTT
-            return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
+            return selectedConnection == ConnectionType::MQTT &&
                    NmMqttConnection::subscribe(topicFilter);
 #else
             (void)topicFilter;
@@ -241,7 +243,7 @@ namespace NightMare
                 return NmEspNowConnection::unsubscribe(topicFilter);
 #endif
 #if NM_ENABLE_MQTT
-            return isMqtt(static_cast<ConnectionType>(selectedConnection)) &&
+            return selectedConnection == ConnectionType::MQTT &&
                    NmMqttConnection::unsubscribe(topicFilter);
 #else
             (void)topicFilter;
@@ -296,6 +298,8 @@ namespace NightMare
             complete = Subscribe("Control/time") && complete;
 #endif
             gResourcesManager.subscribeAll();
+            complete = Subscribe(GatewayNetworkTopicFilter()) && complete;
+            complete = Subscribe(GatewayStatusTopicFilter()) && complete;
             frameworkSubscriptionsRegistered = true;
             if (!complete)
                 LOG_WARNING("NET", "One or more framework subscriptions could not be registered");
@@ -329,26 +333,6 @@ namespace NightMare
             xSemaphoreGive(subscriptionMutex);
         }
 
-        constexpr ConnectionType BaseOrder[] = {ConnectionType::ESP_NOW, ConnectionType::MQTT,
-                                                ConnectionType::LOCAL_MQTT};
-        constexpr size_t MaxProfiles = sizeof(BaseOrder) / sizeof(BaseOrder[0]);
-
-        // Failover order for a preference. AUTO is the base order; a concrete preference moves to the
-        // top and the others keep their base order:
-        //   AUTO        ESP_NOW, MQTT, LOCAL_MQTT
-        //   LOCAL_MQTT  LOCAL_MQTT, ESP_NOW, MQTT
-        // Profiles this build lacks are left out. Returns how many were written.
-        size_t failoverOrder(ConnectionType preferred, ConnectionType (&order)[MaxProfiles])
-        {
-            size_t count = 0;
-            if (connectionEnabled(preferred))
-                order[count++] = preferred;
-            for (ConnectionType connection : BaseOrder)
-                if (connection != preferred && connectionEnabled(connection))
-                    order[count++] = connection;
-            return count;
-        }
-
         void requestNetworkTelemetry()
         {
 #if NM_ENABLE_TELEMETRY
@@ -379,25 +363,11 @@ namespace NightMare
 
         void reevaluateRouting(ConnectionType preference)
         {
-            if (preference != ConnectionType::AUTO && transportUsable(preference))
-            {
-                activate(preference);
-                return;
-            }
             const ConnectionType current = static_cast<ConnectionType>(selectedConnection);
-            if (transportUsable(current))
-                return;
-            ConnectionType order[MaxProfiles];
-            const size_t count = failoverOrder(preference, order);
-            for (size_t i = 0; i < count; ++i)
-            {
-                if (transportUsable(order[i]))
-                {
-                    activate(order[i]);
-                    return;
-                }
-            }
-            activate(ConnectionType::AUTO);
+            activate(ResolveNetworkRoute(preference, current,
+                                         transportUsable(ConnectionType::MQTT),
+                                         transportUsable(ConnectionType::ESP_NOW),
+                                         routeEligible(ConnectionType::ESP_NOW)));
         }
 
         void reevaluateRouting()
@@ -436,7 +406,6 @@ namespace NightMare
         switch (selectedConnection)
         {
         case ConnectionType::MQTT:
-        case ConnectionType::LOCAL_MQTT:
 #if NM_ENABLE_MQTT
             return NmMqttConnection::publish(topic, payload, length, retained);
 #else
@@ -569,10 +538,19 @@ namespace NightMare
         {
         case ConnectionType::AUTO: return "AUTO";
         case ConnectionType::MQTT: return "MQTT";
-        case ConnectionType::LOCAL_MQTT: return "LOCAL_MQTT";
         case ConnectionType::ESP_NOW: return "ESP_NOW";
         }
         return "AUTO";
+    }
+
+    const char *MqttProfileName(MqttProfile profile)
+    {
+        switch (profile)
+        {
+        case MqttProfile::REMOTE: return "REMOTE";
+        case MqttProfile::LOCAL: return "LOCAL";
+        }
+        return "REMOTE";
     }
 
     const char *ConnectionStateName(ConnectionState state)

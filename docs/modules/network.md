@@ -32,8 +32,9 @@ WiFiIP owns STA association, DHCP/IP, reconnect, the stored profile, RSSI,
 channel, TX power, and scans. Enabling WiFiIP requires a ready radio. Disabling
 it leaves the radio and ESP-NOW alone, but is denied while MQTT is enabled.
 
-MQTT owns the MQTT client and its selected `MQTT` or `LOCAL_MQTT` broker
-profile. Enabling MQTT requires WiFiIP to be enabled. If WiFiIP has no address,
+MQTT owns one MQTT client and its selected `REMOTE` or `LOCAL` broker profile.
+The profile and its internal broker fallback are MQTT policy, not separate
+NMNW transports. Enabling MQTT requires WiFiIP to be enabled. If WiFiIP has no address,
 MQTT remains enabled and waits; it never enables WiFiIP. Disabling MQTT does
 not disable WiFiIP.
 
@@ -55,16 +56,21 @@ registry. `ConnectionType` remains the NMNW transport enum:
 enum class ConnectionType : uint8_t
 {
     AUTO = 0,
-    MQTT,
-    LOCAL_MQTT,
-    ESP_NOW
+    MQTT = 1,
+    ESP_NOW = 3
 };
 ```
 
+Numeric value 2 is reserved for the removed pre-freeze `LOCAL_MQTT` transport
+and is not reused. `MqttProfile::{REMOTE, LOCAL}` selects the one MQTT client's
+broker policy.
+
 `SelectConnection()` changes and persists the routing preference. It accepts a
 compiled transport even when its service is disabled or disconnected. The
-current usable active transport stays in place until the preferred transport
-becomes usable. Failover considers only enabled, connected services and never
+current usable active transport stays in place. ESP-NOW may replace healthy
+MQTT only after a probable gateway announcement satisfies the required uplink
+and radio compatibility, and that same gateway authenticates and connects.
+Failover considers only eligible, enabled, connected services and never
 calls a service enable/disable function.
 
 Only the active transport carries normal framework traffic. When it changes,
@@ -81,11 +87,11 @@ bool WiFiIP_enabled();
 ConnectivityState WiFiIP_state();
 WiFiInfo WiFi_info();
 
-bool Mqtt_enable(ConnectionType profile);
+bool Mqtt_enable(MqttProfile profile);
 bool Mqtt_disable();
 bool Mqtt_enabled();
 ConnectivityState Mqtt_state();
-ConnectionType Mqtt_profile();
+MqttProfile Mqtt_profile();
 
 bool EspNow_enable();
 bool EspNow_disable();
@@ -120,6 +126,48 @@ state, requests a network telemetry refresh, and asks `NmConnection` to
 reevaluate routing. No callback starts or stops an unrelated service.
 
 `<device>/telemetry/network` and `NETWORK GET` expose the same independent
-view: `transport`, `wifi_radio`, `wifi_ip`, `esp_now`, and `mqtt`. Publication
+view: `transport`, `wifi_radio`, `wifi_ip`, `esp_now`, `mqtt`, and
+`gateway_candidate`. Candidate observation never initiates discovery. Publication
 failure does not change connectivity state. Duplicate refresh requests are
 coalesced by `SystemState`.
+
+## Gateway candidate and sticky fallback
+
+NMNW subscribes to retained `+/gateway/network` announcements. A candidate is
+probable only when it is online, ESP-NOW-ready, ready for the selected MQTT
+route class (`REMOTE` or `LOCAL`), and radio-compatible. BSSID equality is
+preferred; otherwise SSID and channel must match. The announcement is only
+readiness evidence. The ESP-NOW PSK handshake authenticates the gateway, and
+the beacon's stable gateway id must match the announcement before routing may
+switch from healthy MQTT.
+
+Reachable, eligible, preferred, and active are separate facts. A healthy MQTT
+fallback remains active while no probable gateway exists, during an ESP-NOW
+attempt, and after a failed attempt. If the active transport is lost, routing
+walks the normal preferred/fallback queue; `preferred != active` is expected.
+
+## Frozen gateway MQTT contract
+
+A gateway uses one stable id in MQTT and its ESP-NOW beacon, plus a boot-unique
+opaque `generation`. These retained topics and schema-1 document shapes are
+frozen for the network contract:
+
+```text
+<gateway-id>/status
+{"schema":1,"device":"<gateway-id>","id":"<gateway-id>","kind":"gateway","online":true,"generation":"<opaque>"}
+
+<gateway-id>/gateway/network
+{"schema":1,"device":"<gateway-id>","id":"<gateway-id>","kind":"gateway","online":true,"generation":"<opaque>","capabilities":{"esp_now":true,"mqtt_bridge_remote":true,"mqtt_bridge_local":false},"radio":{"channel":6,"ssid":"example","bssid":"00:11:22:33:44:55"},"uplinks":{"remote_mqtt":{"ready":true},"local_mqtt":{"ready":false}}}
+
+<gateway-id>/gateway/clients
+{"schema":1,"id":"<gateway-id>","generation":"<opaque>","clients":[{"id":"aa:bb:cc:dd:ee:ff","name":"device-name","connected":true,"last_will":{"topic":"device-name/status","retained":true,"payload":[123,34,111,110,108,105,110,101,34,58,102,97,108,115,101,125]}}]}
+```
+
+The gateway MQTT LWT is its `status` document with `online=false` and the
+current generation. On reconnect it publishes locally owned retained state,
+then gateway status/network/client state, and only then subscribes for broker
+replay. A recovery consumer applies the cached LastWills of connected clients
+once for a matching-generation gateway offline event. Repeated delivery is
+idempotent, and an older-generation offline event cannot invalidate a newer
+online generation. LastWill payload is an exact byte array; consumers must not
+reinterpret it as text.

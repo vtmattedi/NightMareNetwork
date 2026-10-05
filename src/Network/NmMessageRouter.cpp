@@ -3,6 +3,7 @@
 #include "NmMessageRouter.h"
 #include "NmConnection.h"
 #include "NmConnectionInternal.h"
+#include "GatewayCandidate.h"
 
 #include <Core/DeviceIdentity.h>
 #include <Core/ResourcesManager.h>
@@ -109,6 +110,8 @@ void onConnected()
 
 bool handleMessage(const String &fullTopic, const String &payload, bool retained)
 {
+    if (NightMare::GatewayCandidateHandleMessage(fullTopic, payload, retained))
+        return true;
     // The resource manager accepts owned /set and /invoke requests, as well as
     // manifests and states from other devices. It sees full topics in both cases.
     if (gResourcesManager.handleIngressMessage(fullTopic, payload, retained))

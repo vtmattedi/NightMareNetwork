@@ -218,12 +218,15 @@ Readable transport names are:
 ```text
 AUTO
 MQTT
-LOCAL_MQTT
 ESP_NOW
 ```
 
 Preference and active transport are separate so a disabled/unavailable
 preferred service can coexist with a connected fallback.
+
+`gateway_candidate` reports already-known retained gateway readiness: `known`,
+`id`, `probable`, `esp_now_ready`, `remote_mqtt_ready`, `local_mqtt_ready`,
+`ssid`, `bssid`, and `channel`. Producing telemetry does not scan or discover.
 
 ## HEARTBEAT contents
 
