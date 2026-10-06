@@ -241,7 +241,7 @@ limits remain:
 - An unauthenticated CONNECT ends the session held by its sender MAC.
 
 V2 (1470-byte) framing is reserved but has no runtime, and SUBSCRIBE is not
-retried within a session.
+retried within a session after connection-level restoration.
 
 ## WiFi/time/OTA remain ESP-oriented services
 

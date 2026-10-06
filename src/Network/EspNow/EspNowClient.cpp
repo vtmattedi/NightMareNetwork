@@ -38,7 +38,6 @@ namespace NightMare::EspNowClient
         constexpr char TagTx[] = "ESPNOW-TX"; // outgoing frames
         constexpr char TagRx[] = "ESPNOW-RX"; // incoming frames
         constexpr size_t MaxTopicLength = 63; // 6-bit length in the message encoding
-        constexpr size_t MaxSubscriptions = 16;
         constexpr uint32_t SearchIntervalMs = 3000;   // probe rate on a fixed/AP channel
         constexpr uint32_t HopIntervalMs = 300;       // dwell per channel while hopping
         constexpr uint32_t HandshakeStepMs = 1000;    // CONNECT->CHALLENGE, AUTH->CONNACK
@@ -57,11 +56,11 @@ namespace NightMare::EspNowClient
 
         // `lock` (spinlock, tiny critical sections only) guards what the API and
         // the receive callback read: state, gateway, cid, rtt, message ids, callbacks.
-        // `listMutex` guards the subscription list and last will; `sendMutex`
-        // serialises transmissions, since ESP-NOW allows one in flight.
+        // `willMutex` guards the last will; `sendMutex` serialises
+        // transmissions, since ESP-NOW allows one in flight.
         // Everything else about the handshake belongs to the client task alone.
         portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
-        SemaphoreHandle_t listMutex = nullptr;
+        SemaphoreHandle_t willMutex = nullptr;
         SemaphoreHandle_t sendMutex = nullptr;
         SemaphoreHandle_t sendDone = nullptr;
         TaskHandle_t task = nullptr;
@@ -79,7 +78,6 @@ namespace NightMare::EspNowClient
         StateCallback stateCallback = nullptr;
         MessageCallback messageCallback = nullptr;
 
-        std::vector<std::string> subscriptions;
         bool willSet = false;
         std::vector<uint8_t> willRaw;
 
@@ -273,18 +271,18 @@ namespace NightMare::EspNowClient
         bool ensureMutexes()
         {
             portENTER_CRITICAL(&lock);
-            const bool needed = listMutex == nullptr || sendMutex == nullptr || sendDone == nullptr;
+            const bool needed = willMutex == nullptr || sendMutex == nullptr || sendDone == nullptr;
             portEXIT_CRITICAL(&lock);
             if (!needed)
                 return true;
-            // Only called from begin()/the list setters before concurrent use.
-            if (listMutex == nullptr)
-                listMutex = xSemaphoreCreateMutex();
+            // Only called from begin()/the will setter before concurrent use.
+            if (willMutex == nullptr)
+                willMutex = xSemaphoreCreateMutex();
             if (sendMutex == nullptr)
                 sendMutex = xSemaphoreCreateMutex();
             if (sendDone == nullptr)
                 sendDone = xSemaphoreCreateBinary();
-            return listMutex != nullptr && sendMutex != nullptr && sendDone != nullptr;
+            return willMutex != nullptr && sendMutex != nullptr && sendDone != nullptr;
         }
 
         void setState(State next)
@@ -628,24 +626,16 @@ namespace NightMare::EspNowClient
             sendTo(mac, FrameType::PING, hs.pingId, session);
         }
 
-        void resync()
+        void restoreLastWill()
         {
-            std::vector<std::string> filters;
             std::vector<uint8_t> will;
             {
-                Guard guard(listMutex);
-                filters = subscriptions;
+                Guard guard(willMutex);
                 if (willSet)
                     will = willRaw;
             }
-            LOG(TagLink, "resync: %u subscription(s)%s", static_cast<unsigned>(filters.size()),
-                will.empty() ? "" : " + last will");
-            for (const std::string &filter : filters)
-                if (!sendSession(FrameType::SUBSCRIBE,
-                                 reinterpret_cast<const uint8_t *>(filter.data()), filter.size()))
-                    LOG_WARNING(TagLink, "resync: could not send SUBSCRIBE '%s'", filter.c_str());
             if (!will.empty() && !sendSession(FrameType::LAST_WILL, will.data(), will.size()))
-                LOG_WARNING(TagLink, "resync: could not send LAST_WILL");
+                LOG_WARNING(TagLink, "could not restore LAST_WILL");
         }
 
         Auth::HandshakeContext handshakeContext(const uint8_t *gateway)
@@ -756,8 +746,8 @@ namespace NightMare::EspNowClient
             LOG(TagLink, "connected to gateway %s, session %u, rtt %lu ms, heartbeat %lu ms",
                 macText(mac).text, frame.header.cid, static_cast<unsigned long>(rtt),
                 static_cast<unsigned long>(hs.heartbeatMs));
+            restoreLastWill();
             setState(State::CONNECTED);
-            resync();
             setDeadline(hs.heartbeatMs);
         }
 
@@ -1223,49 +1213,19 @@ namespace NightMare::EspNowClient
     bool subscribe(const char *filter)
     {
         if (filter == nullptr || filter[0] == '\0' || strlen(filter) > MaxFrameDataSize ||
-            !ensureMutexes())
+            state() != State::CONNECTED || !ensureMutexes())
             return false;
-        bool added = false;
-        {
-            Guard guard(listMutex);
-            bool present = false;
-            for (const std::string &s : subscriptions)
-                present |= s == filter;
-            if (!present)
-            {
-                if (subscriptions.size() >= MaxSubscriptions)
-                    return false;
-                subscriptions.emplace_back(filter);
-                added = true;
-            }
-        }
-        // One already in the list went out with the last resync; sending it again
-        // would only make the gateway replay its retained messages twice.
-        if (added && state() == State::CONNECTED)
-            sendSession(FrameType::SUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
-                        strlen(filter));
-        return true;
+        return sendSession(FrameType::SUBSCRIBE,
+                           reinterpret_cast<const uint8_t *>(filter), strlen(filter));
     }
 
     bool unsubscribe(const char *filter)
     {
-        if (filter == nullptr || !ensureMutexes())
+        if (filter == nullptr || filter[0] == '\0' || strlen(filter) > MaxFrameDataSize ||
+            state() != State::CONNECTED || !ensureMutexes())
             return false;
-        bool removed = false;
-        {
-            Guard guard(listMutex);
-            for (size_t i = 0; i < subscriptions.size(); ++i)
-                if (subscriptions[i] == filter)
-                {
-                    subscriptions.erase(subscriptions.begin() + i);
-                    removed = true;
-                    break;
-                }
-        }
-        if (removed && state() == State::CONNECTED)
-            sendSession(FrameType::UNSUBSCRIBE, reinterpret_cast<const uint8_t *>(filter),
-                        strlen(filter));
-        return removed;
+        return sendSession(FrameType::UNSUBSCRIBE,
+                           reinterpret_cast<const uint8_t *>(filter), strlen(filter));
     }
 
     bool setLastWill(const char *topic, const uint8_t *payload, size_t length, bool retained)
@@ -1275,7 +1235,7 @@ namespace NightMare::EspNowClient
             raw.size() > MaxFrameDataSize || !ensureMutexes())
             return false;
         {
-            Guard guard(listMutex);
+            Guard guard(willMutex);
             willRaw = raw;
             willSet = true;
         }

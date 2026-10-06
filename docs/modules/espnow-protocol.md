@@ -115,8 +115,9 @@ Then one of two things happens:
 
 - **AUTH verifies.** The sender holds the network key, so it is the device.
   Only now is the old session dropped, without firing its last will, and
-  replaced by a new one with a fresh cid. The client resyncs its subscriptions
-  and will. Replacing needs no room in the session table, so a device can
+  replaced by a new one with a fresh cid. The client restores its last will,
+  then its CONNECTED event tells each logical owner to reinstall its own
+  subscriptions. Replacing needs no room in the session table, so a device can
   always reconnect even when the gateway is full.
 - **AUTH fails, or the handshake times out (5 s).** The session resumes exactly
   as it was, its key put back on the peer. Nothing was lost.
@@ -208,12 +209,16 @@ its heartbeat: after `missedBeforeLost` unanswered PINGs (about 45 s with a
 15 s heartbeat), it drops the session, rediscovers the gateway and runs a full
 new handshake.
 
-## Resync
+## Reconnect restoration
 
-Subscriptions and the last will are kept by `EspNowClient`. When a new session
-reaches CONNECTED, the client re-sends them automatically, before any
-application traffic. Nothing about this is visible to the application, and
-none of it rides in CONNECT.
+`EspNowClient` keeps no subscriptions. A SUBSCRIBE or UNSUBSCRIBE call sends
+one frame only while the authenticated session is CONNECTED. `NmConnection`
+also keeps no subscriptions. The ESP-NOW CONNECTED event reaches the connection
+coordinator through `NmEspNowConnection`; when ESP-NOW becomes active, each
+framework owner and the firmware connect callback install their own filters.
+
+The last will remains session-owned by `EspNowClient` and is restored whenever
+a new session reaches CONNECTED. None of this state rides in CONNECT.
 
 ## Errors
 
@@ -255,8 +260,9 @@ Error payloads never carry secret-derived material.
   handshake is proven or times out (5 s). It can no longer end one: that takes
   a verified AUTH. Repeated, it withholds delivery, much as jamming would.
 - **V2 framing** is reserved but has no runtime.
-- **SUBSCRIBE is not retried.** A SUBSCRIBE lost on the air after a resync is
-  not re-sent until the next session.
+- **SUBSCRIBE is not retried within a session.** A SUBSCRIBE lost on the air
+  during connection-level restoration is not re-sent until the active
+  transport is restored again.
 
 ## Tests
 
@@ -273,8 +279,9 @@ The radio-level behaviour needs a gateway and a device. Checklist:
 2. **Wrong PSK.** Change the device's `NM_ESPNOW_PSK`. The gateway logs
    `AUTH ... failed`, the device logs `NM_ESPNOW_PSK differs` and backs off, and
    no session appears in the gateway's device list.
-3. **Resync.** After connecting, the gateway logs every subscription and the
-   last will for the new session without any application action.
+3. **Reconnect restoration.** After connecting, the gateway logs the last will
+   and every subscription restored by `NmConnection` for the new session,
+   without any application action.
 4. **Client reboot.** Reset the device. The gateway logs
    `session N paused until it is proven`, then `proved itself; session N
    replaced`, and the device reconnects within seconds with a new cid.

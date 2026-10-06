@@ -180,10 +180,13 @@ connectivity lifecycle request.
 ### NmConnection
 
 `NmConnection` owns preferred and active NMNW transport selection, routing
-failover, binary-safe generic publication, the shared subscription registry,
-application message-handler registration, and Resource connection injection.
+failover, binary-safe generic publication, stateless subscribe/unsubscribe
+dispatch, application connect/message-handler registration, and Resource
+connection injection.
 It observes connectivity state and never starts or stops WiFiIP, MQTT, or
 ESP-NOW. Only one usable transport is active for framework traffic at a time.
+It does not remember topic filters. Each logical owner reinstalls its filters
+from the active-transport connection event.
 
 ### NmMqttConnection
 
@@ -285,8 +288,8 @@ escape into another application ingress path.
 
 ## Message flow: custom application traffic
 
-For a topic subscribed through `NightMare::Subscribe()` that is not owned by a
-framework handler:
+For a topic subscribed by the firmware's `NightMare::OnConnect()` handler that
+is not owned by a framework route:
 
 ```text
 connection message
@@ -493,11 +496,13 @@ released after completion, failure, abort, or timeout.
 
 ## Reconnect lifecycle
 
-On MQTT reconnect, NightMare restores framework participation instead of asking each application Resource to do so manually.
+When the active transport reconnects, NightMare restores framework
+participation instead of asking each application Resource to do so manually.
 
-The reconnect callback restores subscriptions, records retained framework
-publications, flushes already queued application messages, and invokes the
-project callback. `tickNightMareESP()` then processes at most one queued
+The active-transport connection event asks each framework owner to reinstall
+its own subscriptions, records retained framework publications, invokes the
+firmware `OnConnect()` callback, and flushes already queued application
+messages. `tickNightMareESP()` then processes at most one queued
 framework publication per call. Failed work moves behind the other ready work
 and retries with exponential backoff capped at five minutes. A fresh request
 resets that request's backoff and makes it ready immediately.
@@ -505,16 +510,17 @@ resets that request's backoff and makes it ready immediately.
 The path includes:
 
 ```text
-default/framework subscriptions
-Resource subscriptions
-optional discovery subscriptions
+console and time subscriptions owned by the message router
+subscriptions derived by ResourcesManager from bound Resources
+gateway discovery subscriptions owned by GatewayCandidate
+firmware subscriptions installed by the OnConnect callback
 online status publication
 Resource manifest/state re-announcement
 consume-manifest re-announcement
 /info refresh
 hardware configuration refresh
 queued MQTT messages
-project connected callback
+firmware OnConnect callback
 ```
 
 The bounded tick path prevents manifests, Resource states, INFO, and hardware

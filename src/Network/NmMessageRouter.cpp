@@ -6,6 +6,7 @@
 #include "GatewayCandidate.h"
 
 #include <Core/DeviceIdentity.h>
+#include <Core/Logs.h>
 #include <Core/ResourcesManager.h>
 #include <Core/SystemState.h>
 #if NM_ENABLE_TELEMETRY
@@ -87,6 +88,24 @@ namespace NmMessageRouter
 // connection event: see processPendingIdentityCleanup().
 void onConnected()
 {
+    bool subscriptionsComplete = true;
+#if NM_ENABLE_CONSOLE
+    subscriptionsComplete = NightMare::Subscribe(
+                                gDeviceIdentity.topic("console/in").c_str()) &&
+                            subscriptionsComplete;
+    subscriptionsComplete = NightMare::Subscribe(
+                                gDeviceIdentity.topic("console/controlled/+/in").c_str()) &&
+                            subscriptionsComplete;
+    subscriptionsComplete = NightMare::Subscribe("all/console/in") &&
+                            subscriptionsComplete;
+#endif
+#if NM_ENABLE_TIME_SYNC
+    subscriptionsComplete = NightMare::Subscribe("Control/time") &&
+                            subscriptionsComplete;
+#endif
+    if (!subscriptionsComplete)
+        LOG_WARNING("NET", "Message-router subscriptions were not accepted");
+
     SystemState.request(SystemRequest::PublishStatus);
     SystemState.request(SystemRequest::PublishManifest);
     SystemState.request(SystemRequest::PublishConsumeManifest);

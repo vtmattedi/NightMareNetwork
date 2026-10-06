@@ -476,7 +476,7 @@ weather-node/manifest/msgpack
 weather-node/resource/temperature/state
 ```
 
-and restores those subscriptions after MQTT reconnect.
+and reinstalls those subscriptions when the active transport reconnects.
 
 ## Use a source selected at runtime
 

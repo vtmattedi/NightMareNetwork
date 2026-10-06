@@ -41,6 +41,8 @@ bool GatewayCandidateHandleMessage(const String &topic, const String &payload,
 GatewayCandidateStatus GatewayCandidateGet();
 bool GatewayCandidateIsProbable(MqttProfile requiredUplink);
 bool GatewayCandidateMatchesAuthenticated(const char *gatewayId);
+// Reinstalls the gateway readiness filters on the newly active transport.
+void GatewayCandidateOnConnected();
 const char *GatewayNetworkTopicFilter();
 const char *GatewayStatusTopicFilter();
 }

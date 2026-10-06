@@ -50,24 +50,13 @@ namespace NightMare
 
     namespace
     {
-        // Two filters per maximum Remote Resource, plus framework and application
-        // headroom. One registry replaces both the old MQTT custom list and direct RM
-        // reconnect subscriptions.
-        constexpr size_t MaxSubscriptions = 256;
         constexpr size_t MaxTopicFilterLength = 192;
 
         volatile ConnectionType selectedConnection = ConnectionType::AUTO;
         volatile ConnectionState connectionState = ConnectionState::STOPPED;
-        struct Subscription
-        {
-            String filter;
-            uint16_t references = 0;
-        };
-        Subscription subscriptions[MaxSubscriptions];
-        SemaphoreHandle_t subscriptionMutex = nullptr;
-        bool frameworkSubscriptionsRegistered = false;
         bool resourceConnectionAttached = false;
         bool coordinatorBegun = false;
+        std::atomic<ConnectHandler> applicationConnectHandler{nullptr};
         std::atomic<MessageHandler> applicationMessageHandler{nullptr};
 
         // PublishTextWhenConnected() backlog, flushed on every connect whatever the
@@ -214,13 +203,6 @@ namespace NightMare
             return true;
         }
 
-        bool ensureSubscriptionMutex()
-        {
-            if (subscriptionMutex == nullptr)
-                subscriptionMutex = xSemaphoreCreateMutex();
-            return subscriptionMutex != nullptr;
-        }
-
         bool driverSubscribe(const char *topicFilter)
         {
 #if NM_NETWORK_ESPNOW
@@ -283,54 +265,15 @@ namespace NightMare
             gResourcesManager.setPublisher(&resourceAdapter);
         }
 
-        bool registerFrameworkSubscriptions()
+        void notifyConnectedOwners()
         {
-            if (frameworkSubscriptionsRegistered)
-                return true;
-
-            bool complete = true;
-#if NM_ENABLE_CONSOLE
-            complete = Subscribe(gDeviceIdentity.topic("console/in").c_str()) && complete;
-            complete = Subscribe(gDeviceIdentity.topic("console/controlled/+/in").c_str()) && complete;
-            complete = Subscribe("all/console/in") && complete;
-#endif
-#if NM_ENABLE_TIME_SYNC
-            complete = Subscribe("Control/time") && complete;
-#endif
             gResourcesManager.subscribeAll();
-            complete = Subscribe(GatewayNetworkTopicFilter()) && complete;
-            complete = Subscribe(GatewayStatusTopicFilter()) && complete;
-            frameworkSubscriptionsRegistered = true;
-            if (!complete)
-                LOG_WARNING("NET", "One or more framework subscriptions could not be registered");
-            return complete;
-        }
-
-        void restoreSubscriptions()
-        {
-            if (!ensureSubscriptionMutex())
-                return;
-
-            xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
-            for (const Subscription &subscription : subscriptions)
-            {
-                if (subscription.references != 0 &&
-                    !driverSubscribe(subscription.filter.c_str()))
-                    LOG_WARNING("NET", "Could not restore subscription: %s",
-                                subscription.filter.c_str());
-            }
-            xSemaphoreGive(subscriptionMutex);
-        }
-
-        void removeSubscriptionsFromActive()
-        {
-            if (connectionState != ConnectionState::CONNECTED || subscriptionMutex == nullptr)
-                return;
-            xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
-            for (const Subscription &subscription : subscriptions)
-                if (subscription.references != 0)
-                    driverUnsubscribe(subscription.filter.c_str());
-            xSemaphoreGive(subscriptionMutex);
+            GatewayCandidateOnConnected();
+            NmMessageRouter::onConnected();
+            ConnectHandler handler = applicationConnectHandler.load();
+            if (handler != nullptr)
+                handler();
+            flushDeferred();
         }
 
         void requestNetworkTelemetry()
@@ -344,19 +287,13 @@ namespace NightMare
         {
             const ConnectionType previous = selectedConnection;
             const ConnectionState previousState = connectionState;
-            if (connection != previous && previousState == ConnectionState::CONNECTED)
-                removeSubscriptionsFromActive();
             selectedConnection = connection;
             connectionState = connection == ConnectionType::AUTO
                                   ? ConnectionState::STOPPED
                                   : ConnectionState::CONNECTED;
             if (coordinatorBegun && connection != ConnectionType::AUTO &&
                 (connection != previous || previousState != ConnectionState::CONNECTED))
-            {
-                restoreSubscriptions();
-                NmMessageRouter::onConnected();
-                flushDeferred();
-            }
+                notifyConnectedOwners();
             if (connection != previous || connectionState != previousState)
                 requestNetworkTelemetry();
         }
@@ -425,80 +362,21 @@ namespace NightMare
 
     bool Subscribe(const char *topicFilter)
     {
-        if (!validTopicFilter(topicFilter) || !ensureSubscriptionMutex())
+        if (!validTopicFilter(topicFilter) || connectionState != ConnectionState::CONNECTED)
             return false;
-
-        const String filter(topicFilter);
-        xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
-        int empty = -1;
-        for (size_t i = 0; i < MaxSubscriptions; ++i)
-        {
-            if (subscriptions[i].references != 0 && subscriptions[i].filter == filter)
-            {
-                if (subscriptions[i].references == UINT16_MAX)
-                {
-                    xSemaphoreGive(subscriptionMutex);
-                    return false;
-                }
-                ++subscriptions[i].references;
-                xSemaphoreGive(subscriptionMutex);
-                return true;
-            }
-            if (empty < 0 && subscriptions[i].references == 0)
-                empty = static_cast<int>(i);
-        }
-        if (empty < 0)
-        {
-            xSemaphoreGive(subscriptionMutex);
-            return false;
-        }
-
-        if (connectionState == ConnectionState::CONNECTED && !driverSubscribe(topicFilter))
-        {
-            xSemaphoreGive(subscriptionMutex);
-            return false;
-        }
-        subscriptions[empty].filter = filter;
-        subscriptions[empty].references = 1;
-        xSemaphoreGive(subscriptionMutex);
-        return true;
+        return driverSubscribe(topicFilter);
     }
 
     bool Unsubscribe(const char *topicFilter)
     {
-        if (!validTopicFilter(topicFilter) || !ensureSubscriptionMutex())
+        if (!validTopicFilter(topicFilter) || connectionState != ConnectionState::CONNECTED)
             return false;
+        return driverUnsubscribe(topicFilter);
+    }
 
-        const String filter(topicFilter);
-        xSemaphoreTake(subscriptionMutex, portMAX_DELAY);
-        int found = -1;
-        for (size_t i = 0; i < MaxSubscriptions; ++i)
-        {
-            if (subscriptions[i].references != 0 && subscriptions[i].filter == filter)
-            {
-                found = static_cast<int>(i);
-                break;
-            }
-        }
-        if (found < 0)
-        {
-            xSemaphoreGive(subscriptionMutex);
-            return false;
-        }
-        if (subscriptions[found].references > 1)
-        {
-            --subscriptions[found].references;
-            xSemaphoreGive(subscriptionMutex);
-            return true;
-        }
-        if (connectionState == ConnectionState::CONNECTED && !driverUnsubscribe(topicFilter))
-        {
-            xSemaphoreGive(subscriptionMutex);
-            return false;
-        }
-        subscriptions[found] = Subscription();
-        xSemaphoreGive(subscriptionMutex);
-        return true;
+    void OnConnect(ConnectHandler handler)
+    {
+        applicationConnectHandler.store(handler);
     }
 
     void OnMessage(MessageHandler handler)
@@ -592,17 +470,13 @@ namespace NightMare
     bool ConnectionBegin()
     {
         attachResourceConnection();
-        registerFrameworkSubscriptions();
         const ConnectionType before = static_cast<ConnectionType>(selectedConnection);
         const ConnectionState beforeState = static_cast<ConnectionState>(connectionState);
         coordinatorBegun = true;
         reevaluateRouting();
         if (before == selectedConnection && beforeState == ConnectionState::CONNECTED &&
             connectionState == ConnectionState::CONNECTED)
-        {
-            NmMessageRouter::onConnected();
-            flushDeferred();
-        }
+            notifyConnectedOwners();
         return true;
     }
 

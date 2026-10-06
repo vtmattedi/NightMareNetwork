@@ -1069,7 +1069,8 @@ persisted source, and republishes the consume manifest.
 
 ## Reconnect
 
-After MQTT reconnect, NightMare rebuilds exact Resource subscriptions and
+After the active transport reconnects, `ResourcesManager` rebuilds its exact
+Resource subscriptions and
 requests cooperative re-announcement of:
 
 - the retained Resource manifest,

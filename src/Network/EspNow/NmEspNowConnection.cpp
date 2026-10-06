@@ -18,9 +18,10 @@ namespace
 constexpr uint8_t QueueDepth = 8;
 constexpr uint32_t WorkerStackBytes = 6144;
 
-// Everything the client reports is handled on the worker: ingress work sends
-// frames (restoring subscriptions, announcing status), and a send blocks until
-// the send callback, which runs on the same task that delivers receive callbacks.
+// Everything the client reports is handled on the worker: the CONNECTED event
+// lets each logical owner reinstall subscriptions and announces status, and a send
+// blocks until the send callback, which runs on the same task that delivers
+// receive callbacks.
 struct Event
 {
     bool isMessage = false;

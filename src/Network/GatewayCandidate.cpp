@@ -4,6 +4,7 @@
 #include "GatewayCandidate.h"
 
 #include <ArduinoJson.h>
+#include <Core/Logs.h>
 #if NM_ENABLE_WIFI
 #include <Network/WiFiIP/NmWifiEsp.h>
 #endif
@@ -133,6 +134,14 @@ bool GatewayCandidateMatchesAuthenticated(const char *gatewayId)
 {
     const GatewayCandidateStatus candidate = GatewayCandidateGet();
     return candidate.known && gatewayId != nullptr && candidate.id == gatewayId;
+}
+
+void GatewayCandidateOnConnected()
+{
+    bool complete = Subscribe(GatewayNetworkTopicFilter());
+    complete = Subscribe(GatewayStatusTopicFilter()) && complete;
+    if (!complete)
+        LOG_WARNING("NET", "Gateway candidate subscriptions were not accepted");
 }
 
 const char *GatewayNetworkTopicFilter() { return "+/gateway/network"; }

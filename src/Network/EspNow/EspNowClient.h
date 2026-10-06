@@ -9,9 +9,9 @@
 // CONNACK proves both ends hold the network PSK (NM_ESPNOW_PSK in creds.h),
 // the gateway assigns a session id (cid), both ends derive a per-session key
 // and turn on ESP-NOW encryption, and an encrypted PING/PONG confirms it.
-// Only then is the client CONNECTED. Subscriptions and the last will are kept
-// here and re-sent automatically after every new session; the application
-// never resyncs anything itself.
+// Only then is the client CONNECTED. Subscription owners reinstall their
+// filters from the CONNECTED event; this transport sends each request without
+// retaining it. The last will is kept here and restored per session.
 //
 // Requirements: the Wi-Fi radio is running (Network/WiFiRadio) -- an AP and IP
 // are not needed. With no AP configured the client hops channels until a
@@ -66,9 +66,11 @@ String gatewayId();
 void onState(StateCallback callback);
 void onMessage(MessageCallback callback);
 
-// Kept and re-sent after every new session; also sent right away when CONNECTED.
+// Sent only while CONNECTED. Each logical owner calls this again after the
+// transport reports a completed authenticated session.
 bool subscribe(const char *filter);
 bool unsubscribe(const char *filter);
+// Kept and re-sent after every new session; also sent right away when CONNECTED.
 bool setLastWill(const char *topic, const uint8_t *payload, size_t length,
                  bool retained = false);
 

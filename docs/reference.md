@@ -1320,6 +1320,7 @@ using MessageHandler =
              const uint8_t *payload,
              size_t length,
              bool retained);
+using ConnectHandler = void (*)();
 
 bool Publish(const char *topic,
              const uint8_t *payload,
@@ -1327,6 +1328,7 @@ bool Publish(const char *topic,
              bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
+void OnConnect(ConnectHandler handler);
 void OnMessage(MessageHandler handler);
 
 bool SelectConnection(ConnectionType connection);
@@ -1343,6 +1345,12 @@ generic boundary binary-safe. `ESP_NOW` is available when built with
 `NM_NETWORK_ESPNOW`; `AUTO` uses the base failover order (ESP-NOW, MQTT).
 Local versus remote MQTT is an `MqttProfile`, not another transport. Selection changes only the preferred routing transport. Active
 routing is restricted to an enabled, connected service.
+
+`OnConnect()` replaces the single firmware connection handler, or unregisters
+it when passed `nullptr`. Register it before framework startup and install
+firmware-owned topic filters from that callback. `Subscribe()` and
+`Unsubscribe()` act only on the active connected transport and do not retain
+filters for reconnect.
 
 `OnMessage()` replaces the single application message handler, or unregisters
 it when passed `nullptr`. The handler receives only messages left unconsumed by
@@ -1365,9 +1373,8 @@ MQTT enable requires WiFiIP enabled and never starts it. The selected broker
 profile is MQTT-owned service state. Current implementation limits are:
 
 ```text
-queued reconnect messages:  5
-connection subscriptions:    256
-topic filter length:        192
+queued reconnect messages: 5
+topic filter length:       192
 incoming MQTT payload:      32768 bytes
 MQTT QoS:                   0
 ```

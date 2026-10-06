@@ -39,6 +39,7 @@ using MessageHandler = void (*)(const char *topic,
                                 const uint8_t *payload,
                                 size_t length,
                                 bool retained);
+using ConnectHandler = void (*)();
 
 bool Publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
@@ -47,12 +48,17 @@ bool Publish(const char *topic, const uint8_t *payload, size_t length,
 bool PublishText(const String &topic, const String &payload, bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
+// Replaces the firmware connection handler. Register before ConnectionBegin();
+// it runs after framework owners subscribe on every active-transport connect.
+// Firmware-owned subscriptions belong in this callback because Subscribe()
+// sends immediately and retains no reconnect state.
+void OnConnect(ConnectHandler handler);
 void OnMessage(MessageHandler handler);
 
 bool SelectConnection(ConnectionType connection);
 
-// Attaches framework routing/subscriptions and selects an already-usable active
-// transport. It does not start or stop connectivity services.
+// Attaches framework routing and selects an already-usable active transport.
+// It does not start or stop connectivity services.
 bool ConnectionBegin();
 
 ConnectionType GetActiveConnection();

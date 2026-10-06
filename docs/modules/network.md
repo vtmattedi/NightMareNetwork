@@ -49,8 +49,9 @@ connectivity service.
 ## NMNW transport routing
 
 `NmConnection` owns only the preferred transport, the one active usable
-transport, failover routing, generic publication, and the shared subscription
-registry. `ConnectionType` remains the NMNW transport enum:
+transport, failover routing, generic publication, stateless subscription
+dispatch, and firmware connect/message callbacks. `ConnectionType` remains the
+NMNW transport enum:
 
 ```cpp
 enum class ConnectionType : uint8_t
@@ -74,9 +75,11 @@ Failover considers only eligible, enabled, connected services and never
 calls a service enable/disable function.
 
 Only the active transport carries normal framework traffic. When it changes,
-NightMare removes the shared subscriptions from the previous transport,
-restores them on the new one, and runs the normal reconnect publication path.
-The framework does not duplicate publications over MQTT and ESP-NOW.
+each framework owner installs its own filters on the new transport, the
+firmware `OnConnect()` callback installs project filters, and NightMare runs
+the normal reconnect publication path. Drivers discard ingress from inactive
+transports. The framework does not duplicate publications over MQTT and
+ESP-NOW, and `NmConnection` stores no topic filters.
 
 ## Public lifecycle API
 

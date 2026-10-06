@@ -90,6 +90,11 @@ static_assert(std::is_same<NightMare::MessageHandler,
 static_assert(std::is_same<decltype(&NightMare::OnMessage),
                            void (*)(NightMare::MessageHandler)>::value,
               "OnMessage must remain part of the public connection API");
+static_assert(std::is_same<NightMare::ConnectHandler, void (*)()>::value,
+              "The connect callback must remain allocation-free");
+static_assert(std::is_same<decltype(&NightMare::OnConnect),
+                           void (*)(NightMare::ConnectHandler)>::value,
+              "OnConnect must remain part of the public connection API");
 static_assert(std::is_same<decltype(&NightMare::WiFiIP_enable), bool (*)()>::value,
               "WiFiIP must expose an independent enable lifecycle");
 static_assert(std::is_same<decltype(&NightMare::Mqtt_enable),

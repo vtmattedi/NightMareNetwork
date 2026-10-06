@@ -201,7 +201,7 @@ per remote owner. The compact manifest is decoded for compatibility diagnostics
 against the local Remote-resource declarations. This verification subscription
 is separate from optional JSON `+/manifest/json` discovery/handler subscriptions.
 
-These subscriptions are rebuilt after MQTT reconnect.
+These subscriptions are rebuilt after the active transport reconnects.
 
 ## Ordinary console
 
@@ -297,19 +297,27 @@ A `Control/time` payload must be a JSON object containing both:
 Applications may register additional topic filters with:
 
 ```cpp
-NightMare::Subscribe(...);
-NightMare::Unsubscribe(...);
+void subscribeProjectTopics()
+{
+    NightMare::Subscribe("project/topic");
+}
+
+void setup()
+{
+    NightMare::OnConnect(subscribeProjectTopics);
+    startNightMareESP();
+}
 ```
 
-Subscriptions are remembered in RAM by `NmConnection` and restored once on
-reconnect alongside framework and Resource subscriptions. Messages that are
-not consumed by a framework route are delivered to the handler registered with
-`NightMare::OnMessage()`.
+`Subscribe()` and `Unsubscribe()` act immediately on the active transport and
+store no reconnect state. Firmware therefore owns its filter list and installs
+it again from `OnConnect()`. Framework owners follow the same event-driven
+pattern internally. Messages not consumed by a framework route are delivered
+to the handler registered with `NightMare::OnMessage()`.
 
-The current limits are:
+The connection boundary validates:
 
 ```text
-all subscriptions:   256
 topic filter length: 192 characters
 ```
 
