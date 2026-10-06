@@ -140,17 +140,14 @@ namespace NightMare::EspNowClient
             return primary;
         }
 
-        // --- Receive-side notes ------------------------------------------------
+        // --- Receive-side warnings ---------------------------------------------
         // The receive callback runs on the Wi-Fi task, which has no stack to spare for
         // formatting a log line (NMLog + Serial.printf, the same thing that overflowed
         // sys_evt). It only queues plain data here; rxLogTask formats and prints it.
         enum class RxNote : uint8_t
         {
-            BadFrame,       // value: FrameCheck
             MessageIgnored, // value: 1 = not our gateway, 0 = not our session
-            Ack,
             QueueFull,
-            Unhandled,
         };
 
         struct RxEvent
@@ -194,23 +191,13 @@ namespace NightMare::EspNowClient
             const char *type = frameTypeName(e.type);
             switch (e.note)
             {
-            case RxNote::BadFrame:
-                LOG_DEBUG(TagRx, "frame from %s dropped: %s", from.text,
-                          frameCheckName(static_cast<FrameCheck>(e.value)));
-                break;
             case RxNote::MessageIgnored:
                 LOG_WARNING(TagRx, "MESSAGE #%u from %s ignored: %s", e.messageId, from.text,
                             e.value != 0 ? "not our gateway" : "not our session");
                 break;
-            case RxNote::Ack:
-                LOG_DEBUG(TagRx, "ACK #%u", e.messageId);
-                break;
             case RxNote::QueueFull:
                 LOG_WARNING(TagRx, "%s #%u from %s dropped: client queue full", type, e.messageId,
                             from.text);
-                break;
-            case RxNote::Unhandled:
-                LOG_DEBUG(TagRx, "%s #%u from %s: not for a client", type, e.messageId, from.text);
                 break;
             }
         }
@@ -876,7 +863,6 @@ namespace NightMare::EspNowClient
                     return;
                 }
                 ++hs.missed;
-                LOG_DEBUG(TagTx, "heartbeat (unanswered so far: %u)", hs.missed - 1);
                 sendPing();
                 setDeadline(hs.heartbeatMs);
                 return;
@@ -944,16 +930,13 @@ namespace NightMare::EspNowClient
         {
             if (!running || info == nullptr || data == nullptr || len <= 0)
                 return;
-            // Runs on the Wi-Fi task: note(), never LOG -- see RxNote.
+            // Runs on the Wi-Fi task: queue warnings with note(), never LOG -- see RxNote.
             const uint8_t *from = info->src_addr;
             const int rssi = info->rx_ctrl != nullptr ? info->rx_ctrl->rssi : 0;
             RxFrame rx;
             const FrameCheck check = decodeFrame(rx.frame, data, static_cast<size_t>(len));
             if (check != FrameCheck::OK)
-            {
-                note(RxNote::BadFrame, from, nullptr, rssi, static_cast<int32_t>(check));
                 return;
-            }
             const FrameHeader &header = rx.frame.header;
 
             uint8_t gateway[6];
@@ -974,7 +957,6 @@ namespace NightMare::EspNowClient
                 return;
             }
             case FrameType::ACK:
-                note(RxNote::Ack, from, &header, rssi);
                 return;
             case FrameType::BEACON:
                 // Only a searching client needs one; don't flood the queue otherwise.
@@ -987,7 +969,6 @@ namespace NightMare::EspNowClient
             case FrameType::ERROR:
                 break;
             default:
-                note(RxNote::Unhandled, from, &header, rssi);
                 return;
             }
 
