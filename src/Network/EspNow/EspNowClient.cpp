@@ -72,6 +72,8 @@ namespace NightMare::EspNowClient
         bool gatewayKnown = false;
         uint8_t gatewayMac[6] = {};
         char selectedGatewayId[65] = {};
+        bool gatewayGenerationKnown = false;
+        uint64_t gatewayGeneration = 0;
         uint16_t cid = 0;
         uint32_t lastRttMs = 0;
         uint16_t nextMessageId = 1;
@@ -451,9 +453,26 @@ namespace NightMare::EspNowClient
         {
             char id[sizeof(selectedGatewayId)] = {};
             beaconGatewayId(beacon, id, sizeof(id));
+            uint64_t generation = 0;
+            const bool generationKnown = beaconGeneration(beacon, generation);
             portENTER_CRITICAL(&lock);
             memcpy(selectedGatewayId, id, sizeof(selectedGatewayId));
+            gatewayGenerationKnown = generationKnown;
+            gatewayGeneration = generation;
             portEXIT_CRITICAL(&lock);
+        }
+
+        bool updateGatewayGeneration(const Frame &beacon, uint64_t &previous, uint64_t &next)
+        {
+            if (!beaconGeneration(beacon, next))
+                return false;
+            portENTER_CRITICAL(&lock);
+            const bool changed = gatewayGenerationKnown && gatewayGeneration != next;
+            previous = gatewayGeneration;
+            gatewayGenerationKnown = true;
+            gatewayGeneration = next;
+            portEXIT_CRITICAL(&lock);
+            return changed;
         }
 
         void forgetGateway()
@@ -466,6 +485,8 @@ namespace NightMare::EspNowClient
             portENTER_CRITICAL(&lock);
             gatewayKnown = false;
             selectedGatewayId[0] = '\0';
+            gatewayGenerationKnown = false;
+            gatewayGeneration = 0;
             portEXIT_CRITICAL(&lock);
             hs.peerEncrypted = false;
         }
@@ -781,6 +802,19 @@ namespace NightMare::EspNowClient
             switch (static_cast<FrameType>(rx.frame.header.type))
             {
             case FrameType::BEACON:
+                if (fromGateway)
+                {
+                    uint64_t previous = 0;
+                    uint64_t next = 0;
+                    if (!updateGatewayGeneration(rx.frame, previous, next))
+                        return;
+                    LOG_WARNING(TagLink,
+                                "gateway %s rebooted (generation %016llX -> %016llX); reconnecting",
+                                macText(rx.mac).text, static_cast<unsigned long long>(previous),
+                                static_cast<unsigned long long>(next));
+                    startHandshake();
+                    return;
+                }
                 if (state() != State::SEARCHING || haveGateway || nowUs() < hs.backoffUntilUs)
                     return;
                 if (!beaconSupports(rx.frame, EspNowFrameVersion::V1))
@@ -959,8 +993,9 @@ namespace NightMare::EspNowClient
             case FrameType::ACK:
                 return;
             case FrameType::BEACON:
-                // Only a searching client needs one; don't flood the queue otherwise.
-                if (state() != State::SEARCHING)
+                // While connected, only the exact selected gateway can make a
+                // beacon relevant. The client task compares its boot generation.
+                if (state() != State::SEARCHING && !fromGateway)
                     return;
                 break;
             case FrameType::CHALLENGE:

@@ -858,12 +858,20 @@ This should be considered alongside ManagedEvent/action semantics rather than tr
 A BEACON is intentionally unauthenticated.
 
 A nearby attacker may broadcast a valid-looking gateway BEACON while a client is searching.
+Current beacons also carry a boot generation so a connected client can detect
+an immediate reboot of its selected gateway.
 
 The client may temporarily select the bogus gateway and attempt to authenticate.
 
 ### What the attacker gains
 
-Only temporary discovery influence.
+Without MAC spoofing, only temporary discovery influence. While connected,
+beacons from every MAC except the exact selected gateway MAC are discarded.
+
+An attacker that can spoof the selected gateway MAC and supply a different
+generation can force the client to leave CONNECTED and restart its handshake.
+The attacker still cannot complete authentication, but repeated frames can
+deny service.
 
 The attacker cannot complete authentication without the PSK.
 
@@ -885,15 +893,15 @@ client returns to searching
 
 ### Classification
 
-Availability/discovery interference only.
+Availability/discovery and forced-reconnect interference only.
 
 This is close in nature to other local radio interference techniques and does not create a trust failure.
 
 ### Current decision
 
-Acknowledge.
-
-No immediate protocol change required.
+Acknowledge. Exact-MAC filtering limits the reboot signal to the selected
+gateway identity. The PSK handshake remains the authority after every forced
+reconnect; the plaintext generation is deliberately only a fast restart hint.
 
 ---
 

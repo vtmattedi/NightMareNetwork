@@ -41,7 +41,7 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
 
 | Value | Type        | Direction | cid | Data | Encrypted |
 |------:|-------------|-----------|-----|------|-----------|
-| 0  | BEACON      | gateway → broadcast | 0 | `[count][EspNowFrameVersion…][idLength][gatewayId]` | no |
+| 0  | BEACON      | gateway → broadcast | 0 | `[count][EspNowFrameVersion…][idLength][gatewayId][bootGeneration:8]` | no |
 | 1  | CONNECT     | client → broadcast  | 0 | `ConnectPayload` (10) | no |
 | 2  | CHALLENGE   | gateway → client    | 0 | `ChallengePayload` (8) | no |
 | 3  | AUTH        | client → gateway    | 0 | `AuthPayload` (16) | no |
@@ -97,6 +97,8 @@ The client always broadcasts CONNECT. This does two jobs:
 - The appended stable gateway id is the same id used by MQTT gateway topics.
   It correlates discovery with retained readiness but is public metadata, not
   authentication; only the PSK handshake authenticates the peer.
+- The appended boot generation is a hardware-random 64-bit value created once
+  inside NMNW on each gateway boot. Legacy beacons may omit it.
 
 **An existing session survives the handshake; only a verified AUTH replaces
 it.** A CONNECT proves nothing — anyone in radio range can send one — so it
@@ -202,12 +204,12 @@ On `ERROR INVALID_SESSION` or `NOT_CONNECTED` from its gateway, a client in a
 session starts a new handshake at once. The gateway sends these only when it
 holds a session for that MAC.
 
-**Gateway reboot.** A rebooted gateway has no sessions and no peers. It ignores
-the client's session traffic and sends no error. It could not decrypt that
-traffic anyway, since it no longer holds the key. The client recovers through
-its heartbeat: after `missedBeforeLost` unanswered PINGs (about 45 s with a
-15 s heartbeat), it drops the session, rediscovers the gateway and runs a full
-new handshake.
+**Gateway reboot.** A rebooted gateway has no sessions and no peers. Its next
+BEACON has a new boot generation. A client accepts that signal only from the
+exact MAC of its selected gateway; if the generation differs, it leaves
+CONNECTED and starts a full authenticated handshake immediately. A legacy
+gateway without a beacon generation, or a missed beacon, still recovers via
+`missedBeforeLost` unanswered PINGs as the fallback.
 
 ## Reconnect restoration
 
@@ -259,6 +261,10 @@ Error payloads never carry secret-derived material.
   design, and it suspends any session held by its sender MAC until the
   handshake is proven or times out (5 s). It can no longer end one: that takes
   a verified AUTH. Repeated, it withholds delivery, much as jamming would.
+- **A spoofed same-MAC BEACON can force a reconnect.** BEACON is plaintext. A
+  sender able to spoof the selected gateway MAC and a different generation can
+  make a client restart its handshake. It cannot authenticate as the gateway,
+  but repeated frames are a denial of service similar to radio jamming.
 - **V2 framing** is reserved but has no runtime.
 - **SUBSCRIBE is not retried within a session.** A SUBSCRIBE lost on the air
   during connection-level restoration is not re-sent until the active
@@ -289,11 +295,10 @@ The radio-level behaviour needs a gateway and a device. Checklist:
    wrong key (or let one time out). The gateway logs the pause, then
    `session N resumes`, and the device carries on with the same cid and its
    subscriptions intact.
-5. **Gateway reboot.** Reset the gateway. It sends the device no error. After
-   about 45 s of missed heartbeats the device logs
-   `gateway silent ... searching again`, then does a full new handshake with a
-   new cid.
-6. **Lost device.** Power the device off. After about 60 s the gateway publishes
+6. **Gateway reboot.** Reset the gateway. On its first new-generation BEACON,
+   the device logs `gateway ... rebooted ... reconnecting`, leaves CONNECTED,
+   and completes a full new handshake with a new cid within seconds.
+7. **Lost device.** Power the device off. After about 60 s the gateway publishes
    its last will.
-7. **Clean stop.** `EspNowClient::end()` sends DISCONNECT. The gateway logs
+8. **Clean stop.** `EspNowClient::end()` sends DISCONNECT. The gateway logs
    `disconnected` and no last will goes out.

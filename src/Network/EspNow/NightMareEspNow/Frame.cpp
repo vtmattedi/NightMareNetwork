@@ -1,4 +1,5 @@
 #include "Frame.h"
+#include <esp_random.h>
 #include <string.h>
 
 // Shared byte for byte by the gateway and the NightMareNetwork client: no
@@ -8,6 +9,35 @@ namespace NightMare
 {
     namespace
     {
+        uint64_t bootGeneration()
+        {
+            // Stable for every beacon in this boot; gateway application code
+            // does not own or persist protocol generation state.
+            static const uint64_t generation = [] {
+                uint64_t value = 0;
+                esp_fill_random(&value, sizeof(value));
+                return value;
+            }();
+            return generation;
+        }
+
+        bool beaconVariableOffsets(const Frame &beacon, size_t &idOffset, size_t &idLength,
+                                   size_t &generationOffset)
+        {
+            if (beacon.header.length < 2)
+                return false;
+            const size_t count = beacon.data[0];
+            const size_t lengthOffset = 1 + count;
+            if (lengthOffset >= beacon.header.length)
+                return false;
+            idLength = beacon.data[lengthOffset];
+            idOffset = lengthOffset + 1;
+            if (idOffset + idLength > beacon.header.length)
+                return false;
+            generationOffset = idOffset + idLength;
+            return true;
+        }
+
         bool knownType(uint8_t type)
         {
             return type <= static_cast<uint8_t>(FrameType::ERROR);
@@ -166,8 +196,9 @@ namespace NightMare
         data[0] = sizeof(versions);
         memcpy(data + 1, versions, sizeof(versions));
         size_t length = 1 + sizeof(versions);
-        const size_t idLength = gatewayId == nullptr ? 0 : strlen(gatewayId);
-        if (idLength <= 64 && length + 1 + idLength <= sizeof(data))
+        const size_t requestedIdLength = gatewayId == nullptr ? 0 : strlen(gatewayId);
+        const size_t idLength = requestedIdLength <= 64 ? requestedIdLength : 0;
+        if (length + 1 + idLength <= sizeof(data))
         {
             data[length++] = static_cast<uint8_t>(idLength);
             if (idLength != 0)
@@ -175,6 +206,12 @@ namespace NightMare
                 memcpy(data + length, gatewayId, idLength);
                 length += idLength;
             }
+        }
+        const uint64_t generation = bootGeneration();
+        if (length + sizeof(generation) <= sizeof(data))
+        {
+            memcpy(data + length, &generation, sizeof(generation));
+            length += sizeof(generation);
         }
         Frame frame{};
         makeFrame(frame, FrameType::BEACON, 0, 0, data, length);
@@ -194,17 +231,29 @@ namespace NightMare
 
     bool beaconGatewayId(const Frame &beacon, char *out, size_t outSize)
     {
-        if (out == nullptr || outSize == 0 || beacon.header.length < 2)
+        if (out == nullptr || outSize == 0)
             return false;
-        const size_t count = beacon.data[0];
-        const size_t lengthOffset = 1 + count;
-        if (lengthOffset >= beacon.header.length)
+        size_t idOffset = 0;
+        size_t idLength = 0;
+        size_t generationOffset = 0;
+        if (!beaconVariableOffsets(beacon, idOffset, idLength, generationOffset))
             return false;
-        const size_t idLength = beacon.data[lengthOffset];
-        if (idLength == 0 || idLength >= outSize || lengthOffset + 1 + idLength > beacon.header.length)
+        if (idLength == 0 || idLength >= outSize)
             return false;
-        memcpy(out, beacon.data + lengthOffset + 1, idLength);
+        memcpy(out, beacon.data + idOffset, idLength);
         out[idLength] = '\0';
+        return true;
+    }
+
+    bool beaconGeneration(const Frame &beacon, uint64_t &out)
+    {
+        size_t idOffset = 0;
+        size_t idLength = 0;
+        size_t generationOffset = 0;
+        if (!beaconVariableOffsets(beacon, idOffset, idLength, generationOffset) ||
+            generationOffset + sizeof(out) > beacon.header.length)
+            return false;
+        memcpy(&out, beacon.data + generationOffset, sizeof(out));
         return true;
     }
 }

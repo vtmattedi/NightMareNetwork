@@ -167,12 +167,17 @@ namespace NightMare
     // Bytes to hand to esp_now_send() for a frame built above.
     inline size_t frameSize(const Frame &frame) { return FrameHeaderSize + frame.header.length; }
 
-    // Broadcast, plaintext, cid 0. Data: [count][EspNowFrameVersion...], the
-    // framing versions this gateway runs. No secret material.
+    // Broadcast, plaintext, cid 0. Data:
+    // [count][EspNowFrameVersion...][idLength][gatewayId][bootGeneration:8].
+    // The boot generation is created inside NMNW once per boot. It lets an
+    // already-connected client notice that its exact gateway restarted.
     Frame beaconFrame(const char *gatewayId = nullptr);
     // Whether a beacon's data lists `version`.
     bool beaconSupports(const Frame &beacon, EspNowFrameVersion version);
     // Optional stable gateway id appended after the version list. Empty means
     // an older gateway announcement; it is never authentication evidence.
     bool beaconGatewayId(const Frame &beacon, char *out, size_t outSize);
+    // Optional boot-unique generation appended by current gateways. False for
+    // a legacy or malformed beacon. This is public metadata, not authentication.
+    bool beaconGeneration(const Frame &beacon, uint64_t &out);
 }
