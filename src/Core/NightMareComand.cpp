@@ -1370,13 +1370,16 @@ void NightMareCommand_SerialResolver()
 {
     static std::string command;
     static bool configured = false;
+    static bool enabled = false;
     if (!configured)
     {
         const int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-        if (flags >= 0)
-            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        enabled = flags >= 0 &&
+                  fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == 0;
         configured = true;
     }
+    if (!enabled)
+        return;
     char next;
     while (read(STDIN_FILENO, &next, 1) == 1)
     {
