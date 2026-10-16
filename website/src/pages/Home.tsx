@@ -1,10 +1,33 @@
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Head } from "vite-react-ssg";
+import { ArrowRight, BookOpen, Boxes, CalendarDays, Fingerprint, Network, Terminal, type LucideIcon } from "lucide-react";
 import { Logo } from "../components/Logo";
 
 const MCP_URL = "https://nightmare.mattediworks.com/mcp";
 
 export function Home() {
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page || !window.IntersectionObserver || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const items = page.querySelectorAll<HTMLElement>("[data-reveal]");
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      }
+    }, { threshold: 0.08, rootMargin: "0px 0px -24px 0px" });
+
+    page.classList.add("motion-ready");
+    items.forEach((item) => observer.observe(item));
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
       <Head>
@@ -16,9 +39,11 @@ export function Home() {
         <meta property="og:title" content="NightMare Network" />
       </Head>
 
+      <div className="home-page" ref={pageRef}>
       <section className="hero">
         <div className="wrap hero-inner">
-          <Logo size={140} className="hero-logo" />
+          <Logo size={128} className="hero-logo" />
+          <p className="hero-wordmark">NightMare <span>Network</span></p>
           <h1>
             Build the device. <span className="accent">Share the language.</span>
           </h1>
@@ -50,7 +75,7 @@ export function Home() {
       </section>
 
       <section id="story" className="wrap story" aria-labelledby="story-title">
-        <div className="story-intro">
+        <div className="story-intro" data-reveal>
           <p className="eyebrow">The project so far</p>
           <h2 id="story-title">From repeated helpers to a common device language</h2>
           <p>
@@ -59,7 +84,7 @@ export function Home() {
           </p>
         </div>
         <ol className="story-steps">
-          <li>
+          <li data-reveal>
             <span className="story-number">01</span>
             <div>
               <h3>Helpers became a conversation</h3>
@@ -69,7 +94,7 @@ export function Home() {
               </p>
             </div>
           </li>
-          <li>
+          <li data-reveal>
             <span className="story-number">02</span>
             <div>
               <h3>MQTTP added replies</h3>
@@ -79,7 +104,7 @@ export function Home() {
               </p>
             </div>
           </li>
-          <li>
+          <li data-reveal>
             <span className="story-number">03</span>
             <div>
               <h3>Capabilities became explicit</h3>
@@ -90,10 +115,10 @@ export function Home() {
             </div>
           </li>
         </ol>
-        <Link to="/docs/overview">Read the full overview →</Link>
+        <Link to="/docs/overview" className="text-link">Read the full overview <ArrowRight size={17} aria-hidden="true" /></Link>
       </section>
 
-      <section className="wrap fit" aria-labelledby="fit-title">
+      <section className="wrap fit" aria-labelledby="fit-title" data-reveal>
         <div>
           <p className="eyebrow">The intended fit</p>
           <h2 id="fit-title">A quick start for the device you actually want to build</h2>
@@ -120,40 +145,40 @@ export function Home() {
       </section>
 
       <section className="wrap features">
-        <Feature title="Resources are the application contract" to="/docs/modules/resources">
+        <Feature icon={Boxes} title="Resources are the application contract" to="/docs/modules/resources">
           Expose typed Values, Actions and Events as <code>Managed</code> Resources, or bind{" "}
           <code>Remote</code> Resources implemented by another device. The framework handles
           manifests, retained state, subscriptions and reconnect.
         </Feature>
 
-        <Feature title="Identity and presence stay separate" to="/docs/protocols/status-info">
+        <Feature icon={Fingerprint} title="Identity and presence stay separate" to="/docs/protocols/status-info">
           Retained <code>status</code> carries logical name, physical hardware signature and
           online state. Resource freshness comes from each Value&apos;s retained{" "}
           <code>/state</code>, not from device presence.
         </Feature>
 
-        <Feature title="One command grammar, several transports" to="/docs/protocols/commands">
+        <Feature icon={Terminal} title="One command grammar, several transports" to="/docs/protocols/commands">
           The same command handler serves serial, the MQTT console, correlated MQTTP requests and
           persisted Scheduler command jobs.
         </Feature>
 
-        <Feature title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
+        <Feature icon={CalendarDays} title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
           Wall or monotonic, one-shot or recurring, <code>std::string</code> command or callback. USER jobs stay
           separate from MANAGED framework/application jobs.
         </Feature>
 
-        <Feature title="Local and remote MQTT are transport choices" to="/docs/modules/network">
+        <Feature icon={Network} title="Local and remote MQTT are transport choices" to="/docs/modules/network">
           Devices can use a Local MQTT cluster or Remote MQTT/backend services. Broker policy and
           transport failover stay independent of Resource ownership.
         </Feature>
 
-        <Feature title="Docs and source share one MCP" to="/docs/mcp">
+        <Feature icon={BookOpen} title="Docs and source share one MCP" to="/docs/mcp">
           The MCP server searches the same <code>docs/</code>, active <code>src/</code> and
           examples in the repository and stamps answers with the revision they came from.
         </Feature>
       </section>
 
-      <section className="wrap wire">
+      <section className="wrap wire" data-reveal>
         <h2>What goes on the wire</h2>
         <p>
           Device-scoped state is rooted under the logical device name. Descriptions and current
@@ -180,7 +205,7 @@ CONFIG MANIFEST → Base64 of the MessagePack Config declaration manifest`}</cod
         </p>
       </section>
 
-      <section className="wrap arch">
+      <section className="wrap arch" data-reveal>
         <h2>One repository, three consumers</h2>
         <pre className="code diagram">
           <code>{`                 NightMare Network repository
@@ -203,7 +228,7 @@ CONFIG MANIFEST → Base64 of the MessagePack Config declaration manifest`}</cod
       </section>
 
       <section className="wrap mcp-cta">
-        <div className="mcp-card">
+        <div className="mcp-card" data-reveal>
           <h2>Let your assistant read the source</h2>
           <p>
             A read-only Streamable HTTP MCP endpoint provides documentation search, exact API
@@ -217,21 +242,25 @@ CONFIG MANIFEST → Base64 of the MessagePack Config declaration manifest`}</cod
           </Link>
         </div>
       </section>
+      </div>
     </>
   );
 }
 
 function Feature({
+  icon: Icon,
   title,
   to,
   children,
 }: {
+  icon: LucideIcon;
   title: string;
   to: string;
   children: React.ReactNode;
 }) {
   return (
-    <Link to={to} className="feature">
+    <Link to={to} className="feature" data-reveal>
+      <Icon size={23} strokeWidth={1.8} className="feature-icon" aria-hidden="true" />
       <h3>{title}</h3>
       <p>{children}</p>
     </Link>
