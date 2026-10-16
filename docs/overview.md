@@ -214,7 +214,7 @@ Framework/application C++ jobs are `MANAGED`. Jobs created through the operator 
 
 This boundary matters: an operator can list, delete, or clear USER jobs without accidentally deleting framework jobs such as telemetry publication.
 
-Only wall-clock String command jobs persist across reboot. Callback pointers and monotonic deadlines are runtime state.
+Only wall-clock std::string command jobs persist across reboot. Callback pointers and monotonic deadlines are runtime state.
 
 ## Common ESP32 lifecycle
 

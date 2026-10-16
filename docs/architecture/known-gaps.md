@@ -121,7 +121,7 @@ Function pointers are runtime/firmware state and are never persisted.
 
 Even a wall-clock callback job disappears after reboot.
 
-Persisted scheduling is for wall-clock String command jobs only.
+Persisted scheduling is for wall-clock std::string command jobs only.
 
 ## Monotonic jobs do not survive reboot
 
@@ -183,11 +183,12 @@ presence, and it does not determine application Resource freshness.
 The current library metadata targets:
 
 ```text
-framework: Arduino
+framework: ESP-IDF or Arduino
 platform: espressif32
 ```
 
-The source also includes ESP32-specific APIs and FreeRTOS behavior.
+The source uses ESP32-specific APIs and FreeRTOS behavior. Only optional OTA
+requires Arduino; the core library builds under ESP-IDF.
 
 The feature system makes modules optional, but it is not yet a complete cross-platform abstraction.
 
@@ -212,7 +213,7 @@ Scheduler -> Settings
 Scheduler -> Console
 ```
 
-This reflects support for persisted wall jobs and String command dispatch.
+This reflects support for persisted wall jobs and std::string command dispatch.
 
 A callback-only Scheduler could theoretically operate without both dependencies, but the current feature graph does not expose that narrower configuration.
 
@@ -248,7 +249,7 @@ retried within a session after connection-level restoration.
 **Category:** Technical debt / platform limitation.
 
 WiFi orchestration uses `esp_wifi` and `esp_netif` directly, while time
-synchronization and OTA remain ESP32/Arduino-platform services. The persisted
+synchronization uses ESP-IDF SNTP, while OTA remains an Arduino service. The persisted
 profile still uses the existing settings conventions.
 
 They should be documented as platform services rather than treated as portable core abstractions.

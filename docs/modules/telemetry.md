@@ -56,10 +56,10 @@ enum class InfoType : uint8_t
 
 The subsection types are useful for queries even though they do not each have a retained MQTT topic.
 
-## String lookup
+## std::string lookup
 
 ```cpp
-InfoType getInfoType(const String &type);
+InfoType getInfoType(const std::string &type);
 ```
 
 Recognized names are case-insensitive:
@@ -75,7 +75,7 @@ NETWORK
 HEARTBEAT
 ```
 
-An empty String means:
+An empty std::string means:
 
 ```text
 INFO
@@ -95,7 +95,7 @@ Queries return:
 struct TelemetryResult
 {
     bool valid = false;
-    String data;
+    std::string data;
 };
 ```
 
@@ -169,7 +169,6 @@ firmware_version
 date
 time
 compiler
-arduino_version
 esp_idf_version
 features
 ```
@@ -250,7 +249,7 @@ Telemetry.publishInfo(InfoType::NETWORK);
 Telemetry.publishInfo(InfoType::HEARTBEAT);
 ```
 
-String forms are also available:
+std::string forms are also available:
 
 ```cpp
 Telemetry.publishInfo("SYSTEM");

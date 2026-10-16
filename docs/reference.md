@@ -34,7 +34,7 @@ Config-only include:
 ## Config
 
 Supported types are the built-in `NetCodec<T>` types: `bool`, integral types,
-floating-point types, `String`, `TimeType`, and `ColourType`.
+floating-point types, `std::string`, `TimeType`, and `ColourType`.
 
 ```cpp
 template <typename T>
@@ -45,7 +45,7 @@ public:
         bool (*)(Config<T> &config, const T &requested);
 
     Config(
-        const String &name,
+        const std::string &name,
         const T &defaultValue,
         bool requireReboot = false);
 
@@ -71,7 +71,7 @@ that value if storage cannot be updated.
 Metadata available through `ConfigBase`:
 
 ```cpp
-const String &name() const;
+const std::string &name() const;
 bool requiresReboot() const;
 NetValueType type() const;
 ```
@@ -80,7 +80,7 @@ Manager and handler:
 
 ```cpp
 using ConfigChangeHandler =
-    bool (*)(const String &key, const String &value);
+    bool (*)(const std::string &key, const std::string &value);
 
 ConfigManager &configManager();
 
@@ -88,10 +88,10 @@ bool bind(ConfigBase *config);
 bool unbind(ConfigBase *config);
 bool restore();
 bool restored() const;
-String handle(const String &command);
+std::string handle(const std::string &command);
 void setChangeHandler(ConfigChangeHandler handler);
 bool buildManifestMsgPack(uint8_t *buffer, size_t capacity, size_t &written) const;
-String buildManifestBase64() const;
+std::string buildManifestBase64() const;
 ```
 
 `bind()` and `unbind()` remain available for explicit runtime use and retain
@@ -102,7 +102,7 @@ before `bind()` returns; registration is rolled back if that initialization
 cannot complete.
 
 `handle("list")` returns JSON objects with `name`, `type`, `require_reboot`,
-and `value`. `value` is the Config's current canonical `NetCodec<T>` String
+and `value`. `value` is the Config's current canonical `NetCodec<T>` std::string
 encoding. The binary manifest remains declaration-only.
 
 Limits and manifest versions:
@@ -137,23 +137,23 @@ Main methods:
 ```cpp
 bool begin();
 
-const String &getDeviceName();
-const String &getDeviceId();
-const String &getHardwareSignature();
-const String &getTimezone();
+const std::string &getDeviceName();
+const std::string &getDeviceId();
+const std::string &getHardwareSignature();
+const std::string &getTimezone();
 
-bool isDevice(const String &topic);
-bool relativeTopic(const String &topic, String &relative);
-String topic(const String &relative);
+bool isDevice(const std::string &topic);
+bool relativeTopic(const std::string &topic, std::string &relative);
+std::string topic(const std::string &relative);
 
 void lockAddress();
 
-static bool validDeviceName(const String &name);
-static bool validTimezone(const String &timezone);
+static bool validDeviceName(const std::string &name);
+static bool validTimezone(const std::string &timezone);
 
-bool setTimezone(const String &timezone);
+bool setTimezone(const std::string &timezone);
 
-bool beginAdoption(const String &newName);
+bool beginAdoption(const std::string &newName);
 
 bool hasPendingIdentityCleanup();
 bool getPendingIdentityCleanup(PendingIdentityCleanup &cleanup);
@@ -300,7 +300,7 @@ enum HardwarePolicyFlag : uint8_t {
 struct HardwarePolicy {
     int32_t pollMs = 0;
     uint8_t flags = 0;
-    String note;
+    std::string note;
 };
 
 NetResourceHardwareNoteMaxLength = 64
@@ -319,13 +319,13 @@ RemoteSensor and RemoteState expose:
 
 ```cpp
 bool setSource(
-    const String &deviceName,
-    const String &resourceName);
+    const std::string &deviceName,
+    const std::string &resourceName);
 
 bool clearSource();
 ```
 
-The constructor taking one `String` declares the stable local name. Sources are
+The constructor taking one `std::string` declares the stable local name. Sources are
 stored by that name in `/remoteresources.json` and restored by
 `startNightMareESP()` before networking starts.
 
@@ -366,7 +366,7 @@ enum class NetValueType : uint8_t
 Built-in `NetCodec<T>` support:
 
 ```text
-String
+std::string
 bool
 integral types except bool
 floating-point types
@@ -382,7 +382,7 @@ TimeType(uint8_t hour, uint8_t minute, uint8_t second = 0);
 uint8_t hour() const;
 uint8_t minute() const;
 uint8_t second() const;
-String toString() const;
+std::string toString() const;
 ```
 
 Out-of-range constructor components produce `00:00:00`; `decodeTime()` instead
@@ -430,7 +430,7 @@ ActionArgMetadata(
 struct ActionResult
 {
     bool success;
-    String result;
+    std::string result;
 };
 ```
 
@@ -439,15 +439,15 @@ struct ActionResult
 Constructors:
 
 ```cpp
-ManagedAction(const String &resourceName);
+ManagedAction(const std::string &resourceName);
 
 template <size_t N>
 ManagedAction(
-    const String &resourceName,
+    const std::string &resourceName,
     const ActionArgMetadata (&args)[N]);
 
 ManagedAction(
-    const String &resourceName,
+    const std::string &resourceName,
     const ActionArgMetadata *args,
     size_t argCount);
 ```
@@ -456,7 +456,7 @@ Handler:
 
 ```cpp
 using Handler =
-    ActionResult (*)(ManagedAction &action, const String &payload);
+    ActionResult (*)(ManagedAction &action, const std::string &payload);
 
 Handler onInvoke;
 ```
@@ -464,7 +464,7 @@ Handler onInvoke;
 Execution:
 
 ```cpp
-ActionResult execute(const String &payload) override;
+ActionResult execute(const std::string &payload) override;
 ```
 
 ## RemoteAction
@@ -472,15 +472,15 @@ ActionResult execute(const String &payload) override;
 Common constructors:
 
 ```cpp
-RemoteAction(const String &localName);
+RemoteAction(const std::string &localName);
 
 RemoteAction(
-    const String &resourceName,
+    const std::string &resourceName,
     const NetDeviceIdentity &owner);
 
 template <size_t N>
 RemoteAction(
-    const String &resourceName,
+    const std::string &resourceName,
     const NetDeviceIdentity &owner,
     const ActionArgMetadata (&args)[N]);
 ```
@@ -491,12 +491,12 @@ Methods:
 
 ```cpp
 bool setSource(
-    const String &deviceName,
-    const String &resourceName);
+    const std::string &deviceName,
+    const std::string &resourceName);
 
 bool clearSource();
 
-bool invoke(const String &payload = String());
+bool invoke(const std::string &payload = std::string());
 ```
 
 ## NetEvent<T>
@@ -521,7 +521,7 @@ template <typename T>
 class ManagedEvent
 {
 public:
-    explicit ManagedEvent(const String &resourceName);
+    explicit ManagedEvent(const std::string &resourceName);
 
     using EventHandler =
         void (*)(ManagedEvent<T> &event, const T &payload);
@@ -537,7 +537,7 @@ public:
 `fire()` publishes `<device>/resource/<name>/event` with retain `false`. It
 returns `true` only when the connection accepted the publication; it returns
 `false` when unbound, when the payload encodes to an empty or over-2048-byte
-String, or when publication is refused. Equal payloads are separate occurrences.
+std::string, or when publication is refused. Equal payloads are separate occurrences.
 
 `onEvent` is a local listener: `fire()` calls it once for every valid occurrence
 after attempting the publication, whatever the publication's outcome and even
@@ -554,10 +554,10 @@ template <typename T>
 class RemoteEvent
 {
 public:
-    explicit RemoteEvent(const String &localName);
+    explicit RemoteEvent(const std::string &localName);
 
     RemoteEvent(
-        const String &resourceName,
+        const std::string &resourceName,
         const NetDeviceIdentity &owner);
 
     using EventHandler =
@@ -568,8 +568,8 @@ public:
     uint32_t lastUpdateMs() const;
 
     bool setSource(
-        const String &deviceName,
-        const String &resourceName);
+        const std::string &deviceName,
+        const std::string &resourceName);
 
     bool clearSource();
 };
@@ -588,25 +588,25 @@ occurrence, `0` before the first and again after `setSource()` or
 ## Resource topic helpers
 
 ```cpp
-const String &resolveResourceOwner(
+const std::string &resolveResourceOwner(
     const NetResource &resource);
 
-String resolveResourceManifestTopic(
-    const String &deviceName,
+std::string resolveResourceManifestTopic(
+    const std::string &deviceName,
     DocumentFormat format);
 
-String resolveDocumentTopic(
-    const String &deviceName,
-    const String &documentRoot,
+std::string resolveDocumentTopic(
+    const std::string &deviceName,
+    const std::string &documentRoot,
     DocumentFormat format);
 
-String resolveResourceTopic(
+std::string resolveResourceTopic(
     const NetResource &resource,
     ResourceTopicOperation operation);
 
-String resolveResourceTopic(
-    const String &deviceName,
-    const String &resourceName,
+std::string resolveResourceTopic(
+    const std::string &deviceName,
+    const std::string &resourceName,
     ResourceTopicOperation operation);
 ```
 
@@ -648,30 +648,30 @@ bool publishConsumeManifest();
 bool publishResourceStates();
 void subscribeAll();
 bool needsSubscription(
-    const String &topicFilter) const;
+    const std::string &topicFilter) const;
 
 bool handleIngressMessage(
-    const String &topic,
-    const String &message,
+    const std::string &topic,
+    const std::string &message,
     bool retained = false);
 
 using ManifestHandler =
-    void (*)(const String &deviceName, const String &manifest);
+    void (*)(const std::string &deviceName, const std::string &manifest);
 
 void setManifestHandler(ManifestHandler handler);
 
 using EncodedManifestHandler =
-    void (*)(const String &deviceName, const String &encoded);
+    void (*)(const std::string &deviceName, const std::string &encoded);
 
 void setEncodedManifestHandler(
     EncodedManifestHandler handler);
 
 static bool decodeManifest(
-    const String &encoded,
+    const std::string &encoded,
     JsonDocument &into);
 
 static bool decodeConsumeManifest(
-    const String &encoded,
+    const std::string &encoded,
     JsonDocument &into);
 
 constexpr uint8_t ConsumeManifestEncodingVersion = 3;
@@ -679,16 +679,16 @@ constexpr uint8_t ConsumeManifestVersion = 4;
 constexpr uint8_t ManifestEncodingVersion = 3;
 constexpr uint8_t ResourceManifestVersion = 6;
 
-String resolveResourceConsumeManifestTopic(
-    const String &deviceName,
+std::string resolveResourceConsumeManifestTopic(
+    const std::string &deviceName,
     DocumentFormat format);
 
 ActionResult executeAction(
     NetActionResource &action,
-    const String &canonicalPayload);
+    const std::string &canonicalPayload);
 
 ActionResult executeCommand(
-    const String &expression);
+    const std::string &expression);
 
 // Resource command grammar:
 //   >list
@@ -697,7 +697,7 @@ ActionResult executeCommand(
 //   >raw <topic> [payload]
 //   > <name|owner/name> [get|set|invoke|source|advertise|poll] [payload]
 
-bool withdrawIdentity(const String &oldDeviceName);
+bool withdrawIdentity(const std::string &oldDeviceName);
 ```
 
 Connection boundary:
@@ -707,8 +707,8 @@ class ResourcePublisher
 {
 public:
     virtual bool publish(
-        const String &topic,
-        const String &payload,
+        const std::string &topic,
+        const std::string &payload,
         bool retained) = 0;
 };
 
@@ -716,10 +716,10 @@ class ResourceSubscriber
 {
 public:
     virtual bool subscribe(
-        const String &topicFilter) = 0;
+        const std::string &topicFilter) = 0;
 
     virtual bool unsubscribe(
-        const String &topicFilter) = 0;
+        const std::string &topicFilter) = 0;
 };
 ```
 
@@ -800,51 +800,51 @@ Scheduling:
 
 ```cpp
 int32_t atWall(
-    const String &label,
-    const String &command,
+    const std::string &label,
+    const std::string &command,
     uint32_t epochSeconds,
     SchedulerJobScope scope = SchedulerJobScope::MANAGED);
 
 int32_t atWall(
-    const String &label,
+    const std::string &label,
     SchedulerCallback callback,
     uint32_t epochSeconds);
 
 int32_t after(
-    const String &label,
-    const String &command,
+    const std::string &label,
+    const std::string &command,
     uint32_t delayMs,
     SchedulerJobScope scope = SchedulerJobScope::MANAGED);
 
 int32_t after(
-    const String &label,
+    const std::string &label,
     SchedulerCallback callback,
     uint32_t delayMs);
 
 int32_t everyWall(
-    const String &label,
-    const String &command,
+    const std::string &label,
+    const std::string &command,
     uint32_t intervalSeconds,
     SchedulerJobScope scope = SchedulerJobScope::MANAGED);
 
 int32_t everyWall(
-    const String &label,
+    const std::string &label,
     SchedulerCallback callback,
     uint32_t intervalSeconds);
 
 int32_t everyMonotonic(
-    const String &label,
-    const String &command,
+    const std::string &label,
+    const std::string &command,
     uint32_t intervalMs,
     SchedulerJobScope scope = SchedulerJobScope::MANAGED);
 
 int32_t everyMonotonic(
-    const String &label,
+    const std::string &label,
     SchedulerCallback callback,
     uint32_t intervalMs);
 
 int32_t timer(
-    const String &label,
+    const std::string &label,
     SchedulerCallback callback,
     uint32_t intervalMs);
 
@@ -857,7 +857,7 @@ Management:
 
 ```cpp
 bool remove(
-    const String &label,
+    const std::string &label,
     SchedulerJobScope scope = SchedulerJobScope::MANAGED);
 
 bool remove(
@@ -866,7 +866,7 @@ bool remove(
 
 bool clear(SchedulerJobScope scope);
 
-String list(SchedulerJobScope scope);
+std::string list(SchedulerJobScope scope);
 ```
 
 Scheduler implementation constants:
@@ -911,7 +911,7 @@ Context:
 struct NightmareContext
 {
     CommandSource msgSource;
-    String sourceIdentifier;
+    std::string sourceIdentifier;
     void *userContext;
 };
 ```
@@ -922,7 +922,7 @@ Result:
 struct NightMareResults
 {
     bool result;
-    String response;
+    std::string response;
     NightmareContext context;
 };
 ```
@@ -932,12 +932,12 @@ Parsed message:
 ```cpp
 struct NightMareMessage
 {
-    String command;
-    String subcommand;
-    String args[NM_MAX_ARGS];
+    std::string command;
+    std::string subcommand;
+    std::string args[NM_MAX_ARGS];
     uint8_t argc;
     bool valid;
-    String error;
+    std::string error;
 };
 ```
 
@@ -956,27 +956,25 @@ void setCommandResolver(
         const NightMareMessage &message));
 
 NightMareMessage parseNightMareMessage(
-    const String &message);
+    const std::string &message);
 
 NightMareMessage parseNightMareMessage2(
-    const String &message);
+    const std::string &message);
 
 bool ensureSize(
-    const String &str,
+    const std::string &str,
     size_t maxLength,
-    String &error);
+    std::string &error);
 
 NightMareResults handleNightMareCommand(
-    const String &message,
+    const std::string &message,
     NightmareContext context = NightmareContext());
 ```
 
 When serial console is enabled:
 
 ```cpp
-void NightMareCommand_SerialResolver(
-    SERIALTYPE *serial,
-    char readUntilChar = '\n');
+void NightMareCommand_SerialResolver();
 ```
 
 ## RuntimeState
@@ -994,31 +992,31 @@ Methods:
 
 ```cpp
 bool set(
-    const String &key,
-    const String &value);
+    const std::string &key,
+    const std::string &value);
 
-String get(
-    const String &key,
-    const String &defaultValue = "") const;
+std::string get(
+    const std::string &key,
+    const std::string &defaultValue = "") const;
 
 bool setFlag(
-    const String &key,
+    const std::string &key,
     bool value);
 
 bool getFlag(
-    const String &key) const;
+    const std::string &key) const;
 
 bool exists(
-    const String &key) const;
+    const std::string &key) const;
 
 bool remove(
-    const String &key);
+    const std::string &key);
 
 void clear();
 
 size_t size() const;
 
-String toJson() const;
+std::string toJson() const;
 ```
 
 ## SystemState
@@ -1096,24 +1094,24 @@ bool load();
 bool save();
 
 bool set(
-    const String &key,
-    const String &value) override;
+    const std::string &key,
+    const std::string &value) override;
 
-String get(
-    const String &key,
-    const String &defaultValue = "") const override;
+std::string get(
+    const std::string &key,
+    const std::string &defaultValue = "") const override;
 
 bool exists(
-    const String &key) const override;
+    const std::string &key) const override;
 
 bool remove(
-    const String &key) override;
+    const std::string &key) override;
 
 void clear() override;
 void clear(bool saveChanges);
 
 size_t size() const override;
-String toJson() const override;
+std::string toJson() const override;
 ```
 
 Current persistent file:
@@ -1178,11 +1176,11 @@ The component accessors are UTC.
 Local/human formatting:
 
 ```cpp
-String timestampToDateString(time_t timestamp, TimeStampFormat format = DateAndTime);
-String timeString(time_t timestamp = now());
-String fullTimeString(time_t timestamp = now());
-String dateString(time_t timestamp = now());
-time_t timestampOfNextOccurrence(const String &timeString);
+std::string timestampToDateString(time_t timestamp, TimeStampFormat format = DateAndTime);
+std::string timeString(time_t timestamp = now());
+std::string fullTimeString(time_t timestamp = now());
+std::string dateString(time_t timestamp = now());
+time_t timestampOfNextOccurrence(const std::string &timeString);
 ```
 
 See [Time](modules/time.md).
@@ -1234,7 +1232,7 @@ enum class InfoType
 struct TelemetryResult
 {
     bool valid;
-    String data;
+    std::string data;
 };
 
 ```
@@ -1242,7 +1240,7 @@ struct TelemetryResult
 API:
 
 ```cpp
-InfoType getInfoType(const String &type);
+InfoType getInfoType(const std::string &type);
 
 bool Telemetry.start();
 
@@ -1250,18 +1248,18 @@ TelemetryResult Telemetry.getInfo(
     InfoType type = InfoType::INFO) const;
 
 TelemetryResult Telemetry.getInfo(
-    const String &type) const;
+    const std::string &type) const;
 
 bool Telemetry.publishInfo(
     InfoType type = InfoType::INFO);
 
 bool Telemetry.publishInfo(
-    const String &type);
+    const std::string &type);
 
 TelemetryResult Telemetry.getHardware() const;
 TelemetryResult Telemetry.getHardwareMessagePack() const;
 static bool TelemetryService::decodeHardware(
-    const String &encoded,
+    const std::string &encoded,
     JsonDocument &into);
 bool Telemetry.publishHardware();
 

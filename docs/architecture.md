@@ -151,7 +151,7 @@ It also does not own the Resources themselves. The application owns the Resource
 parameters. The application owns each `Config<T>`; construction registers a
 non-owning pointer with the function-local global manager and destruction
 unregisters it. The manager provides `list`, `get`, `set`, and `manifest`
-String ingress plus a compact MessagePack declaration manifest.
+std::string ingress plus a compact MessagePack declaration manifest.
 
 It has no connection to `ResourcesManager` or MQTT. The command layer routes
 its `CONFIG ...` namespace to `configManager().handle(...)`; ConfigManager
@@ -374,7 +374,7 @@ MANUAL
     cooperative code services tick()
 ```
 
-Only wall-clock String command jobs are persisted. Runtime callback pointers and monotonic deadlines are not.
+Only wall-clock std::string command jobs are persisted. Runtime callback pointers and monotonic deadlines are not.
 
 USER jobs are the operator-visible subset. MANAGED jobs are protected from `JOB LIST`, `JOB DELETE`, and `JOB CLEAR`.
 
@@ -530,7 +530,7 @@ This is an example of the project's â€œregister once, participate automaticallyâ
 
 ## Identity adoption and cleanup
 
-Changing a device name is treated as a migration rather than a simple String assignment.
+Changing a device name is treated as a migration rather than a simple std::string assignment.
 
 The new name is persisted, while the old name and the cleanup work still required are remembered.
 

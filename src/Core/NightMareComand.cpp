@@ -832,7 +832,7 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
                 if (NightMare::Storage::exists(filename))
                 {
                     std::string file;
-                    if (NightMare::Storage::read(filename, file, FS_LIST_JSON_CAPACITY))
+                    if (NightMare::Storage::read(filename, file, SIZE_MAX))
                     {
                         result.response = file;
                         result.result = true;

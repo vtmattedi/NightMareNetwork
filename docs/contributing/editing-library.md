@@ -117,7 +117,7 @@ Callback jobs are not persisted.
 
 Monotonic jobs are not persisted.
 
-Only supported wall-clock String command jobs survive reboot.
+Only supported wall-clock std::string command jobs survive reboot.
 
 ### Cluster and namespace are different
 

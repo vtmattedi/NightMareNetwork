@@ -10,11 +10,12 @@ order: 70
 The active NightMare implementation targets:
 
 ```text
-Arduino
+ESP-IDF or Arduino
 ESP32 / espressif32
 ```
 
-The core abstractions are kept reasonably separate, but several platform services still use ESP32, Arduino, FreeRTOS, LittleFS, and `esp_mqtt_client` directly.
+Non-OTA modules use ESP-IDF, FreeRTOS, SPIFFS, and `esp_mqtt_client` directly.
+The optional OTA module uses ArduinoOTA and requires the Arduino framework.
 
 The main project-facing lifecycle is:
 
@@ -649,7 +650,7 @@ Current platform-specific dependencies include:
 ```text
 ESP hardware APIs
 FreeRTOS
-LittleFS
+ESP-IDF SPIFFS
 esp_wifi / esp_netif
 esp_mqtt_client
 ArduinoOTA

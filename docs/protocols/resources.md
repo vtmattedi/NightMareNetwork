@@ -438,7 +438,7 @@ colour
 The built-in `NetCodec<T>` implementations currently cover:
 
 ```text
-String
+std::string
 bool
 integral C++ types
 floating-point C++ types
@@ -448,7 +448,7 @@ ColourType
 
 `struct` exists in the wire taxonomy and Action argument metadata, but there is no generic built-in `NetCodec<T>` that silently serializes arbitrary C++ structs.
 
-Unsupported Value C++ types fail at the codec boundary rather than degrading to String.
+Unsupported Value C++ types fail at the codec boundary rather than degrading to std::string.
 
 ## Value state
 
@@ -510,9 +510,9 @@ Examples may look like:
 
 Decoding uses the whole payload as one floating-point number; trailing text is rejected.
 
-### String
+### std::string
 
-The payload is the raw String.
+The payload is the raw std::string.
 
 Example:
 
@@ -522,7 +522,7 @@ cool
 
 There is no JSON quoting added by the Resource protocol.
 
-An empty String is not a valid Resource String value because the empty MQTT payload is reserved as the retained deletion marker.
+An empty std::string is not a valid Resource std::string value because the empty MQTT payload is reserved as the retained deletion marker.
 
 ### Time
 
@@ -811,7 +811,7 @@ The default is:
 NM_ENABLE_ACTION_PAYLOAD_ASSERTION 0
 ```
 
-The canonical payload String is passed to the ManagedAction handler without generic schema validation.
+The canonical payload std::string is passed to the ManagedAction handler without generic schema validation.
 
 ### With payload assertion enabled
 
@@ -870,7 +870,7 @@ A ManagedAction returns:
 struct ActionResult
 {
     bool success;
-    String result;
+    std::string result;
 };
 ```
 
@@ -915,7 +915,7 @@ request id:
 bool      true
 integer   42
 float     23.5
-String    raw string
+std::string    raw string
 custom T  the custom NetCodec<T> encoding
 ```
 

@@ -171,7 +171,7 @@ The payload uses the same Value codec representation as `/state`.
 
 Transient Action request.
 
-The payload is passed to the Action as its canonical payload String. Schema-based Actions normally use a JSON object payload, but payload validation is optional at compile time.
+The payload is passed to the Action as its canonical payload std::string. Schema-based Actions normally use a JSON object payload, but payload validation is optional at compile time.
 
 There is no Resource result topic.
 

@@ -27,7 +27,7 @@ application                     connection
 NetValue<T>
     │  NetCodec<T>
     ▼
-encoded String  ───────────────> MQTT
+encoded std::string  ───────────────> MQTT
 ```
 
 `ResourcesManager` never needs to know the application's `T`.
@@ -665,7 +665,7 @@ The schema must outlive the Action, so static/global arrays are the normal sourc
 Install a handler:
 
 ```cpp
-ActionResult onSetTimer(ManagedAction &action, const String &payload)
+ActionResult onSetTimer(ManagedAction &action, const std::string &payload)
 {
     // Parse the canonical payload as required by the application.
     return {true, "timer accepted"};
@@ -692,7 +692,7 @@ Managed Action execution returns:
 struct ActionResult
 {
     bool success;
-    String result;
+    std::string result;
 };
 ```
 
@@ -916,10 +916,10 @@ is state, not an Event.
 ### Payloads
 
 Events use the library's `NetCodec<T>`, exactly as Values do, so `bool`, integer,
-floating-point, `String`, `TimeType` and `ColourType` payloads are supported and
+floating-point, `std::string`, `TimeType` and `ColourType` payloads are supported and
 an unsupported `T` fails to compile. Applications do not define their own codecs
 (see [Applications do not define Value types](#applications-do-not-define-value-types)); to carry
-several fields, fire a JSON object in a `ManagedEvent<String>`. Unlike a Value,
+several fields, fire a JSON object in a `ManagedEvent<std::string>`. Unlike a Value,
 an Event is never decoded from or published as an empty payload.
 
 ### When not to use an Event
@@ -938,7 +938,7 @@ Built-in `NetCodec<T>` support currently covers:
 bool
 integral types
 floating-point types
-String
+std::string
 TimeType
 ColourType
 ```
@@ -969,7 +969,7 @@ backend tooling) has to agree on its encoding and its `NetValueType` number, so 
 one project would have to be declared everywhere, and a mismatch silently corrupts payloads.
 
 Unsupported C++ Value types therefore fail to compile, and that is the intended answer. To carry a
-structured reading, publish a generic struct: a JSON object in a `ManagedSensor<String>`. It
+structured reading, publish a generic struct: a JSON object in a `ManagedSensor<std::string>`. It
 travels as a `string`, the library neither validates nor interprets its fields, and the consumer is
 responsible for decoding it. Document the fields next to the Resource declaration, and add fields
 rather than changing existing ones so older consumers keep working.
@@ -984,7 +984,7 @@ For a **Value**:
 empty payload = retained deletion / unavailable state
 ```
 
-Therefore an empty String cannot be a valid Resource String value.
+Therefore an empty std::string cannot be a valid Resource std::string value.
 
 For an **Action**:
 
@@ -1159,7 +1159,7 @@ The `ResourcePublisher` / `ResourceSubscriber` adapter is injected by
 Discovery/tooling code can observe valid manifests:
 
 ```cpp
-void manifestReceived(const String &deviceName, const String &manifest)
+void manifestReceived(const std::string &deviceName, const std::string &manifest)
 {
     // inspect/update application discovery state
 }
@@ -1167,7 +1167,7 @@ void manifestReceived(const String &deviceName, const String &manifest)
 gResourcesManager.setManifestHandler(manifestReceived);
 ```
 
-The callback also receives an empty String for a valid retained manifest withdrawal.
+The callback also receives an empty std::string for a valid retained manifest withdrawal.
 
 Malformed manifests are not delivered to the handler.
 

@@ -6,7 +6,7 @@
 #include <type_traits>
 #include <new>
 #include <utility>
-#include <LittleFS.h>
+#include <Core/Storage.h>
 
 namespace
 {
@@ -70,7 +70,7 @@ static_assert(!HasFreshnessField<RemoteSensor<int>>::value,
 static_assert(!HasEncodedValue<ManagedSensor<int>>::value, "wire encoding is framework-internal");
 static_assert(!HasAdvertisementApi<ManagedSensor<int>>::value,
               "advertisement policy must remain manager-internal");
-static_assert(!std::is_constructible<NetValue<int>, const String &>::value,
+static_assert(!std::is_constructible<NetValue<int>, const std::string &>::value,
               "NetValue is an implementation base, not an application resource");
 static_assert(static_cast<uint8_t>(NightMare::ConnectionType::AUTO) == 0,
               "ConnectionType persistence values must remain stable");
@@ -119,9 +119,9 @@ RemoteAction remoteAction("outside_action");
 class RecordingPublisher : public ResourcePublisher
 {
 public:
-    bool publish(const String &topic, const String &payload, bool retained) override
+    bool publish(const std::string &topic, const std::string &payload, bool retained) override
     {
-        if (topic.endsWith("/state"))
+        if (NightMare::Text::endsWith(topic, "/state"))
         {
             ++stateAttempts;
             lastStateTopic = topic;
@@ -131,18 +131,18 @@ public:
                 return false;
             ++statePublishes;
         }
-        if (topic.endsWith("/manifest/msgpack") || topic.endsWith("/manifest/json"))
+        if (NightMare::Text::endsWith(topic, "/manifest/msgpack") || NightMare::Text::endsWith(topic, "/manifest/json"))
         {
             ++manifestAttempts;
-            if (failManifest || (failJsonDocuments && topic.endsWith("/json")))
+            if (failManifest || (failJsonDocuments && NightMare::Text::endsWith(topic, "/json")))
                 return false;
             ++manifestPublishes;
-            if (topic.endsWith("/manifest/msgpack"))
+            if (NightMare::Text::endsWith(topic, "/manifest/msgpack"))
                 lastManifestPacked = payload;
             else
                 lastManifestJson = payload;
         }
-        if (topic.endsWith("/manifest/consume/json"))
+        if (NightMare::Text::endsWith(topic, "/manifest/consume/json"))
         {
             ++consumeJsonPublishes;
             if (failJsonDocuments)
@@ -150,16 +150,16 @@ public:
             lastConsumeJson = payload;
             consumeWasRetained = retained;
         }
-        else if (topic.endsWith("/manifest/consume/msgpack"))
+        else if (NightMare::Text::endsWith(topic, "/manifest/consume/msgpack"))
         {
             ++consumePackedPublishes;
             lastConsumePacked = payload;
             consumeWasRetained = retained;
         }
-        if (topic.endsWith("/manifest") || topic.endsWith("/manifest/consume") ||
-            topic.endsWith("/hardware"))
+        if (NightMare::Text::endsWith(topic, "/manifest") || NightMare::Text::endsWith(topic, "/manifest/consume") ||
+            NightMare::Text::endsWith(topic, "/hardware"))
             ++bareDocumentPublishes;
-        if (topic.endsWith("/event"))
+        if (NightMare::Text::endsWith(topic, "/event"))
         {
             ++eventAttempts;
             lastEventTopic = topic;
@@ -177,14 +177,14 @@ public:
     int eventPublishes = 0;
     int eventRetained = 0;
     bool failEvent = false;
-    String lastEventTopic;
-    String lastEventPayload;
-    String lastConsumePacked;
+    std::string lastEventTopic;
+    std::string lastEventPayload;
+    std::string lastConsumePacked;
 
     int consumeJsonPublishes = 0;
     int consumePackedPublishes = 0;
     bool consumeWasRetained = false;
-    String lastConsumeJson;
+    std::string lastConsumeJson;
     int stateAttempts = 0;
     int statePublishes = 0;
     bool stateWasRetained = false;
@@ -193,10 +193,10 @@ public:
     int manifestPublishes = 0;
     bool failManifest = false;
     bool failJsonDocuments = false;
-    String lastManifestJson;
-    String lastManifestPacked;
-    String lastStateTopic;
-    String lastStatePayload;
+    std::string lastManifestJson;
+    std::string lastManifestPacked;
+    std::string lastStateTopic;
+    std::string lastStatePayload;
     int bareDocumentPublishes = 0;
 };
 
@@ -205,13 +205,13 @@ public:
 class RecordingSubscriber : public ResourceSubscriber
 {
 public:
-    bool subscribe(const String &filter) override
+    bool subscribe(const std::string &filter) override
     {
         subscribed += filter;
         subscribed += '|';
         return true;
     }
-    bool unsubscribe(const String &filter) override
+    bool unsubscribe(const std::string &filter) override
     {
         unsubscribed += filter;
         unsubscribed += '|';
@@ -222,17 +222,17 @@ public:
         subscribed = "|";
         unsubscribed = "|";
     }
-    bool subscribedTo(const String &filter) const
+    bool subscribedTo(const std::string &filter) const
     {
-        return subscribed.indexOf(String("|") + filter + "|") >= 0;
+        return subscribed.find(std::string("|") + filter + "|") != std::string::npos;
     }
-    bool unsubscribedFrom(const String &filter) const
+    bool unsubscribedFrom(const std::string &filter) const
     {
-        return unsubscribed.indexOf(String("|") + filter + "|") >= 0;
+        return unsubscribed.find(std::string("|") + filter + "|") != std::string::npos;
     }
 
-    String subscribed = "|";
-    String unsubscribed = "|";
+    std::string subscribed = "|";
+    std::string unsubscribed = "|";
 };
 
 int localEventCalls = 0;
@@ -245,7 +245,7 @@ void recordLocalEvent(ManagedEvent<uint32_t> &, const uint32_t &payload)
     lastLocalEvent = payload;
 }
 
-void countStringEvent(ManagedEvent<String> &, const String &)
+void countStringEvent(ManagedEvent<std::string> &, const std::string &)
 {
     ++stringEventCalls;
 }
@@ -262,14 +262,14 @@ void recordEvent(RemoteEvent<uint32_t> &, const uint32_t &payload)
 bool manifestHasResource(JsonVariantConst manifest, const char *name)
 {
     for (JsonVariantConst resource : manifest["resources"].as<JsonArrayConst>())
-        if (resource["name"].as<String>() == name)
+        if (resource["name"].as<std::string>() == name)
             return true;
     return false;
 }
 
 int writeCalls = 0;
 int applicationMessageCalls = 0;
-String applicationMessageTopic;
+std::string applicationMessageTopic;
 uint8_t applicationMessagePayload[3] = {};
 size_t applicationMessageLength = 0;
 bool applicationMessageRetained = false;
@@ -348,22 +348,22 @@ void setup()
     const NightMareResults oldSet = handleNightMareCommand("NETWORK SET MQTT");
     const NightMareResults oldIp = handleNightMareCommand("NETWORK IP");
     const bool connectivityCommands =
-        networkGet.result && networkGet.response.indexOf("\"transport\"") >= 0 &&
-        networkGet.response.indexOf("\"wifi_radio\"") >= 0 &&
-        networkGet.response.indexOf("\"wifi_ip\"") >= 0 &&
-        networkGet.response.indexOf("\"esp_now\"") >= 0 &&
-        networkGet.response.indexOf("\"mqtt\"") >= 0 &&
-        networkGet.response.indexOf("\"gateway_candidate\"") >= 0 &&
+        networkGet.result && networkGet.response.find("\"transport\"") != std::string::npos &&
+        networkGet.response.find("\"wifi_radio\"") != std::string::npos &&
+        networkGet.response.find("\"wifi_ip\"") != std::string::npos &&
+        networkGet.response.find("\"esp_now\"") != std::string::npos &&
+        networkGet.response.find("\"mqtt\"") != std::string::npos &&
+        networkGet.response.find("\"gateway_candidate\"") != std::string::npos &&
         !mqttDependency.result &&
-        mqttDependency.response.indexOf("wifi_ip_disabled") >= 0 &&
+        mqttDependency.response.find("wifi_ip_disabled") != std::string::npos &&
         preferenceOnly.result &&
         NightMare::WiFiIP_enabled() == wifiBeforeTransport &&
         NightMare::Mqtt_enabled() == mqttBeforeTransport &&
 #if NM_NETWORK_ESPNOW
         NightMare::EspNow_enabled() == espNowBeforeTransport &&
 #endif
-        !oldSet.result && oldSet.response.indexOf("unknown_network_command") >= 0 &&
-        !oldIp.result && oldIp.response.indexOf("unknown_network_command") >= 0;
+        !oldSet.result && oldSet.response.find("unknown_network_command") != std::string::npos &&
+        !oldIp.result && oldIp.response.find("unknown_network_command") != std::string::npos;
     smokeState.setFlag("connectivity_commands", connectivityCommands);
     NightMare::GatewayCandidateStatus candidate;
     candidate.known = true;
@@ -435,8 +435,8 @@ void setup()
     gResourcesManager.bindResource(&managedAction);
     gResourcesManager.bindResource(&remoteAction);
     NightMare::OnMessage(recordApplicationMessage);
-    String binaryPayload;
-    binaryPayload.concat("A\0B", 3);
+    std::string binaryPayload;
+    binaryPayload.append("A\0B", 3);
     const bool applicationMessageRouted =
         NmMessageRouter::handleMessage("application/binary", binaryPayload, true);
     const int callsBeforeFrameworkMessage = applicationMessageCalls;
@@ -468,13 +468,13 @@ void setup()
     consumeValue.add("temperature");
     consumeValue.add(static_cast<uint8_t>(AccessPolicy::READ));
     consumeValue.add(static_cast<uint8_t>(NetValueType::INTEGER));
-    String encodedConsume;
+    std::string encodedConsume;
     serializeMsgPack(consumePacked, encodedConsume);
     JsonDocument decodedConsume;
     const bool consumeCodecWorks =
         ResourcesManager::decodeConsumeManifest(encodedConsume, decodedConsume) &&
         decodedConsume["version"].as<int>() == ConsumeManifestVersion &&
-        decodedConsume["remotes"][0]["device"].as<String>() == "outside-node" &&
+        decodedConsume["remotes"][0]["device"].as<std::string>() == "outside-node" &&
         decodedConsume["remotes"][0]["bound"].as<bool>() &&
         decodedConsume["consumes"].isNull() &&
         resolveResourceConsumeManifestTopic("smoke", DocumentFormat::MSGPACK) ==
@@ -493,12 +493,12 @@ void setup()
     const bool boundPublished = ResourcesManager::decodeConsumeManifest(
         consumePublisher.lastConsumePacked, boundConsume) &&
         boundConsume["remotes"][0]["bound"].as<bool>() &&
-        boundConsume["remotes"][0]["device"].as<String>() == "weather-node";
+        boundConsume["remotes"][0]["device"].as<std::string>() == "weather-node";
     consumed.setSource("relay-node", "target");
     JsonDocument retargetConsume;
     const bool retargetPublished = ResourcesManager::decodeConsumeManifest(
         consumePublisher.lastConsumePacked, retargetConsume) &&
-        retargetConsume["remotes"][0]["device"].as<String>() == "relay-node";
+        retargetConsume["remotes"][0]["device"].as<std::string>() == "relay-node";
     consumeManager.unbindResource(&consumed);
     JsonDocument unboundConsume;
     const bool unbindPublished = ResourcesManager::decodeConsumeManifest(
@@ -518,9 +518,9 @@ void setup()
     const ActionResult timeValue = gResourcesManager.executeCommand(" managed_time");
     const ActionResult colourValue = gResourcesManager.executeCommand(" managed_colour");
     const ActionResult customManifest = gResourcesManager.executeCommand("manifest json");
-    const bool resourceCommandsWork = list.success && list.result.startsWith("TYPE") &&
-                                      list.result.indexOf("VALUE") >= 0 &&
-                                      list.result.indexOf("outside_temperature") >= 0 &&
+    const bool resourceCommandsWork = list.success && NightMare::Text::startsWith(list.result, "TYPE") &&
+                                      list.result.find("VALUE") != std::string::npos &&
+                                      list.result.find("outside_temperature") != std::string::npos &&
                                       local.success && local.result == "18" &&
                                       qualified.success && qualified.result == "18";
     const NightMareResults invalidResourceAdvertisement =
@@ -537,10 +537,10 @@ void setup()
                                      timeValue.success && timeValue.result == "08:30:15" &&
                                      colourValue.success && colourValue.result == "4278190335" &&
                                      customManifest.success &&
-                                     customManifest.result.indexOf("\"type\":\"time\"") >= 0 &&
-                                     customManifest.result.indexOf("\"type\":\"colour\"") >= 0 &&
-                                     customManifest.result.indexOf(
-                                         "\"advertise_ms\":300000") >= 0;
+                                     customManifest.result.find("\"type\":\"time\"") != std::string::npos &&
+                                     customManifest.result.find("\"type\":\"colour\"") != std::string::npos &&
+                                     customManifest.result.find(
+                                         "\"advertise_ms\":300000") != std::string::npos;
 
     ResourcesManager advertisementManager;
     RecordingPublisher advertisementPublisher;
@@ -552,9 +552,9 @@ void setup()
     JsonDocument legacySettings;
     legacySettings["advertisement:primary"]["enabled"] = true;
     legacySettings["advertisement:primary"]["period"] = 5;
-    File legacyFile = LittleFS.open("/resourcesettings.json", "w");
-    const bool legacyWritten = legacyFile && serializeJson(legacySettings, legacyFile) != 0;
-    legacyFile.close();
+    std::string legacyFile;
+    const bool legacyWritten = serializeJson(legacySettings, legacyFile) != 0 &&
+        NightMare::Storage::write("/resourcesettings.json", legacyFile);
     const bool legacyMigrated = legacyWritten && advertisementManager.loadResourceSettings() &&
         advertisementManager.executeCommand(" advertisement:primary advertise").result == "5000";
     const int beforeInitialState = advertisementPublisher.statePublishes;
@@ -593,7 +593,7 @@ void setup()
     ownerValue.add(nullptr);
     ownerValue.add(5000);
     ownerValue.add(nullptr);
-    String encodedOwnerManifest;
+    std::string encodedOwnerManifest;
     serializeMsgPack(ownerManifest, encodedOwnerManifest);
     ResourcesManager freshnessManager;
     RemoteSensor<int> freshnessRemote("temperature", NetDeviceIdentity("freshness-node"));
@@ -730,7 +730,7 @@ void setup()
         ResourcesManager::decodeManifest(hardwarePublisher.lastManifestPacked,
                                          decodedHardwareManifest) &&
         decodedHardwareManifest["version"].as<int>() == ResourceManifestVersion &&
-        decodedHardwareManifest["resources"][1]["hardware"]["note"].as<String>() ==
+        decodedHardwareManifest["resources"][1]["hardware"]["note"].as<std::string>() ==
             "Address: 0x48";
     const bool hardwarePolicyWorks = hardwareDeclared && hardwareBound &&
         connectionDefaultsConnected && connectionReporting &&
@@ -740,11 +740,11 @@ void setup()
         pollReset.success && hardwareSensor.hardwareEnabled() &&
         hardwareSensor.hardwarePollMs() == 1000 &&
         hardwareManifest.success && packedHardwareDecoded &&
-        hardwareManifest.result.indexOf("\"poll_ms\":1000") >= 0 &&
-        hardwareManifest.result.indexOf("\"flags\":7") >= 0 &&
-        hardwareManifest.result.indexOf("\"connected\":true") >= 0 &&
-        hardwareManifest.result.indexOf("\"note\":\"Address: 0x48\"") >= 0 &&
-        hardwareManifest.result.indexOf("\"name\":\"plain_sensor\",\"kind\":\"value\",\"access\":\"read\",\"type\":\"integer\",\"advertise_ms\":300000,\"hardware\"") < 0;
+        hardwareManifest.result.find("\"poll_ms\":1000") != std::string::npos &&
+        hardwareManifest.result.find("\"flags\":7") != std::string::npos &&
+        hardwareManifest.result.find("\"connected\":true") != std::string::npos &&
+        hardwareManifest.result.find("\"note\":\"Address: 0x48\"") != std::string::npos &&
+        hardwareManifest.result.find("\"name\":\"plain_sensor\",\"kind\":\"value\",\"access\":\"read\",\"type\":\"integer\",\"advertise_ms\":300000,\"hardware\"") == std::string::npos;
 
     const bool advertisementLifecycle = advertisementBound && immediateAdvertisement &&
         legacyMigrated && periodSet.success &&
@@ -768,13 +768,13 @@ void setup()
                                             resourceErrorsAreExternal && consumeLifecycleWorks &&
                                             customResourcesWork &&
                                             advertisementLifecycle);
-    const String timezone = gDeviceIdentity.getTimezone();
+    const std::string timezone = gDeviceIdentity.getTimezone();
     const NightMareResults timezoneQuery = handleNightMareCommand("TIMEZONE");
     const NightMareResults timezoneSet =
-        handleNightMareCommand(String("TIMEZONE SET \"") + timezone + "\"");
+        handleNightMareCommand(std::string("TIMEZONE SET \"") + timezone + "\"");
     const NightMareResults invalidAdopt = handleNightMareCommand("CHANGE NAME all");
     smokeState.setFlag("identity_commands",
-                        timezoneQuery.result && timezoneQuery.response.indexOf(timezone) >= 0 &&
+                        timezoneQuery.result && timezoneQuery.response.find(timezone) != std::string::npos &&
                             timezoneSet.result && gDeviceIdentity.getTimezone() == timezone &&
                             !invalidAdopt.result);
     const NMHardware::Profile profile = NMHardware::getProfile();
@@ -965,7 +965,7 @@ void setup()
     JsonDocument decodedHardware;
     const bool hardwareDecoded = packedHardware.valid &&
         TelemetryService::decodeHardware(packedHardware.data, decodedHardware);
-    String decodedHardwareJson;
+    std::string decodedHardwareJson;
     serializeJson(decodedHardware, decodedHardwareJson);
     JsonDocument badHardwareVersion;
     JsonArray badVersionRoot = badHardwareVersion.to<JsonArray>();
@@ -975,14 +975,14 @@ void setup()
     badVersionRoot.add<JsonArray>();
     badVersionRoot.add<JsonArray>();
     badVersionRoot.add<JsonArray>();
-    String badVersionPayload;
+    std::string badVersionPayload;
     serializeMsgPack(badHardwareVersion, badVersionPayload);
     JsonDocument malformedHardware;
     JsonArray malformedRoot = malformedHardware.to<JsonArray>();
     malformedRoot.add(NMHardware::HardwareEncodingVersion);
     malformedRoot.add(NMHardware::HwConfigVersion);
     malformedRoot.add("main");
-    String malformedPayload;
+    std::string malformedPayload;
     serializeMsgPack(malformedHardware, malformedPayload);
     JsonDocument rejectedHardware;
     const bool hardwareFailuresSafe =
@@ -1003,27 +1003,27 @@ void setup()
                             illegalGraphRejected &&
                             hardware.valid && hardwareDecoded && hardwareFailuresSafe &&
                             decodedHardwareJson == hardware.data &&
-                            hardware.data.indexOf("esp32-devkit:test") >= 0 &&
-                            hardware.data.indexOf("\"version\":2") >= 0 &&
-                            hardware.data.indexOf("\"host_assembly\":\"controller\"") >= 0 &&
-                            hardware.data.indexOf("\"definitions\"") >= 0 &&
-                            hardware.data.indexOf("\"kind\":\"sensor_probe\"") >= 0 &&
-                            hardware.data.indexOf("\"canonical_net\":\"GND\"") >= 0 &&
-                            hardware.data.indexOf("\"wire\":{\"color\":\"yellow\"}") >= 0 &&
-                            hardware.data.indexOf("\"a\"") >= 0 &&
-                            hardware.data.indexOf("\"connections\"") >= 0 &&
-                            hardware.data.indexOf("\"nets\"") < 0 && info.valid &&
-                            info.data.indexOf("hwconnections") < 0 &&
+                            hardware.data.find("esp32-devkit:test") != std::string::npos &&
+                            hardware.data.find("\"version\":2") != std::string::npos &&
+                            hardware.data.find("\"host_assembly\":\"controller\"") != std::string::npos &&
+                            hardware.data.find("\"definitions\"") != std::string::npos &&
+                            hardware.data.find("\"kind\":\"sensor_probe\"") != std::string::npos &&
+                            hardware.data.find("\"canonical_net\":\"GND\"") != std::string::npos &&
+                            hardware.data.find("\"wire\":{\"color\":\"yellow\"}") != std::string::npos &&
+                            hardware.data.find("\"a\"") != std::string::npos &&
+                            hardware.data.find("\"connections\"") != std::string::npos &&
+                            hardware.data.find("\"nets\"") == std::string::npos && info.valid &&
+                            info.data.find("hwconnections") == std::string::npos &&
                             hardwareCommand.result && !removedConnections.result);
     // Events: transient occurrences. Never retained, never replayed, never state.
     // A clean persisted-source file keeps this independent of earlier runs.
-    LittleFS.remove("/remoteresources.json");
+    NightMare::Storage::remove("/remoteresources.json");
     ResourcesManager eventManager;
     RecordingPublisher eventPublisher;
     RecordingSubscriber eventSubscriber;
     ManagedEvent<uint32_t> beep("acoustic:beep");
     RemoteEvent<uint32_t> watched("beep", NetDeviceIdentity("watson"));
-    RemoteEvent<String> unsourced("unsourced_event");
+    RemoteEvent<std::string> unsourced("unsourced_event");
     watched.onEvent = recordEvent;
     eventManager.setSubscriber(&eventSubscriber);
     eventManager.setPublisher(&eventPublisher);
@@ -1035,7 +1035,7 @@ void setup()
     const bool eventsBound = eventManager.bindResource(&beep) &&
                              eventManager.bindResource(&watched) &&
                              eventManager.bindResource(&unsourced);
-    const String beepTopic = gDeviceIdentity.getDeviceName() + "/resource/acoustic:beep/event";
+    const std::string beepTopic = gDeviceIdentity.getDeviceName() + "/resource/acoustic:beep/event";
 
     // Provider manifests: JSON names the kind and type and nothing else; the
     // compact form is [2, name, typeEnum] under the bumped encoding version.
@@ -1044,15 +1044,15 @@ void setup()
         !deserializeMsgPack(providerPacked, eventPublisher.lastManifestPacked);
     bool compactEventShape = false;
     for (JsonArrayConst entry : providerPacked[2].as<JsonArrayConst>())
-        if (entry[1].as<String>() == "acoustic:beep")
+        if (entry[1].as<std::string>() == "acoustic:beep")
             compactEventShape = entry.size() == 3 &&
                                 entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
                                 entry[2].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
     JsonDocument expandedProvider;
     const bool providerExpanded =
         ResourcesManager::decodeManifest(eventPublisher.lastManifestPacked, expandedProvider) &&
-        expandedProvider["resources"][0]["kind"].as<String>() == "event" &&
-        expandedProvider["resources"][0]["type"].as<String>() == "integer" &&
+        expandedProvider["resources"][0]["kind"].as<std::string>() == "event" &&
+        expandedProvider["resources"][0]["type"].as<std::string>() == "integer" &&
         expandedProvider["resources"][0].size() == 3;
     const bool providerManifests =
         providerPackedParsed &&
@@ -1070,8 +1070,8 @@ void setup()
     const bool eventSubscriptions =
         eventSubscriber.subscribedTo("watson/resource/beep/event") &&
         eventSubscriber.subscribedTo("watson/manifest/msgpack") &&
-        eventSubscriber.subscribed.indexOf("acoustic:beep") < 0 &&
-        eventSubscriber.subscribed.indexOf("unsourced_event") < 0;
+        eventSubscriber.subscribed.find("acoustic:beep") == std::string::npos &&
+        eventSubscriber.subscribed.find("unsourced_event") == std::string::npos;
 
     // The same payload twice is two occurrences, published transient on /event.
     const int publishedBefore = eventPublisher.eventPublishes;
@@ -1089,9 +1089,9 @@ void setup()
     // one local call, whatever happened to the publication.
     const bool localListenerSeesEveryFire = localEventCalls == 4 && lastLocalEvent == 43;
     // An invalid payload is not an occurrence: rejected and never announced locally.
-    ManagedEvent<String> emptyEvent("empty_payload");
+    ManagedEvent<std::string> emptyEvent("empty_payload");
     emptyEvent.onEvent = countStringEvent;
-    const bool emptyPayloadRejected = !emptyEvent.fire(String()) && stringEventCalls == 0;
+    const bool emptyPayloadRejected = !emptyEvent.fire(std::string()) && stringEventCalls == 0;
 
     // A reconnect rebuilds subscriptions and republishes the manifest. It never
     // re-fires, and never invokes a callback.
@@ -1102,7 +1102,7 @@ void setup()
     const bool reconnectDoesNotReplay =
         eventPublisher.eventAttempts == publishedBeforeReconnect && eventCallbacks == 0 &&
         eventSubscriber.subscribedTo("watson/resource/beep/event") &&
-        eventSubscriber.subscribed.indexOf("acoustic:beep") < 0;
+        eventSubscriber.subscribed.find("acoustic:beep") == std::string::npos;
 
     // Every valid live occurrence calls onEvent, identical payloads included.
     const bool firstConsumed = eventManager.handleIngressMessage("watson/resource/beep/event", "5");
@@ -1137,10 +1137,10 @@ void setup()
         !eventManager.executeCommand(" acoustic:beep source watson/beep").success &&
         eventPublisher.eventAttempts == publishedBeforeVerbs;
     const bool consoleDescribes =
-        bare.success && bare.result.startsWith("EVENT beep last_update_ms=") &&
-        listing.success && listing.result.indexOf("managed last_update_ms=") >= 0 &&
-        listing.result.indexOf("remote source=watson/beep last_update_ms=") >= 0 &&
-        listing.result.indexOf("remote source=- last_update_ms=0") >= 0;
+        bare.success && NightMare::Text::startsWith(bare.result, "EVENT beep last_update_ms=") &&
+        listing.success && listing.result.find("managed last_update_ms=") != std::string::npos &&
+        listing.result.find("remote source=watson/beep last_update_ms=") != std::string::npos &&
+        listing.result.find("remote source=- last_update_ms=0") != std::string::npos;
     const ActionResult commandSource =
         eventManager.executeCommand(" unsourced_event source holmes/lamp");
     const bool commandSourceWorks =
@@ -1161,22 +1161,20 @@ void setup()
         !deserializeMsgPack(consumedPacked, eventPublisher.lastConsumePacked);
     bool compactRemote = false;
     for (JsonArrayConst entry : consumedPacked[2].as<JsonArrayConst>())
-        if (entry[1].as<String>() == "beep")
+        if (entry[1].as<std::string>() == "beep")
             compactRemote = entry.size() == 6 &&
                             entry[0].as<uint8_t>() == static_cast<uint8_t>(NetResourceType::EVENT) &&
-                            entry[2].as<bool>() && entry[3].as<String>() == "holmes" &&
-                            entry[4].as<String>() == "chime" &&
+                            entry[2].as<bool>() && entry[3].as<std::string>() == "holmes" &&
+                            entry[4].as<std::string>() == "chime" &&
                             entry[5].as<uint8_t>() == static_cast<uint8_t>(NetValueType::INTEGER);
     JsonDocument expandedConsume;
     const bool consumeExpanded =
         ResourcesManager::decodeConsumeManifest(eventPublisher.lastConsumePacked,
                                                 expandedConsume) &&
-        expandedConsume["remotes"][0]["kind"].as<String>() == "event" &&
-        expandedConsume["remotes"][0]["type"].as<String>() == "integer";
-    File persistedFile = LittleFS.open("/remoteresources.json", "r");
-    const String persisted = persistedFile ? persistedFile.readString() : String();
-    if (persistedFile)
-        persistedFile.close();
+        expandedConsume["remotes"][0]["kind"].as<std::string>() == "event" &&
+        expandedConsume["remotes"][0]["type"].as<std::string>() == "integer";
+    std::string persisted;
+    NightMare::Storage::read("/remoteresources.json", persisted, 32768);
     const bool sourceRetargeted =
         retargeted && watched.lastUpdateMs() == 0 &&
         eventSubscriber.unsubscribedFrom("watson/resource/beep/event") &&
@@ -1185,7 +1183,7 @@ void setup()
         eventSubscriber.subscribedTo("holmes/manifest/msgpack") &&
         consumePackedParsed && consumedPacked[0].as<uint8_t>() == ConsumeManifestEncodingVersion &&
         consumedPacked.size() == 3 && compactRemote && consumeExpanded &&
-        persisted.indexOf("\"beep\":\"holmes/chime\"") >= 0 &&
+        persisted.find("\"beep\":\"holmes/chime\"") != std::string::npos &&
         !eventManager.handleIngressMessage("watson/resource/beep/event", "5") &&
         eventManager.handleIngressMessage("holmes/resource/chime/event", "6") &&
         eventCallbacks == 3 && lastEventSeen == 6 && watched.lastUpdateMs() != 0;
@@ -1209,9 +1207,9 @@ void setup()
     mismatchedEvent.add(static_cast<uint8_t>(NetResourceType::EVENT));
     mismatchedEvent.add("chime");
     mismatchedEvent.add(static_cast<uint8_t>(NetValueType::STRING));
-    // The type enum for STRING is 0, a NUL byte that the String writer inside
+    // The type enum for STRING is 0, a NUL byte that the std::string writer inside
     // serializeMsgPack() would cut off; the binary-safe serializer keeps it.
-    String encodedMismatch;
+    std::string encodedMismatch;
     const bool mismatchEncoded =
         serializeWholeDocument(mismatchedManifest, DocumentFormat::MSGPACK,
                                encodedMismatch) == PayloadResult::Complete;
@@ -1224,10 +1222,8 @@ void setup()
     // Clearing leaves a discoverable, unbound declaration and forgets the source.
     eventSubscriber.clear();
     const bool cleared = watched.clearSource();
-    File clearedFile = LittleFS.open("/remoteresources.json", "r");
-    const String persistedAfterClear = clearedFile ? clearedFile.readString() : String();
-    if (clearedFile)
-        clearedFile.close();
+    std::string persistedAfterClear;
+    NightMare::Storage::read("/remoteresources.json", persistedAfterClear, 32768);
     JsonDocument clearedConsume;
     const bool clearedConsumeDecoded = ResourcesManager::decodeConsumeManifest(
         eventPublisher.lastConsumePacked, clearedConsume);
@@ -1237,7 +1233,7 @@ void setup()
         clearedConsumeDecoded && clearedConsume["remotes"].size() == 2 &&
         !clearedConsume["remotes"][0]["bound"].as<bool>() &&
         !clearedConsume["remotes"][1]["bound"].as<bool>() &&
-        persistedAfterClear.indexOf("\"beep\"") < 0;
+        persistedAfterClear.find("\"beep\"") == std::string::npos;
 
     // Unbinding: a Managed event just leaves the manifest, with no tombstone to
     // retract (nothing was retained); a Remote one gives its subscription and
@@ -1253,14 +1249,12 @@ void setup()
     watched.setSource("holmes", "chime");
     eventSubscriber.clear();
     eventManager.unbindResource(&watched);
-    File unboundFile = LittleFS.open("/remoteresources.json", "r");
-    const String persistedAfterUnbind = unboundFile ? unboundFile.readString() : String();
-    if (unboundFile)
-        unboundFile.close();
+    std::string persistedAfterUnbind;
+    NightMare::Storage::read("/remoteresources.json", persistedAfterUnbind, 32768);
     JsonDocument consumeAfterUnbind;
     const bool remoteUnbound =
         !watched.isBound() && eventSubscriber.unsubscribedFrom("holmes/resource/chime/event") &&
-        persistedAfterUnbind.indexOf("\"beep\"") < 0 &&
+        persistedAfterUnbind.find("\"beep\"") == std::string::npos &&
         ResourcesManager::decodeConsumeManifest(eventPublisher.lastConsumePacked,
                                                 consumeAfterUnbind) &&
         consumeAfterUnbind["remotes"].size() == 1;
@@ -1271,14 +1265,14 @@ void setup()
     oldRoot.add(ManifestEncodingVersion - 1);
     oldRoot.add(ResourceManifestVersion);
     oldRoot.add<JsonArray>();
-    String encodedOldManifest;
+    std::string encodedOldManifest;
     serializeMsgPack(oldManifest, encodedOldManifest);
     JsonDocument oldConsume;
     JsonArray oldConsumeRoot = oldConsume.to<JsonArray>();
     oldConsumeRoot.add(ConsumeManifestEncodingVersion - 1);
     oldConsumeRoot.add(ConsumeManifestVersion);
     oldConsumeRoot.add<JsonArray>();
-    String encodedOldConsume;
+    std::string encodedOldConsume;
     serializeMsgPack(oldConsume, encodedOldConsume);
     JsonDocument ignored;
     const bool oldEncodingsFallBack =

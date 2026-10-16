@@ -55,7 +55,7 @@ The `+` wildcard represents exactly one request ID segment.
 
 ## Request
 
-Publish a normal NightMare command String to:
+Publish a normal NightMare command std::string to:
 
 ```text
 <device>/console/controlled/<id>/in
@@ -86,7 +86,7 @@ See [Commands](commands.md).
 
 ## Response
 
-The result String is published to:
+The result std::string is published to:
 
 ```text
 <device>/console/controlled/<id>/out
@@ -108,7 +108,7 @@ The response is transient:
 retained: false
 ```
 
-MQTTP does not define a second JSON response envelope around command output. The response payload is the command handler's `result.response` String.
+MQTTP does not define a second JSON response envelope around command output. The response payload is the command handler's `result.response` std::string.
 
 That means the payload format depends on the command:
 

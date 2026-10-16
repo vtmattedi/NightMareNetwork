@@ -14,7 +14,7 @@ static bool onBrightnessWrite(ManagedState<uint8_t> &, const uint8_t &requested)
     return true;
 }
 
-static ActionResult onIdentify(ManagedAction &, const String &payload)
+static ActionResult onIdentify(ManagedAction &, const std::string &payload)
 {
     if (payload.length() != 0)
         return {false, "identify takes no arguments"};

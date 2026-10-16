@@ -33,7 +33,7 @@ optional JSON wire failure cannot make canonical publication fail.
 as ordinary `NetCodec<T>` specializations and append their identifiers to
 `NetValueType`.
 
-**Reason:** Config and Resources already share one typed-to-String boundary.
+**Reason:** Config and Resources already share one typed-to-std::string boundary.
 A second semantic codec registry would duplicate dispatch and let the two
 surfaces disagree about the same C++ value.
 
@@ -54,7 +54,7 @@ misstate what they are.
 
 **Consequence:** Config v1 has typed durable values, lifetime-based automatic
 registration, startup restoration, optional explicit manager operations,
-String command ingress, and a declaration manifest only. It has no MQTT,
+std::string command ingress, and a declaration manifest only. It has no MQTT,
 automatic reboot, or Resource integration. Runtime-only application data
 continues to belong in an application-owned `RuntimeState`. Configs bound after
 startup restoration are initialized from persistence as part of binding, while
@@ -66,7 +66,7 @@ pre-startup/static binding remains filesystem-free.
 banks. Runtime facts answer what is true now. Requests answer which bounded
 framework publication still needs processing.
 
-**Reason:** module-neutral consumers should not depend on String keys or module
+**Reason:** module-neutral consumers should not depend on std::string keys or module
 headers, and MQTT reconnect callbacks should not build every allocation-heavy
 retained document in one TLS memory burst.
 
@@ -74,7 +74,7 @@ retained document in one TLS memory burst.
 request per call. Failed work moves behind other ready requests and retries
 with exponential backoff capped at five minutes. A fresh request resets its
 backoff. This is task-safe framework plumbing, not an ISR API or a generic
-scheduler. Generic transient String data continues to use an application-owned
+scheduler. Generic transient std::string data continues to use an application-owned
 `RuntimeState`.
 
 ## Retained MQTT state instead of a separate synchronization protocol
@@ -362,7 +362,7 @@ the direct local edge.
 
 ## Only wall-clock command jobs persist
 
-**Decision:** persisted jobs are limited to wall-clock String command jobs.
+**Decision:** persisted jobs are limited to wall-clock std::string command jobs.
 
 **Reason:** a callback pointer is only meaningful inside the current firmware/runtime, and a monotonic deadline is only meaningful inside the current boot.
 
@@ -390,7 +390,7 @@ the direct local edge.
 
 **Reason:** framework code already has a typed C++ API. Routing its own maintenance work back through the text command parser would add avoidable parsing and coupling.
 
-**Consequence:** String commands remain useful for persisted/user-visible jobs, while internal framework work stays direct.
+**Consequence:** std::string commands remain useful for persisted/user-visible jobs, while internal framework work stays direct.
 
 ## Command and Resource Action remain separate concepts
 

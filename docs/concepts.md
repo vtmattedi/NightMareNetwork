@@ -111,7 +111,7 @@ Value state is published at:
 
 and is retained.
 
-An empty retained payload is a tombstone: it deletes the retained Value state. Empty String is therefore not a valid Resource String value.
+An empty retained payload is a tombstone: it deletes the retained Value state. Empty std::string is therefore not a valid Resource std::string value.
 
 ### TimeType
 
@@ -462,7 +462,7 @@ An interval of zero means one-shot.
 A job executes exactly one target:
 
 ```text
-String command
+std::string command
 callback
 ```
 

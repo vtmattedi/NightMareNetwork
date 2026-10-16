@@ -27,7 +27,7 @@ repeat
     recurring
 
 target
-    String command
+    std::string command
     callback
 
 scope
@@ -105,7 +105,7 @@ cannot enumerate or remove MANAGED jobs.
 
 ## Command jobs
 
-A command job stores a String and executes it through:
+A command job stores a std::string and executes it through:
 
 ```cpp
 handleNightMareCommand(...)
@@ -314,7 +314,7 @@ Only jobs satisfying all of these persist:
 ```text
 active
 Wall clock
-String command target
+std::string command target
 ```
 
 Therefore:
@@ -504,7 +504,7 @@ Clearing one scope preserves persisted jobs from the other scope.
 ## List
 
 ```cpp
-String json =
+std::string json =
     gScheduler.list(SchedulerJobScope::USER);
 ```
 
@@ -520,16 +520,16 @@ The operator command family maps to Scheduler calls as follows:
 
 ```text
 JOB AT
-    wall one-shot String command
+    wall one-shot std::string command
 
 JOB AFTER
-    monotonic one-shot String command
+    monotonic one-shot std::string command
 
 JOB EVERY ... WALL
-    wall recurring String command
+    wall recurring std::string command
 
 JOB EVERY ... MONO
-    monotonic recurring String command
+    monotonic recurring std::string command
 
 JOB LIST
     USER list

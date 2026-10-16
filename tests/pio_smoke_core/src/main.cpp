@@ -26,7 +26,7 @@ bool acceptPositiveConfig(Config<int> &, const int &requested)
     return requested > 0;
 }
 
-bool rejectGlobalConfig(const String &key, const String &)
+bool rejectGlobalConfig(const std::string &key, const std::string &)
 {
     return key != "persist_global_reject";
 }
@@ -63,7 +63,7 @@ static_assert(static_cast<uint8_t>(NetResourceType::VALUE) == 0 &&
 NM_DETECT_MEMBER(Fire, std::declval<U &>().fire(1u));
 NM_DETECT_MEMBER(OnEvent, std::declval<U &>().onEvent);
 NM_DETECT_MEMBER(LastUpdateMs, std::declval<const U &>().lastUpdateMs());
-NM_DETECT_MEMBER(SetSource, std::declval<U &>().setSource(String(), String()));
+NM_DETECT_MEMBER(SetSource, std::declval<U &>().setSource(std::string(), std::string()));
 NM_DETECT_MEMBER(ClearSource, std::declval<U &>().clearSource());
 NM_DETECT_MEMBER(GetValue, std::declval<const U &>().getValue());
 NM_DETECT_MEMBER(SetValue, std::declval<U &>().setValue(1u));
@@ -90,7 +90,7 @@ static_assert(!std::is_base_of<NetValueResource, ManagedEvent<uint32_t>>::value 
 static_assert(sizeof(ManagedEvent<uint32_t>) < sizeof(ManagedSensor<uint32_t>) &&
                   sizeof(RemoteEvent<uint32_t>) < sizeof(RemoteSensor<uint32_t>),
               "Event storage must exclude the Value-only fields");
-static_assert(!std::is_constructible<NetEvent<uint32_t>, const String &>::value,
+static_assert(!std::is_constructible<NetEvent<uint32_t>, const std::string &>::value,
               "NetEvent is an implementation base, not an application resource");
 
 static_assert(HasFire<ManagedEvent<uint32_t>>::value && HasLastUpdateMs<ManagedEvent<uint32_t>>::value &&
@@ -144,25 +144,25 @@ void setup()
     smokeState.setFlag("booted", true);
     smokeState.setFlag("clock_valid", NightMare::Time::valid());
 
-    const String configPrefix = "_config:";
-    const String defaultKey = configPrefix + "persist_default";
-    const String restoredKey = configPrefix + "persist_restored";
-    const String invalidKey = configPrefix + "persist_invalid";
-    const String localKey = configPrefix + "persist_local";
-    const String commandKey = configPrefix + "persist_command";
-    const String onWriteRejectKey = configPrefix + "persist_onwrite_reject";
-    const String globalRejectKey = configPrefix + "persist_global_reject";
-    const String timeKey = configPrefix + "persist_time";
-    const String colourKey = configPrefix + "persist_colour";
-    const String lateRestoredKey = configPrefix + "persist_late_restored";
-    const String lateDefaultKey = configPrefix + "persist_late_default";
-    const String invalidLocalKey = configPrefix + "persist_invalid_local";
-    const String failureKey = configPrefix + "persist_failure";
-    const String persistenceKeys[] = {
+    const std::string configPrefix = "_config:";
+    const std::string defaultKey = configPrefix + "persist_default";
+    const std::string restoredKey = configPrefix + "persist_restored";
+    const std::string invalidKey = configPrefix + "persist_invalid";
+    const std::string localKey = configPrefix + "persist_local";
+    const std::string commandKey = configPrefix + "persist_command";
+    const std::string onWriteRejectKey = configPrefix + "persist_onwrite_reject";
+    const std::string globalRejectKey = configPrefix + "persist_global_reject";
+    const std::string timeKey = configPrefix + "persist_time";
+    const std::string colourKey = configPrefix + "persist_colour";
+    const std::string lateRestoredKey = configPrefix + "persist_late_restored";
+    const std::string lateDefaultKey = configPrefix + "persist_late_default";
+    const std::string invalidLocalKey = configPrefix + "persist_invalid_local";
+    const std::string failureKey = configPrefix + "persist_failure";
+    const std::string persistenceKeys[] = {
         defaultKey, restoredKey, invalidKey, localKey, commandKey,
         onWriteRejectKey, globalRejectKey, timeKey, colourKey, lateRestoredKey,
         lateDefaultKey, invalidLocalKey, failureKey};
-    for (const String &key : persistenceKeys)
+    for (const std::string &key : persistenceKeys)
         PersistentSettings.remove(key);
     PersistentSettings.set(restoredKey, "23");
     PersistentSettings.set(invalidKey, "not-an-integer");
@@ -212,7 +212,7 @@ void setup()
                                          lateDefault.value() == 15 &&
                                          PersistentSettings.get(lateDefaultKey) == "15";
 
-        Config<String> invalidLocal("persist_invalid_local", "valid");
+        Config<std::string> invalidLocal("persist_invalid_local", "valid");
         const bool invalidLocalRejected = !invalidLocal.set("") &&
                                           invalidLocal.value() == "valid" &&
                                           PersistentSettings.get(invalidLocalKey) == "valid";
@@ -222,7 +222,7 @@ void setup()
              PersistentSettings.size() < RuntimeState::MaxEntries;
              ++i)
             if (!PersistentSettings.RuntimeState::set(
-                    String("_config_test_fill:") + String(i), "x"))
+                    std::string("_config_test_fill:") + std::to_string(i), "x"))
                 break;
         const size_t countBeforeFailedBind = configManager().count();
         Config<int> persistenceFailure("persist_failure", 12);
@@ -281,9 +281,9 @@ void setup()
         !deserializeJson(configList, configManager().handle("list"));
     bool currentStateListed = false;
     for (JsonObjectConst item : configList.as<JsonArrayConst>())
-        if (item["name"].as<String>() == "callback_config")
-            currentStateListed = item["type"].as<String>() == "integer" &&
-                                 item["value"].as<String>() == "12" &&
+        if (item["name"].as<std::string>() == "callback_config")
+            currentStateListed = item["type"].as<std::string>() == "integer" &&
+                                 item["value"].as<std::string>() == "12" &&
                                  !item["require_reboot"].as<bool>();
     smokeState.setFlag("config_on_write", managerCallbackAccepted &&
                                               managerCallbackRejected &&
@@ -346,7 +346,7 @@ void setup()
                              decodedColour == ColourType(1, 2, 3, 4) &&
                              decodeColour("hsv(0,255,255)", decodedColour) &&
                              decodedColour == red;
-    const String encodedRed = NetCodec<ColourType>::encode(red);
+    const std::string encodedRed = NetCodec<ColourType>::encode(red);
     ColourType codecColour;
     const bool colourCodec = encodedRed == "4278190335" &&
                              NetCodec<ColourType>::decode(encodedRed, codecColour) &&
@@ -377,9 +377,9 @@ void setup()
     bool sawColour = false;
     for (JsonArrayConst item : configManifest[2].as<JsonArrayConst>())
     {
-        if (item[0].as<String>() == "smoke_time")
+        if (item[0].as<std::string>() == "smoke_time")
             sawTime = item[1].as<uint8_t>() == static_cast<uint8_t>(NetValueType::TIME);
-        if (item[0].as<String>() == "smoke_colour")
+        if (item[0].as<std::string>() == "smoke_colour")
             sawColour = item[1].as<uint8_t>() == static_cast<uint8_t>(NetValueType::COLOUR);
     }
     smokeState.setFlag("config_custom_types", configValues && configManifestTypes && sawTime &&
@@ -391,7 +391,7 @@ void setup()
     // default smoke test, which has the manager.
     ManagedEvent<uint32_t> managedEvent("smoke_event");
     RemoteEvent<uint32_t> remoteEvent("smoke_remote_event");
-    RemoteEvent<String> sourcedEvent("smoke_sourced_event", NetDeviceIdentity("watson"));
+    RemoteEvent<std::string> sourcedEvent("smoke_sourced_event", NetDeviceIdentity("watson"));
     const bool eventKinds = managedEvent.kind() == NetResourceType::EVENT &&
                             remoteEvent.kind() == NetResourceType::EVENT &&
                             !managedEvent.isRemote() && remoteEvent.isRemote() &&

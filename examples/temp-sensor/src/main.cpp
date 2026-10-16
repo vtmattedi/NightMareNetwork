@@ -4,13 +4,13 @@
 
 static ManagedSensor<float> temperature("temperature");
 static ManagedSensor<bool> connected("connected");
-static ManagedSensor<String> sensorAddress("sensor_address");
+static ManagedSensor<std::string> sensorAddress("sensor_address");
 static ManagedAction rescan("rescan");
 
 static uint32_t publishedReadMs = 0;
-static String publishedAddress;
+static std::string publishedAddress;
 
-static ActionResult onRescan(ManagedAction &, const String &payload)
+static ActionResult onRescan(ManagedAction &, const std::string &payload)
 {
     if (payload.length() != 0)
         return {false, "rescan takes no arguments"};
@@ -33,7 +33,7 @@ static void pollSensor()
 
     if (status.connected && status.address[0] != '\0')
     {
-        const String address(status.address);
+        const std::string address(status.address);
         if (address != publishedAddress)
         {
             publishedAddress = address;

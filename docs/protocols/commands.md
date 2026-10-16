@@ -9,7 +9,7 @@ order: 40
 
 NightMare has one text command grammar that can be executed from different sources.
 
-The parser and built-in command handler are shared. A command behaves as the same command whether it came from serial, MQTT console, controlled MQTT request/response, an HTTP endpoint, or a Scheduler String job.
+The parser and built-in command handler are shared. A command behaves as the same command whether it came from serial, MQTT console, controlled MQTT request/response, an HTTP endpoint, or a Scheduler std::string job.
 
 ## Config commands
 
@@ -317,7 +317,7 @@ See [MQTTP](mqttp.md).
 
 ### Scheduler
 
-A String command job runs through the same `handleNightMareCommand()` path with command source `JOB`.
+A std::string command job runs through the same `handleNightMareCommand()` path with command source `JOB`.
 
 ## Built-in precedence
 
@@ -620,7 +620,7 @@ A USER job and MANAGED job may use the same label without blocking each other.
 
 ## Scheduler persistence through JOB
 
-Only wall-clock String command jobs persist.
+Only wall-clock std::string command jobs persist.
 
 Therefore:
 
@@ -717,7 +717,7 @@ CONFIG LIST
 ```
 
 Returns compact JSON containing each Config's name, wire type,
-`require_reboot` metadata, and current canonical String value:
+`require_reboot` metadata, and current canonical std::string value:
 
 ```json
 [{"name":"heartbeat:period","type":"integer","require_reboot":false,"value":"15"}]
@@ -779,7 +779,7 @@ Returns JSON:
 }
 ```
 
-Directory traversal is bounded to four recursive levels, and the serialized JSON response is limited to 4096 bytes.
+SPIFFS exposes a flat file list. The serialized JSON response is limited to 4096 bytes.
 
 ### Read
 

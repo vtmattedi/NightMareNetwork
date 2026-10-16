@@ -258,7 +258,6 @@ firmware_version
 date
 time
 compiler
-arduino_version
 esp_idf_version
 features
 ```
@@ -296,7 +295,6 @@ Example:
   "date": "Sep 21 2026",
   "time": "21:17:38",
   "compiler": "...",
-  "arduino_version": 10819,
   "esp_idf_version": "...",
   "features": {
     "settings": true,

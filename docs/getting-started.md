@@ -16,7 +16,7 @@ Do not use the older `Esp32Device`, `ResourceManager`, `NetEvent`, or `NetAction
 The current implementation targets:
 
 ```text
-framework: Arduino
+framework: ESP-IDF or Arduino
 platform:  espressif32
 ```
 
@@ -24,8 +24,12 @@ The library currently declares these dependencies:
 
 ```text
 ArduinoJson ^7.0.0
-ArduinoOTA
 ```
+
+`NM_ENABLE_OTA=1` requires an Arduino framework build because that optional
+module uses ArduinoOTA. The other modules use ESP-IDF APIs. Public text values
+use `std::string`, including Resource payloads and Config values. An existing
+LittleFS partition is reset when the new SPIFFS storage is first mounted.
 
 With the default WiFi/MQTT feature set, a normal project needs:
 
@@ -237,7 +241,6 @@ Resources should normally have application lifetime.
 A typical device can declare them globally:
 
 ```cpp
-#include <Arduino.h>
 #include <NightMare.h>
 
 ManagedSensor<float> temperature("temperature");
@@ -284,12 +287,12 @@ Returning `false` rejects the request and leaves Resource state unchanged.
 
 ## Implement an Action
 
-A ManagedAction handler receives the canonical payload String and returns an `ActionResult`.
+A ManagedAction handler receives the canonical payload std::string and returns an `ActionResult`.
 
 ```cpp
 ActionResult onIdentify(
     ManagedAction &action,
-    const String &payload)
+    const std::string &payload)
 {
     (void)action;
 
@@ -634,7 +637,7 @@ Commands can arrive through:
 serial console       when enabled
 MQTT console
 controlled MQTT / MQTTP
-Scheduler String jobs
+Scheduler std::string jobs
 ```
 
 The `>` form routes command/control input to already-bound Resources. The character immediately after `>` is significant:

@@ -119,7 +119,7 @@ Local writes also verify that the codec can decode its own canonical encoding
 before anything is persisted. A value whose encoding cannot be restored is
 rejected, protecting both built-in and future custom codecs.
 
-## String ingress
+## std::string ingress
 
 The common command path accepts:
 
@@ -141,7 +141,7 @@ manifest
 ```
 
 `list` returns compact JSON containing declaration metadata and each Config's
-current value in its canonical `NetCodec<T>` String form. `get` returns that
+current value in its canonical `NetCodec<T>` std::string form. `get` returns that
 same encoded value for one Config. `set` treats everything after the name
 separator as the payload. `manifest` returns Base64 of the declaration-only
 binary manifest.
@@ -160,9 +160,9 @@ Example list item:
 The application may install one global ingress handler:
 
 ```cpp
-bool onConfigChange(const String &key, const String &rawValue)
+bool onConfigChange(const std::string &key, const std::string &rawValue)
 {
-    if (key == "max_door_open_time" && rawValue.toInt() < 1000)
+    if (key == "max_door_open_time" && std::strtol(rawValue.c_str(), nullptr, 10) < 1000)
         return false;
     return true;
 }

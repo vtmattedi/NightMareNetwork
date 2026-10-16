@@ -77,7 +77,7 @@ NightMare provides one timing engine for:
 - monotonic jobs,
 - one-shot work,
 - recurring work,
-- String commands,
+- std::string commands,
 - function-pointer callbacks.
 
 It also separates:
@@ -95,7 +95,7 @@ The operator-facing JOB commands cannot delete MANAGED jobs.
 ### Local configuration registry
 
 NightMare provides a small typed Config registry for firmware parameters. It
-owns registration, typed String decoding, optional application acceptance of
+owns registration, typed std::string decoding, optional application acceptance of
 command-ingress changes, durable storage through `PersistentSettings`, startup
 restoration, and a compact declaration manifest.
 

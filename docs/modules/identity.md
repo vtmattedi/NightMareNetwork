@@ -20,7 +20,7 @@ Identity separates the logical network name, physical board identifiers, and loc
 ## Device name
 
 ```cpp
-const String &getDeviceName();
+const std::string &getDeviceName();
 ```
 
 The device name is the current logical/network identity.
@@ -44,7 +44,7 @@ The name is adoptable.
 ## Hardware signature
 
 ```cpp
-const String &getHardwareSignature();
+const std::string &getHardwareSignature();
 ```
 
 The hardware signature is the generated name the board was born with.
@@ -73,7 +73,7 @@ This is why status can identify both:
 ## Device ID
 
 ```cpp
-const String &getDeviceId();
+const std::string &getDeviceId();
 ```
 
 The device ID is a raw machine-oriented hardware identifier derived from `ESP.getEfuseMac()`.
@@ -87,9 +87,9 @@ Do not treat it as the human-facing MQTT name.
 ## Timezone
 
 ```cpp
-const String &getTimezone();
-bool setTimezone(const String &timezone);
-static bool validTimezone(const String &timezone);
+const std::string &getTimezone();
+bool setTimezone(const std::string &timezone);
+static bool validTimezone(const std::string &timezone);
 ```
 
 The timezone is a persisted POSIX `TZ` string. It is applied to the process with `setenv("TZ", ...)` and `tzset()`, so local formatting and local wall-clock calculations change immediately.
@@ -207,7 +207,7 @@ bedroom-ac/resource/power/state
 ## Relative topic
 
 ```cpp
-String relative;
+std::string relative;
 
 if (gDeviceIdentity.relativeTopic(fullTopic, relative))
 {
@@ -247,7 +247,7 @@ Request a new logical name with:
 gDeviceIdentity.beginAdoption("bedroom-ac");
 ```
 
-Adoption is treated as a migration, not as an ordinary String assignment.
+Adoption is treated as a migration, not as an ordinary std::string assignment.
 
 The operation records:
 
@@ -338,7 +338,7 @@ Public cleanup state is represented by:
 ```cpp
 struct PendingIdentityCleanup
 {
-    String oldName;
+    std::string oldName;
     uint8_t pendingFlags;
 };
 ```

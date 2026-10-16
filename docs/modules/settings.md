@@ -7,7 +7,7 @@ order: 60
 
 # Settings and runtime state
 
-NightMare has two generic String key/value types and one typed runtime facility:
+NightMare has two generic std::string key/value types and one typed runtime facility:
 
 ```text
 RuntimeState
@@ -28,7 +28,7 @@ PersistentSettings
 ```
 
 `SystemState` is not a key/value store. `PersistentSettings` remains a
-`StateStore` backed by the existing String model.
+`StateStore` backed by the existing std::string model.
 
 Runtime state still exists through `RuntimeState`, but there is intentionally
 no global runtime configuration controller. Applications own their runtime
@@ -36,7 +36,7 @@ state; `SystemState` is reserved for framework runtime facts and requests.
 
 ## RuntimeState
 
-`RuntimeState` is a small in-memory String key/value store.
+`RuntimeState` is a small in-memory std::string key/value store.
 
 ```cpp
 RuntimeState state;
@@ -70,7 +70,7 @@ Adding a new key fails when the store already contains 128 entries.
 ## Get
 
 ```cpp
-String mode = state.get("mode", "off");
+std::string mode = state.get("mode", "off");
 ```
 
 The default is returned when the key does not exist.
@@ -115,7 +115,7 @@ removes all entries.
 ## JSON
 
 ```cpp
-String json = state.toJson();
+std::string json = state.toJson();
 ```
 
 Values are serialized as JSON Strings.
@@ -202,7 +202,7 @@ PersistentSettings.begin();
 
 For a persistent store, `begin()`:
 
-1. mounts LittleFS with `LittleFS.begin(true)`,
+1. mounts the ESP-IDF SPIFFS partition, formatting it if the old LittleFS data cannot be mounted,
 2. updates `SystemFlag::PersistentStorageReady`,
 3. loads `/configs.json`,
 4. creates/saves an empty settings file if none exists.
@@ -331,7 +331,7 @@ _config:<Config name>
 These names are implementation details.
 
 NightMare source refers to them through `NightMare::PersistentKey` constants;
-the String values on disk remain unchanged for existing devices.
+the std::string values on disk remain unchanged for existing devices.
 
 Application code should use the owning module APIs:
 
@@ -368,7 +368,7 @@ or their dedicated commands so their side effects cannot be bypassed.
 
 ## Current coupling
 
-The current persistence implementation is directly tied to LittleFS and String key/value data.
+The current persistence implementation uses ESP-IDF SPIFFS and std::string key/value data.
 
 A future persistence abstraction may separate generic settings semantics from ESP32 filesystem storage.
 

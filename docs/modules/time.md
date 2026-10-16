@@ -34,7 +34,7 @@ NightMare::Time::year(epoch);
 Human-facing formatting uses the process `TZ` setting owned and applied by `DeviceIdentity`:
 
 ```cpp
-String NightMare::Time::timestampToDateString(
+std::string NightMare::Time::timestampToDateString(
     time_t timestamp,
     TimeStampFormat format = DateAndTime);
 ```

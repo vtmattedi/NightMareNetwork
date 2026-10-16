@@ -210,7 +210,7 @@ void validateMemberShape(const AssemblyMembers &members, const std::string &path
             if (members.devices[i].terminals[terminal].canonicalNet > CanonicalNet::ProtectiveEarth)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
                               path + ".devices[" + std::to_string(i) + "].terminals[" +
-                                  terminal + "].canonical_net",
+                                  std::to_string(terminal) + "].canonical_net",
                               "Canonical net enum is invalid.");
     }
     for (size_t i = 0; i < members.connectorCount && members.connectors != nullptr; ++i)
@@ -225,7 +225,7 @@ void validateMemberShape(const AssemblyMembers &members, const std::string &path
             if (members.connectors[i].contacts[contact].canonicalNet > CanonicalNet::ProtectiveEarth)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
                               path + ".connectors[" + std::to_string(i) + "].contacts[" +
-                                  contact + "].canonical_net",
+                                  std::to_string(contact) + "].canonical_net",
                               "Canonical net enum is invalid.");
     }
     for (size_t i = 0; i < members.connectionCount && members.connections != nullptr; ++i)
