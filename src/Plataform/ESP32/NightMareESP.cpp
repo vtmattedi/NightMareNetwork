@@ -173,7 +173,6 @@ namespace
         {
             const uint16_t index = (next + checked) % SystemRequestCount;
             const SystemRequest request = static_cast<SystemRequest>(index);
-            // Serial.printf("Processing system request: %d  queue: [%s]\n", index, debugSystemRequest().c_str());
             RequestRetry &retry = requestRetries[index];
             const bool fresh = SystemState.pending(request);
             if (fresh)

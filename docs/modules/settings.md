@@ -293,9 +293,11 @@ serializes the current RuntimeState as JSON and writes:
 /configs.json
 ```
 
-The implementation first writes and verifies `/configs.tmp`, then renames that
-complete file over `/configs.json`. A failed or partial temporary write leaves
-the previous durable settings document in place.
+The implementation writes `/configs.json.tmp`, moves the old document to
+`/configs.json.bak`, then renames the complete temporary file into place.
+If startup finds the backup without the live file, it restores the backup.
+A failed or partial temporary write leaves the previous durable document in
+place.
 
 Because normal persistent `set()` and `remove()` already save, explicit save is mainly useful after an intentional in-memory-only mutation path.
 

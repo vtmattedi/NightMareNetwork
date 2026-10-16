@@ -1,6 +1,5 @@
 #pragma once
 #include <Core/Text.h>
-#include <Core/PlatformClock.h>//Only while not moving over to espidf
 
 struct MacAddress {
     static constexpr size_t Length = 6;

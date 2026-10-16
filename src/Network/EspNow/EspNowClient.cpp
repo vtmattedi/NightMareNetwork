@@ -32,8 +32,7 @@ namespace NightMare::EspNowClient
     {
         namespace Auth = NightMare::EspNowAuth;
 
-        // NightMare's LOG, not ESP_LOGx: the Arduino core hides ESP_LOG output,
-        // which is how every failure in here used to vanish.
+        // Use the shared NightMare logger for consistent connection diagnostics.
         constexpr char TagLink[] = "ESPNOW";  // search, handshake, session state
         constexpr char TagTx[] = "ESPNOW-TX"; // outgoing frames
         constexpr char TagRx[] = "ESPNOW-RX"; // incoming frames
@@ -144,7 +143,7 @@ namespace NightMare::EspNowClient
 
         // --- Receive-side warnings ---------------------------------------------
         // The receive callback runs on the Wi-Fi task, which has no stack to spare for
-        // formatting a log line (NMLog + Serial.printf, the same thing that overflowed
+        // formatting a log line (NMLog plus stdio, the same thing that overflowed
         // sys_evt). It only queues plain data here; rxLogTask formats and prints it.
         enum class RxNote : uint8_t
         {
@@ -1143,8 +1142,8 @@ namespace NightMare::EspNowClient
         running = true;
         taskExited = false;
         setState(State::SEARCHING);
-        // 6 KB: NMLog::write formats into a 256-byte stack buffer and then Serial.printf
-        // formats again, sendRaw can log, and the HMAC runs on this task too.
+        // 6 KB: NMLog::write formats on the stack, sendRaw can log, and the HMAC
+        // runs on this task too.
         if (xTaskCreate(clientTask, "espnow_client", 6144, nullptr, 1, &task) != pdPASS)
         {
             LOG_ERROR(TagLink, "could not create the client task");

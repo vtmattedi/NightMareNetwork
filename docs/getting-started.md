@@ -30,6 +30,8 @@ ArduinoJson ^7.0.0
 module uses ArduinoOTA. The other modules use ESP-IDF APIs. Public text values
 use `std::string`, including Resource payloads and Config values. An existing
 LittleFS partition is reset when the new SPIFFS storage is first mounted.
+If a project includes ArduinoJson before NightMare headers, define
+`ARDUINOJSON_ENABLE_STD_STRING=1` in its build flags.
 
 With the default WiFi/MQTT feature set, a normal project needs:
 
@@ -55,7 +57,7 @@ lib_deps =
 
 During development against a local checkout, a project can instead use a local/symlink dependency.
 
-The public umbrella headers are:
+The public umbrella header is:
 
 ```cpp
 #include <NightMare.h>
@@ -241,6 +243,7 @@ Resources should normally have application lifetime.
 A typical device can declare them globally:
 
 ```cpp
+#include <Arduino.h>  // Needed by the setup()/loop() example below.
 #include <NightMare.h>
 
 ManagedSensor<float> temperature("temperature");
@@ -404,6 +407,26 @@ void loop()
     tickNightMareESP();
 
     // Application cooperative work.
+}
+```
+
+An ESP-IDF application uses `app_main()` instead. Bind Resources before
+startup, then call the same cooperative tick:
+
+```cpp
+#include <NightMare.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+extern "C" void app_main()
+{
+    // Bind application Resources here.
+    startNightMareESP();
+    while (true)
+    {
+        tickNightMareESP();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 ```
 
@@ -716,7 +739,7 @@ See [MQTT topics](protocols/topics.md) for the complete wire map.
 The generated default network name is based on the board hardware:
 
 ```cpp
-Serial.println(gDeviceIdentity.getDeviceName());
+Serial.println(gDeviceIdentity.getDeviceName().c_str());
 ```
 
 Example:

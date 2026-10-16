@@ -347,6 +347,9 @@ Serial console
     only when NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
 ```
 
+The optional serial console reads nonblocking ESP-IDF standard input and
+dispatches complete newline-terminated commands.
+
 SNTP completion is intentionally dispatched here because the ESP callback runs
 on lwIP's task. NightMare defers the `SystemFlag::TimeSynced` transition and the
 application `onTimeSync()` callback to the normal cooperative context.

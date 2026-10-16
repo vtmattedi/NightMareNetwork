@@ -8,6 +8,13 @@
 #include <string>
 #include <esp_heap_caps.h>
 
+#if defined(ARDUINOJSON_ENABLE_STD_STRING) && !ARDUINOJSON_ENABLE_STD_STRING
+#error "NightMare requires ARDUINOJSON_ENABLE_STD_STRING=1"
+#endif
+#ifndef ARDUINOJSON_ENABLE_STD_STRING
+#define ARDUINOJSON_ENABLE_STD_STRING 1
+#endif
+
 namespace NightMare
 {
 namespace Text
@@ -24,7 +31,13 @@ inline bool tryReserve(std::string &value, size_t capacity)
 
 inline std::string slice(const std::string &value, size_t first, size_t last = std::string::npos)
 {
-    return value.substr(first, last == std::string::npos ? last : last - first);
+    if (last != std::string::npos && last < first)
+        std::swap(first, last);
+    if (first >= value.size())
+        return {};
+    if (last == std::string::npos)
+        return value.substr(first);
+    return value.substr(first, std::min(last, value.size()) - first);
 }
 
 inline int indexOf(const std::string &value, char needle, size_t from = 0)

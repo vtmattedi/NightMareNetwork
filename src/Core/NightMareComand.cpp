@@ -1365,11 +1365,7 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 #include <fcntl.h>
 #include <unistd.h>
 
-/// @brief Listens to Serial input and resolves commands using the NightMare command resolver.
-/// This function uses Serial.readStringUntil to read input until the specified character is encountered.
-/// @param _Serial A HardwareSerial Object Pointer.
-/// @param readUntilChar The character to read until (default is '\n')
-/// @note: If readUntilChar is set to 0, it will read until no more data is available in the buffer, allowing for multi-line commands.
+/// @brief Polls ESP-IDF standard input and resolves each complete command line.
 void NightMareCommand_SerialResolver()
 {
     static std::string command;

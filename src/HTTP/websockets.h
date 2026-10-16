@@ -4,6 +4,9 @@
 #include <Core/Text.h>
 #include <Core/PlatformClock.h>
 #include <esp_http_server.h>
+#ifndef CONFIG_HTTPD_WS_SUPPORT
+#error "NM_ENABLE_WEBSOCKET requires CONFIG_HTTPD_WS_SUPPORT=y in ESP-IDF sdkconfig"
+#endif
 #include <Core/NightMareTypes.h>
 void ws_broadcast(const char *msg);
 void http_close_cb(httpd_handle_t hd, int fd);

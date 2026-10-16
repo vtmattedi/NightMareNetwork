@@ -54,8 +54,12 @@ bool startSntpTimeSync()
         esp_sntp_stop();
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, NM_NTP_SERVER_1);
+#if SNTP_MAX_SERVERS > 1
     esp_sntp_setservername(1, NM_NTP_SERVER_2);
+#endif
+#if SNTP_MAX_SERVERS > 2
     esp_sntp_setservername(2, NM_NTP_SERVER_3);
+#endif
     esp_sntp_init();
     LOG("Time", "SNTP synchronization started (%s)", timezone);
     return true;

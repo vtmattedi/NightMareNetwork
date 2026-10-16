@@ -17,9 +17,23 @@ bool mounted = false;
 
 std::string physicalPath(const std::string &path)
 {
-    if (path.empty() || path[0] != '/' || path.find("..") != std::string::npos)
+    if (path.empty() || path[0] != '/' ||
+        path.find("/../") != std::string::npos ||
+        (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0))
         return {};
     return std::string(MountPoint) + path;
+}
+
+bool fileExists(const std::string &name)
+{
+    struct stat info;
+    return stat(name.c_str(), &info) == 0;
+}
+
+void recoverPrevious(const std::string &name)
+{
+    if (!fileExists(name) && fileExists(name + ".bak"))
+        std::rename((name + ".bak").c_str(), name.c_str());
 }
 }
 
@@ -41,8 +55,10 @@ bool exists(const std::string &path)
     if (!mount())
         return false;
     const std::string name = physicalPath(path);
-    struct stat info;
-    return !name.empty() && stat(name.c_str(), &info) == 0;
+    if (name.empty())
+        return false;
+    recoverPrevious(name);
+    return fileExists(name);
 }
 
 bool read(const std::string &path, std::string &out, size_t maxBytes)
@@ -53,6 +69,7 @@ bool read(const std::string &path, std::string &out, size_t maxBytes)
     const std::string name = physicalPath(path);
     if (name.empty())
         return false;
+    recoverPrevious(name);
     struct stat info;
     if (stat(name.c_str(), &info) != 0 || info.st_size < 0 ||
         static_cast<size_t>(info.st_size) > maxBytes)
@@ -76,6 +93,7 @@ bool write(const std::string &path, const std::string &data, bool atomic)
     const std::string name = physicalPath(path);
     if (name.empty())
         return false;
+    recoverPrevious(name);
     const std::string target = atomic ? name + ".tmp" : name;
     FILE *file = std::fopen(target.c_str(), "wb");
     if (file == nullptr)
@@ -89,10 +107,26 @@ bool write(const std::string &path, const std::string &data, bool atomic)
         std::remove(target.c_str());
         return false;
     }
-    if (atomic && std::rename(target.c_str(), name.c_str()) != 0)
+    if (atomic)
     {
-        std::remove(target.c_str());
-        return false;
+        const std::string backup = name + ".bak";
+        const bool hadPrevious = fileExists(name);
+        if (hadPrevious &&
+            ((fileExists(backup) && std::remove(backup.c_str()) != 0) ||
+             std::rename(name.c_str(), backup.c_str()) != 0))
+        {
+            std::remove(target.c_str());
+            return false;
+        }
+        if (std::rename(target.c_str(), name.c_str()) != 0)
+        {
+            if (hadPrevious)
+                std::rename(backup.c_str(), name.c_str());
+            std::remove(target.c_str());
+            return false;
+        }
+        if (hadPrevious)
+            std::remove(backup.c_str());
     }
     return true;
 }

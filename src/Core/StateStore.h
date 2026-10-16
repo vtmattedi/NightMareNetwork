@@ -5,7 +5,7 @@
 
 #if NM_ENABLE_SETTINGS
 
-// Keep the existing path so stored settings survive the source rename.
+// Logical settings path inside the ESP-IDF SPIFFS partition.
 #define SETTINGS_FILE "/configs.json"
 
 // Shares RuntimeState's storage and JSON behavior. Persistent instances add
