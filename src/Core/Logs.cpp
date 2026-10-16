@@ -2,6 +2,9 @@
 
 #include <cstdarg>
 #include <cstdio>
+#if NM_LOG_LEVEL > NM_LOG_LEVEL_OFF && NM_LOG_OUTPUT == NM_LOG_OUTPUT_ARDUINO
+#include <Arduino.h>
+#endif
 #if NM_LOG_USE_TIME_OF_DAY
 #include <ctime>
 #include "Time.h"
@@ -82,12 +85,17 @@ namespace NMLog
         }
 #endif
 #if (NM_LOG_USE_ANSI)
-#define NM_LOG_TIME_FORMAT "[\033[90m%s\033[0m] [%s] [%s] %s\n"
+#define NM_LOG_TIME_FORMAT "[\033[90m%s\033[0m] [%s] [%s] %s"
 #else
-#define NM_LOG_TIME_FORMAT "[%s] [%s] [%s] %s\n"
+#define NM_LOG_TIME_FORMAT "[%s] [%s] [%s] %s"
 #endif
-        std::printf(NM_LOG_TIME_FORMAT, stamp,
+#if NM_LOG_OUTPUT == NM_LOG_OUTPUT_ARDUINO
+        Serial.printf(NM_LOG_TIME_FORMAT "\n", stamp,
+                      levelName, module != nullptr ? module : "Core", message);
+#else
+        std::printf(NM_LOG_TIME_FORMAT "\n", stamp,
                     levelName, module != nullptr ? module : "Core", message);
+#endif
 #else
         (void)level;
         (void)module;

@@ -19,6 +19,22 @@
 #define NM_LOG_LEVEL NM_LOG_LEVEL_OFF
 #endif
 
+// Compile-time log destination. Arduino output requires an Arduino build.
+#define NM_LOG_OUTPUT_PRINTF 0
+#define NM_LOG_OUTPUT_ARDUINO 1
+
+#ifndef NM_LOG_OUTPUT
+#define NM_LOG_OUTPUT NM_LOG_OUTPUT_PRINTF
+#endif
+
+#if NM_LOG_OUTPUT != NM_LOG_OUTPUT_PRINTF && NM_LOG_OUTPUT != NM_LOG_OUTPUT_ARDUINO
+#error "NM_LOG_OUTPUT must be PRINTF or ARDUINO"
+#endif
+
+#if NM_LOG_LEVEL > NM_LOG_LEVEL_OFF && NM_LOG_OUTPUT == NM_LOG_OUTPUT_ARDUINO && !defined(ARDUINO)
+#error "NM_LOG_OUTPUT_ARDUINO requires the Arduino framework"
+#endif
+
 // 1 stamps each line with the local wall-clock time (HH:MM:SS) instead of NightMare::Platform::monotonicMillis(). Until the
 // clock is valid (before the first time sync) the line falls back to NightMare::Platform::monotonicMillis().
 #ifndef NM_LOG_USE_TIME_OF_DAY

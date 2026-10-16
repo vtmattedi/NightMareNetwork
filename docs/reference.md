@@ -1696,13 +1696,34 @@ Configure:
 
 ```cpp
 #define NM_LOG_LEVEL NM_LOG_LEVEL_DEBUG
+#define NM_LOG_OUTPUT NM_LOG_OUTPUT_ARDUINO
 ```
+
+`NM_LOG_LEVEL` defaults to `OFF`, so log calls compile out. Choose one
+compile-time output (`NM_LOG_OUTPUT` defaults to `NM_LOG_OUTPUT_PRINTF`):
+
+| Output | Destination |
+|---|---|
+| `NM_LOG_OUTPUT_PRINTF` | ESP-IDF `stdout` console, through `printf` |
+| `NM_LOG_OUTPUT_ARDUINO` | Arduino `Serial`, through `Serial.printf` |
+
+Arduino output requires an Arduino build, and the application must initialize
+`Serial` before expecting logs. The Arduino header is included only when
+`NM_LOG_OUTPUT_ARDUINO` is selected and `NM_LOG_LEVEL` is above `OFF`.
+
+Log lines use `[timestamp] [level] [module] message`. The timestamp defaults to
+monotonic milliseconds. Set `NM_LOG_USE_TIME_OF_DAY=1` to use local `HH:MM:SS`
+after time synchronization, with monotonic milliseconds until then.
 
 ANSI formatting:
 
 ```cpp
 #define NM_LOG_USE_ANSI 1
 ```
+
+ANSI colors default on for both outputs.
+Configuration belongs in `NightMareConfig.h` or build flags so library source
+files use the same settings.
 
 Macros:
 
@@ -1761,7 +1782,9 @@ NM_NETWORK_TELEMETRY_INTERVAL_MS 300000UL
 NM_IDENTITY_CLEANUP_RETRY_MS      60000UL
 NM_FIRMWARE_VERSION              "unspecified"
 NM_LOG_LEVEL                     0
+NM_LOG_OUTPUT                    NM_LOG_OUTPUT_PRINTF
 NM_LOG_USE_ANSI                  1
+NM_LOG_USE_TIME_OF_DAY           0
 ```
 
 ## Compile-time dependency graph
