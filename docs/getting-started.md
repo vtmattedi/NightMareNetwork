@@ -315,19 +315,15 @@ identify.onInvoke = onIdentify;
 
 For richer Actions, declare `ActionArgMetadata` and parse the payload in the handler.
 
-## Bind Resources
+## Automatic Resource binding
 
-Bind every Resource before starting the framework:
-
-```cpp
-gResourcesManager.bindResource(&temperature);
-gResourcesManager.bindResource(&power);
-gResourcesManager.bindResource(&identify);
-```
+Each Resource enlists itself when constructed. `startNightMareESP()` binds the
+declared Resources in declaration order before networking starts. No explicit
+`bindResource()` calls are needed for Resources created before startup.
 
 `ResourcesManager` does not own those objects. They must remain alive while bound.
 
-Binding before framework startup also matters for identity cleanup: retained state under an old adopted identity can only be removed for Resources that the current firmware has declared.
+Declaration before framework startup also matters for identity cleanup: retained state under an old adopted identity can only be removed for Resources that the current firmware has declared.
 
 ## Give Managed Values an initial state
 
@@ -357,10 +353,6 @@ void setup()
 
     power.onWrite = onPowerWrite;
     identify.onInvoke = onIdentify;
-
-    gResourcesManager.bindResource(&temperature);
-    gResourcesManager.bindResource(&power);
-    gResourcesManager.bindResource(&identify);
 
     temperature.setValue(0.0f);
     power.setValue(false);
@@ -410,7 +402,7 @@ void loop()
 }
 ```
 
-An ESP-IDF application uses `app_main()` instead. Bind Resources before
+An ESP-IDF application uses `app_main()` instead. Declare Resources before
 startup, then call the same cooperative tick:
 
 ```cpp
@@ -420,7 +412,7 @@ startup, then call the same cooperative tick:
 
 extern "C" void app_main()
 {
-    // Bind application Resources here.
+    // Resources declared before this call are bound during startup.
     startNightMareESP();
     while (true)
     {
@@ -486,12 +478,11 @@ void onOutsideTemperature(
 }
 ```
 
-Then bind it:
+Then configure it before startup:
 
 ```cpp
 outsideTemperature.onUpdate = onOutsideTemperature;
 
-gResourcesManager.bindResource(&outsideTemperature);
 outsideTemperature.setSource("weather-node", "temperature");
 ```
 
@@ -506,14 +497,13 @@ and reinstalls those subscriptions when the active transport reconnects.
 
 ## Use a source selected at runtime
 
-A Remote Resource can be bound before it has a source:
+A Remote Resource can be declared before it has a source:
 
 ```cpp
 RemoteSensor<float> selectedTemperature("selected_temperature");
 
 void setup()
 {
-    gResourcesManager.bindResource(&selectedTemperature);
     startNightMareESP();
 }
 ```
@@ -529,7 +519,7 @@ selectedTemperature.setSource(
 The manager replaces the old subscriptions, resets state learned from the
 previous source, saves the binding in `/remoteresources.json`, and republishes
 the consume manifest. `startNightMareESP()` restores the saved binding on the
-next boot after Resources are bound and before networking starts.
+next boot after Resources are automatically bound and before networking starts.
 
 ## Write another device's state
 
@@ -539,10 +529,9 @@ Declare:
 RemoteState<bool> bedroomPower("bedroom_power");
 ```
 
-Bind it:
+Configure its source:
 
 ```cpp
-gResourcesManager.bindResource(&bedroomPower);
 bedroomPower.setSource("bedroom-ac", "power");
 ```
 
@@ -573,12 +562,11 @@ bedroomPower.authoritativeValue();
 
 ## Invoke a remote Action
 
-Declare and bind:
+Declare and configure:
 
 ```cpp
 RemoteAction identifyRemote("bedroom_identify");
 
-gResourcesManager.bindResource(&identifyRemote);
 identifyRemote.setSource("bedroom-ac", "identify");
 ```
 
@@ -630,7 +618,7 @@ A job may be added before `gScheduler.begin()` / `startNightMareESP()`.
 This is useful for application setup:
 
 ```text
-declare/bind Resources
+declare Resources
 register callbacks/jobs
 start framework
 ```

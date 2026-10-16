@@ -580,7 +580,7 @@ private:
  * each leaf rather than present and rejected at runtime.
  *
  * A module that primarily implements a Resource should normally own the leaf
- * declaration, stable name, handlers and binding alongside its hardware logic.
+ * declaration, stable name and handlers alongside its hardware logic.
  * This keeps reusable module interfaces with the module instead of collecting
  * every Resource declaration in main.cpp. */
 

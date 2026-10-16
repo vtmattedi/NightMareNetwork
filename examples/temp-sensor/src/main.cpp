@@ -69,11 +69,6 @@ void setup()
 
     rescan.onInvoke = onRescan;
 
-    gResourcesManager.bindResource(&temperature);
-    gResourcesManager.bindResource(&connected);
-    gResourcesManager.bindResource(&sensorAddress);
-    gResourcesManager.bindResource(&rescan);
-
     connected.setValue(false);
 
     // The DS18B20 driver is non-blocking; service its state machine regularly.

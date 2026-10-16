@@ -635,8 +635,13 @@ ResourcesManager::MaxResources == 100
 
 Project-facing methods:
 
+Resource construction enlists the object; `startNightMareESP()` calls
+`bindEnlisted()` in declaration order. Explicit `bindResource()` remains
+available for Resources created after startup.
+
 ```cpp
 bool bindResource(NetResource *resource);
+bool bindEnlisted();
 void unbindResource(NetResource *resource);
 bool loadRemoteSources();
 bool loadResourceSettings();
@@ -1504,7 +1509,7 @@ Normal application structure:
 ```cpp
 void setup()
 {
-    // Declare/bind Configs, Resources, and handlers first.
+    // Declare Configs and Resources; register handlers first.
     startNightMareESP();
 
     // Application hardware/services.

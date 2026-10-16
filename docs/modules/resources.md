@@ -1,6 +1,6 @@
 ---
 title: Resources
-description: Declare, bind, publish, observe, write, and invoke NightMare Resources.
+description: Declare, publish, observe, write, and invoke NightMare Resources.
 section: modules
 order: 10
 ---
@@ -83,23 +83,25 @@ The role does not change.
 
 A Remote Resource can be retargeted to another source, but it remains Remote.
 
-## Binding
+## Automatic binding
 
 Resources are owned by the application, not by `ResourcesManager`.
 
-A Resource must therefore outlive its binding.
+A Resource must therefore outlive its binding. Each Resource enlists itself when
+constructed; `startNightMareESP()` binds all enlisted Resources in declaration
+order before networking starts.
 
 ```cpp
 ManagedSensor<float> temperature("temperature");
 
 void setup()
 {
-    gResourcesManager.bindResource(&temperature);
     startNightMareESP();
 }
 ```
 
-The manager stores a non-owning pointer.
+The manager stores a non-owning pointer. Explicit `bindResource()` remains
+available for Resources created after startup or for deliberate manual binding.
 
 A project can later remove the binding:
 
@@ -111,7 +113,7 @@ gResourcesManager.unbindResource(&temperature);
 
 If a module primarily implements a Sensor, State, Action, Event, or Config, that
 module should normally own its declaration, stable name, handlers, and
-binding/exposure. For example, `TemperatureSensor.cpp/.h` should normally own
+exposure. For example, `TemperatureSensor.cpp/.h` should normally own
 the hardware driver and its `ManagedSensor<float>` rather than making
 `main.cpp` a registry of every application capability. Cross-module
 orchestration still belongs above the individual modules.
@@ -133,19 +135,19 @@ and has no runtime or protocol meaning. The convention only gives backend and
 tooling a stable hint for future grouping and relationship inference; flat
 Resource names remain valid.
 
-## Why bind before `startNightMareESP()`
+## Why declare before `startNightMareESP()`
 
 The normal order is:
 
-```cpp
-bind Resources
+```text
+construct Resources
 register handlers
 startNightMareESP()
 ```
 
 This has two benefits.
 
-First, Resources are already registered when MQTT starts, so normal manifest/state announcement can happen immediately.
+First, startup binds the declared Resources before MQTT starts, so normal manifest/state announcement can happen immediately.
 
 Second, if an adopted identity still has retained state to clean up, the cleanup pass can only discover Managed Resources declared by the current firmware.
 
@@ -264,8 +266,8 @@ RemoteSensor<float> outdoorTemperature("outdoor_temperature");
 void setup()
 {
     outdoorTemperature.onUpdate = temperatureChanged;
-    gResourcesManager.bindResource(&outdoorTemperature);
     outdoorTemperature.setSource("weather-node", "temperature");
+    startNightMareESP();
 }
 ```
 
@@ -307,7 +309,7 @@ ManagedState<bool> power("power");
 void setup()
 {
     power.onWrite = onPowerWrite;
-    gResourcesManager.bindResource(&power);
+    startNightMareESP();
 }
 ```
 
@@ -455,7 +457,7 @@ RemoteSensor<float> selectedTemperature("selected_temperature");
 
 void setup()
 {
-    gResourcesManager.bindResource(&selectedTemperature);
+    startNightMareESP();
 }
 ```
 
@@ -494,7 +496,7 @@ The Resource remains Remote.
 If the requested source is invalid, points at the current device, or duplicates another locally bound Resource address, the manager refuses it and keeps the previous source.
 
 At `startNightMareESP()`, persisted bindings are restored after application Resources
-have been bound and before networking starts. Unknown local names and malformed source
+have been automatically bound and before networking starts. Unknown local names and malformed source
 entries are removed from the file. An offline remote device is not a reason to remove a
 binding.
 
@@ -636,7 +638,7 @@ For a Value influenced by several inputs through controller logic, do not use
 declarations are not part of this model.
 
 Dependencies are firmware declarations: never persisted, not runtime
-configurable. Declaring them before `bindResource()` avoids republishing the
+configurable. Declaring them before `startNightMareESP()` avoids republishing the
 manifest once per call.
 
 ## ManagedAction
@@ -674,7 +676,7 @@ ActionResult onSetTimer(ManagedAction &action, const std::string &payload)
 void setup()
 {
     setTimer.onInvoke = onSetTimer;
-    gResourcesManager.bindResource(&setTimer);
+    startNightMareESP();
 }
 ```
 
@@ -795,7 +797,6 @@ ManagedEvent<uint32_t> beep("acoustic:beep");
 
 void setup()
 {
-    gResourcesManager.bindResource(&beep);
     startNightMareESP();
 }
 
@@ -869,8 +870,8 @@ static void onBeep(RemoteEvent<uint32_t> &event, const uint32_t &hertz)
 void setup()
 {
     remoteBeep.onEvent = onBeep;
-    gResourcesManager.bindResource(&remoteBeep);
     remoteBeep.setSource("Watson", "acoustic:beep");
+    startNightMareESP();
 }
 ```
 
@@ -1144,7 +1145,8 @@ subscribeAll()
 setManifestHandler(...)
 ```
 
-Applications normally call only binding and optional manifest-handler methods.
+Applications normally rely on automatic binding during startup. Explicit binding,
+unbinding, and manifest-handler methods remain available when needed.
 
 Remote Resources are published automatically at
 `<device>/manifest/consume/msgpack`. Each declaration appears once in
