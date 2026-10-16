@@ -549,7 +549,7 @@ void TelemetryService::appendHardware(JsonObject dst) const
     dst["cores"] = chip.cores;
     dst["revision"] = chip.revision;
     dst["flash_bytes"] = flashBytes;
-    dst["heap_bytes"] = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+    dst["heap_bytes"] = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     dst["psram_bytes"] = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
 }
 
@@ -641,8 +641,8 @@ void TelemetryService::appendSystem(JsonObject dst) const
 {
     dst["uptime_ms"] = NightMare::Platform::monotonicMillis();
     dst["cpu_mhz"] = esp_clk_cpu_freq() / 1000000;
-    dst["free_heap_bytes"] = esp_get_free_heap_size();
-    dst["min_free_heap_bytes"] = esp_get_minimum_free_heap_size();
+    dst["free_heap_bytes"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    dst["min_free_heap_bytes"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
     dst["free_psram_bytes"] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 }
 

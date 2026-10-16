@@ -1031,10 +1031,11 @@ An Event has no value to show, so its cell describes it instead: its role, for a
 Remote Event its source (`source=-` while unconfigured), and `last_update_ms`.
 
 `>manifest json` returns the named-key manifest. A MessagePack selection
-republishes `<device>/manifest/msgpack` and responds `Republished to MQTT.`;
+republishes `<device>/manifest/msgpack` and responds `Republished.`;
 raw binary is not returned through the text command channel. `publish` makes
 publication explicit. With no format it publishes canonical MessagePack and,
 only when enabled, the optional JSON sibling.
+Bare `>manifest` selects MessagePack and republishes only that manifest.
 
 `>drop` unbinds the addressed Resource.
 

@@ -25,8 +25,15 @@ export function createServer(repo: Repo): McpServer {
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       instructions: [
-        "NightMare Network is an ESP32 C++ framework and MQTT resource protocol. Use search_docs",
-        "first for concepts, protocols and how-tos. Before modifying the library, read",
+        "NightMare Network is a toolkit for custom ESP32 devices, built from reused helpers,",
+        "a common command resolver with MQTT failover, MQTTP request/response, and today's typed",
+        "Resources, Actions, Events, Config declarations and Remote source binding. It is not a",
+        "home automation platform or a framework for mass producing one fixed product.",
+        "Read get_doc('overview') for its history and intended fit; use search_docs for concepts,",
+        "protocols and how-tos. The C++ library builds with ESP-IDF or Arduino; only optional OTA",
+        "requires Arduino. Resource, consume and hardware documents use MessagePack by default;",
+        "the Config declaration manifest is MessagePack returned as Base64 by CONFIG MANIFEST.",
+        "Before modifying the library, read",
         "contributing/editing-library plus the linked architecture documents;",
         "get_api for a specific function, class or macro; search_source / get_source when the docs",
         "are not enough. If documentation and source disagree, the source is right. Every result",
@@ -68,7 +75,8 @@ export function createServer(repo: Repo): McpServer {
       title: "Get a document",
       description:
         "Returns one documentation page in full, as markdown. Paths are relative to docs/ without " +
-        "the extension, e.g. 'protocols/mqttp' or 'getting-started'. Use list_docs to see them.",
+        "the extension, e.g. 'overview', 'protocols/mqttp' or 'getting-started'. " +
+        "Read 'overview' for the project's history and intended use. Use list_docs to see all pages.",
       inputSchema: { path: z.string().min(1).describe("Document path, e.g. 'protocols/resources'") },
     },
     async ({ path }) => {

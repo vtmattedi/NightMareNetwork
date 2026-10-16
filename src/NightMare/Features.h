@@ -127,9 +127,9 @@
 #ifndef NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
 #define NM_ENABLE_REMOTE_RESOURCE_VERIFICATION 1
 #endif
-// Which encoding `>manifest` returns when asked for neither: json or mpack.
+// Which encoding `>manifest` selects when asked for neither: json or msgpack.
 #ifndef NM_DEFAULT_MANIFEST_FORMAT
-#define NM_DEFAULT_MANIFEST_FORMAT json
+#define NM_DEFAULT_MANIFEST_FORMAT msgpack
 #endif
 // How often a pending cleanup of a previous identity is retried. Deliberately
 // slow: it only matters after an adoption, and each attempt publishes.

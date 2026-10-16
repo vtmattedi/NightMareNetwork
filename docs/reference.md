@@ -1744,6 +1744,7 @@ NM_ENABLE_WEBSOCKET                 0
 NM_ENABLE_LVGL                      0
 
 NM_ENABLE_ACTION_PAYLOAD_ASSERTION  0
+NM_DEFAULT_MANIFEST_FORMAT          msgpack
 
 NM_SCHEDULER_OWN_TASK               1
 NM_CONSOLE_BUILTINS                 1

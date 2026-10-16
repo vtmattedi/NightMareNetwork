@@ -9,6 +9,7 @@ static ManagedAction rescan("rescan");
 
 static uint32_t publishedReadMs = 0;
 static std::string publishedAddress;
+static bool publishedConnected = false;
 
 static ActionResult onRescan(ManagedAction &, const std::string &payload)
 {
@@ -25,10 +26,10 @@ static void pollSensor()
     tickTempSensor();
     const TempSensorStatus status = tempSensorStatus();
 
-    if (!connected.hasAuthoritativeValue() ||
+    if (!publishedConnected ||
         connected.getValue() != status.connected)
     {
-        connected.setValue(status.connected);
+        publishedConnected = connected.setValue(status.connected);
     }
 
     if (status.connected && status.address[0] != '\0')

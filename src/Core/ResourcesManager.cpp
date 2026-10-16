@@ -89,12 +89,12 @@ namespace
     }
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
-/// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT mpack`
+/// bare word in NightMareConfig.h -- `#define NM_DEFAULT_MANIFEST_FORMAT msgpack`
 /// -- so the setting reads the way the command does.
 #define NM_MANIFEST_FORMAT_STR2(x) #x
 #define NM_MANIFEST_FORMAT_STR(x) NM_MANIFEST_FORMAT_STR2(x)
 
-    /// @brief "json" or "mpack", case-insensitively. Empty selects the default.
+    /// @brief "json", "msgpack", or "mpack", case-insensitively. Empty selects the default.
     bool parseDocumentFormat(const std::string &text, DocumentFormat &format)
     {
         std::string wanted = text;
@@ -2245,7 +2245,7 @@ ActionResult ResourcesManager::executeCommand(const std::string &expression)
                                              : std::string("Manifest publish failed.")};
             }
 
-            DocumentFormat format = DocumentFormat::JSON;
+            DocumentFormat format = DocumentFormat::MSGPACK;
             if (!parseDocumentFormat(formatArgument, format))
                 return {false, std::string("Usage: >manifest [publish] [json|msgpack]")};
 

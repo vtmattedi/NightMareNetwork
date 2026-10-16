@@ -23,6 +23,13 @@ into memory when it starts.
 
 There is no separate documentation database and no embedding index.
 
+For the project's origin and intended use, ask for `get_doc` with `path: "overview"`.
+That shared page covers the progression from reused helpers to the common command
+resolver and MQTT failover, then MQTTP, then today's Resources and Configs.
+For exact current API behavior, use `get_api` or inspect `src/` through
+`get_source`. The server tells clients that the C++ library supports ESP-IDF
+and Arduino, with Arduino required only for optional OTA.
+
 ## Public endpoint
 
 The project website currently advertises the Streamable HTTP endpoint:

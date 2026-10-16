@@ -15,6 +15,22 @@ NightMare makes those repeated concerns part of the framework.
 
 The goal is not to turn every device into the same application. The goal is to make different applications participate in the network in the same way.
 
+## How it grew
+
+NightMare Network began as helpers reused across several firmware projects. As those projects needed to talk to their microcontrollers in the same way, the helpers became a common command resolver and MQTT addressing conventions. MQTT broker failover meant the device could keep using that conversation as network conditions changed.
+
+MQTTP came next: a correlated request/response pattern over MQTT. It gave a caller its own reply topic while keeping the same command parser and project resolver. A command from an operator, another device, or a service could follow one grammar.
+
+The current model makes application capabilities explicit. A device binds typed Managed and Remote Resources: Values for state, Actions for operations, and Events for occurrences. Resource manifests describe what a device offers; a separate consume manifest describes what it uses. A Remote Resource keeps a stable local name while its source binding can change. `Config<T>` declarations are bound into their own MessagePack declaration manifest and can be restored from persistent settings.
+
+The C++ library now builds with ESP-IDF or Arduino. OTA is the optional Arduino-only module; the rest of the library does not require the Arduino framework.
+
+## What it is for
+
+NightMare is a fast starting point for a custom ESP32 device. Bind a `Config<T>` and its declaration appears in the Config manifest. Bind a `ManagedSensor<T>` and it appears in the Resource manifest; its readings have a standard state topic. The framework supplies the shared network behavior, while the application decides what the device senses, does, and exposes.
+
+A device such as Watson, an acoustic detector, is the kind of problem this serves: its detection logic is specific to its hardware and purpose, but its configuration, events, commands, and network presence can use common tools. The framework gives that custom work a structure without prescribing its implementation.
+
 ## Philosophy
 
 The central rule is:
@@ -236,7 +252,7 @@ for framework work that is intentionally cooperative. Components that already ow
 
 ## What NightMare is not
 
-NightMare is not a replacement for application logic, hardware drivers, or a general distributed database.
+NightMare is not a home automation platform, a universal optimizer for every subsystem it touches, or a framework for mass producing one fixed product. It is a set of practical tools for building a particular device with full control of its hardware and application behavior. It does not replace application logic, hardware drivers, or a general distributed database.
 
 It also does not attempt to make every behavior transparent. Important limitations and trade-offs are documented explicitly, including the current ESP32 focus, the absence of namespace in topic addressing, the lack of a centralized runtime execution queue, and the deliberate use of plain function-pointer Scheduler callbacks.
 

@@ -549,6 +549,14 @@ void setup()
     advertisementManager.setPublisher(&advertisementPublisher);
     const bool advertisementBound = advertisementManager.bindResource(&advertised) &&
                                     advertisementManager.bindResource(&flatAdvertisement);
+    const int manifestsBeforeDefaultCommand = advertisementPublisher.manifestPublishes;
+    const std::string jsonBeforeDefaultCommand = advertisementPublisher.lastManifestJson;
+    const ActionResult defaultManifest = advertisementManager.executeCommand("manifest");
+    const bool defaultManifestIsMessagePack = defaultManifest.success &&
+        defaultManifest.result == "Republished." &&
+        advertisementPublisher.manifestPublishes == manifestsBeforeDefaultCommand + 1 &&
+        !advertisementPublisher.lastManifestPacked.empty() &&
+        advertisementPublisher.lastManifestJson == jsonBeforeDefaultCommand;
     JsonDocument legacySettings;
     legacySettings["advertisement:primary"]["enabled"] = true;
     legacySettings["advertisement:primary"]["period"] = 5;
@@ -746,7 +754,8 @@ void setup()
         hardwareManifest.result.find("\"note\":\"Address: 0x48\"") != std::string::npos &&
         hardwareManifest.result.find("\"name\":\"plain_sensor\",\"kind\":\"value\",\"access\":\"read\",\"type\":\"integer\",\"advertise_ms\":300000,\"hardware\"") == std::string::npos;
 
-    const bool advertisementLifecycle = advertisementBound && immediateAdvertisement &&
+    const bool advertisementLifecycle = advertisementBound && defaultManifestIsMessagePack &&
+        immediateAdvertisement &&
         legacyMigrated && periodSet.success &&
         disabledStillComputes && enabledAdvertised &&
         unavailableStillComputes && availabilityRecovered && freshnessBound &&

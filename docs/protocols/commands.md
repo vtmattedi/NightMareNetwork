@@ -53,10 +53,11 @@ No space after `>` selects an internal ResourceManager operation:
 `>list` returns the manager's currently bound Resources as JSON.
 
 `>manifest json` returns the readable manifest. `>manifest msgpack` republishes
-the retained compact manifest and returns `Republished to MQTT.` because raw
+the retained compact manifest and returns `Republished.` because raw
 MessagePack is not useful on a text command response. `publish` explicitly
 requests MQTT publication; with no format it republishes canonical MessagePack
 and the optional JSON sibling only when `NM_ENABLE_JSON_WIRE=1`.
+Bare `>manifest` selects MessagePack and republishes only that manifest.
 
 `>raw` sends the supplied MQTT-shaped topic and opaque payload through `ResourcesManager::handleIngressMessage()`.
 

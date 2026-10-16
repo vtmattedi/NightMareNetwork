@@ -8,10 +8,10 @@ export function Home() {
   return (
     <>
       <Head>
-        <title>NightMare Network · ESP32 devices that speak the same language</title>
+        <title>NightMare Network · Build the device, share the language</title>
         <meta
           name="description"
-          content="NightMare Network is an ESP32 C++ framework and MQTT resource protocol for devices that expose, discover and use each other's state and capabilities."
+          content="NightMare Network gives custom ESP32 devices a quick start with shared MQTT, commands, configuration and structured Resources, while you keep control of the device."
         />
         <meta property="og:title" content="NightMare Network" />
       </Head>
@@ -20,21 +20,24 @@ export function Home() {
         <div className="wrap hero-inner">
           <Logo size={140} className="hero-logo" />
           <h1>
-            ESP32 devices that speak <span className="accent">the same language</span>.
+            Build the device. <span className="accent">Share the language.</span>
           </h1>
           <p className="lede">
-            NightMare Network standardizes the plumbing that otherwise gets rebuilt in every
-            networked firmware project: identity, MQTT addressing, retained state, Resources,
-            commands, scheduling and device telemetry.
+            NightMare Network grew from helpers reused across projects into a practical starting
+            point for custom ESP32 devices. Identity, MQTT, commands, configuration and Resources
+            already have a place; your firmware decides what the device does.
           </p>
           <p className="lede">
-            <strong>Register once, participate automatically.</strong> Your application still owns
-            the hardware and business logic; NightMare owns the repeated network behavior around it.
+            <strong>Declare it, then use it.</strong> Bind a Config or a sensor and its declaration
+            appears in the appropriate manifest. Keep full control of the hardware and behavior.
           </p>
           <div className="cta">
             <Link className="btn btn-primary" to="/docs/getting-started">
               Get started
             </Link>
+            <a className="btn" href="#story">
+              How it grew
+            </a>
             <Link className="btn" to="/docs/mcp">
               Connect the MCP
             </Link>
@@ -46,9 +49,79 @@ export function Home() {
         </div>
       </section>
 
+      <section id="story" className="wrap story" aria-labelledby="story-title">
+        <div className="story-intro">
+          <p className="eyebrow">The project so far</p>
+          <h2 id="story-title">From repeated helpers to a common device language</h2>
+          <p>
+            Each stage came from building devices and finding the same work in the next project.
+            The result is a framework for the shared parts, with room for each device to be its own.
+          </p>
+        </div>
+        <ol className="story-steps">
+          <li>
+            <span className="story-number">01</span>
+            <div>
+              <h3>Helpers became a conversation</h3>
+              <p>
+                Reused firmware helpers grew into MQTT addressing, a common command resolver and
+                failover. Projects could talk to their microcontrollers through one familiar path.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span className="story-number">02</span>
+            <div>
+              <h3>MQTTP added replies</h3>
+              <p>
+                A request and response model over MQTT gave each caller a correlated reply topic.
+                It still uses the same command grammar and project resolver.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span className="story-number">03</span>
+            <div>
+              <h3>Capabilities became explicit</h3>
+              <p>
+                Today, typed Resources describe Values, Actions and Events. Config declarations
+                have their own manifest, and Remote Resources bind a stable local name to a source.
+              </p>
+            </div>
+          </li>
+        </ol>
+        <Link to="/docs/overview">Read the full overview →</Link>
+      </section>
+
+      <section className="wrap fit" aria-labelledby="fit-title">
+        <div>
+          <p className="eyebrow">The intended fit</p>
+          <h2 id="fit-title">A quick start for the device you actually want to build</h2>
+          <p>
+            NightMare handles the repeatable network work. You choose the sensors, the actions,
+            the event payloads, the hardware, and the rules that make this device useful.
+          </p>
+          <p>
+            Think of Watson, a custom acoustic detector: its detection logic belongs to that
+            project, while its configuration and network conversation can use common tools.
+          </p>
+        </div>
+        <div className="fit-note">
+          <h3>Practical scope</h3>
+          <p>
+            This is a toolkit for specific, tailored devices. It does not try to optimize every
+            subsystem, become a home automation platform, or prescribe a mass production product.
+          </p>
+          <p>
+            The library builds under ESP-IDF or Arduino. OTA alone remains an optional
+            Arduino-only module.
+          </p>
+        </div>
+      </section>
+
       <section className="wrap features">
         <Feature title="Resources are the application contract" to="/docs/modules/resources">
-          Expose typed Values and Actions as <code>Managed</code> Resources, or bind{" "}
+          Expose typed Values, Actions and Events as <code>Managed</code> Resources, or bind{" "}
           <code>Remote</code> Resources implemented by another device. The framework handles
           manifests, retained state, subscriptions and reconnect.
         </Feature>
@@ -65,13 +138,13 @@ export function Home() {
         </Feature>
 
         <Feature title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
-          Wall or monotonic, one-shot or recurring, String command or callback. USER jobs stay
+          Wall or monotonic, one-shot or recurring, std::string command or callback. USER jobs stay
           separate from MANAGED framework/application jobs.
         </Feature>
 
         <Feature title="Local and remote MQTT are transport choices" to="/docs/modules/network">
-          Devices normally share a Local MQTT cluster and can bridge toward Remote MQTT/backend
-          services. Broker choice is independent of Resource ownership.
+          Devices can use a Local MQTT cluster or Remote MQTT/backend services. Broker policy and
+          transport failover stay independent of Resource ownership.
         </Feature>
 
         <Feature title="Docs and source share one MCP" to="/docs/mcp">
@@ -87,19 +160,17 @@ export function Home() {
           state are retained; writes, Action invocations and commands are transient.
         </p>
         <pre className="code">
-          <code>{`bedroom-ac/status                         {"name":"bedroom-ac","hardware":"Esp32-nm-6ca172e0","online":true}   retained
-bedroom-ac/info                           {"identity":{...},"hardware":{...},"build":{...},"boot":{...}}        retained
-bedroom-ac/telemetry/system               {"uptime_ms":3612000,"free_heap_bytes":...}                            retained
+          <code>{`bedroom-ac/status                          {"name":"bedroom-ac","hardware":"...","timezone":"UTC0","online":true}  retained
+bedroom-ac/manifest/msgpack                <MessagePack Resource manifest>                            retained
+bedroom-ac/manifest/consume/msgpack        <MessagePack consume manifest>                             retained
+bedroom-ac/resource/temperature/state     23.44                                                      retained
 
-bedroom-ac/resources                      {"version":2,"resources":[...]}                                        retained
-bedroom-ac/resources/temperature/state    23.44                                                                 retained
-bedroom-ac/resources/power/state          true                                                                  retained
-
-→ bedroom-ac/resources/power/set          false
-→ bedroom-ac/resources/identify/invoke
-
+→ bedroom-ac/resource/power/set            false
+→ bedroom-ac/resource/identify/invoke
 → bedroom-ac/console/controlled/req-42/in   INFO SYSTEM
-← bedroom-ac/console/controlled/req-42/out  {"uptime_ms":3612000,"cpu_mhz":160,...}`}</code>
+← bedroom-ac/console/controlled/req-42/out  {"uptime_ms":3612000,"cpu_mhz":160,...}
+
+CONFIG MANIFEST → Base64 of the MessagePack Config declaration manifest`}</code>
         </pre>
         <p>
           <Link to="/docs/protocols/topics">Topics</Link> ·{" "}
