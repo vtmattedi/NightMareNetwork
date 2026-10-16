@@ -110,7 +110,7 @@ h1, h2, h3, h4 { font-family: var(--display); line-height: 1.2; letter-spacing: 
 .btn:hover { text-decoration: none; border-color: var(--fg-3); }
 .btn-primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 .btn-primary:hover { filter: brightness(1.06); }
-.hero-code { display: inline-block; text-align: left; margin: 0; }
+.hero-code { display: inline-block; max-width: 100%; text-align: left; margin: 0; }
 
 /* ---- origin and intended use ---- */
 .story { padding-top: 54px; padding-bottom: 34px; }

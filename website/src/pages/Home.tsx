@@ -138,7 +138,7 @@ export function Home() {
         </Feature>
 
         <Feature title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
-          Wall or monotonic, one-shot or recurring, std::string command or callback. USER jobs stay
+          Wall or monotonic, one-shot or recurring, <code>std::string</code> command or callback. USER jobs stay
           separate from MANAGED framework/application jobs.
         </Feature>
 

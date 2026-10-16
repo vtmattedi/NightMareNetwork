@@ -29,6 +29,7 @@ export function createServer(repo: Repo): McpServer {
         "a common command resolver with MQTT failover, MQTTP request/response, and today's typed",
         "Resources, Actions, Events, Config declarations and Remote source binding. It is not a",
         "home automation platform or a framework for mass producing one fixed product.",
+        "It aims for a quick start with full application control, not universal optimization.",
         "Read get_doc('overview') for its history and intended fit; use search_docs for concepts,",
         "protocols and how-tos. The C++ library builds with ESP-IDF or Arduino; only optional OTA",
         "requires Arduino. Resource, consume and hardware documents use MessagePack by default;",
