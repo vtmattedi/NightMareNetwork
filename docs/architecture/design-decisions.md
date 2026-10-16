@@ -448,3 +448,17 @@ Examples include the legacy Scheduler file import and literal status payloads.
 **Reason:** NightMare is still converging on its first stable architecture. Carrying compatibility for pre-freeze designs would make the code and documentation permanently explain several models at once.
 
 **Consequence:** users of older development snapshots may need to clear/recreate persisted state when moving to the frozen model.
+
+## ESP-IDF is the non-OTA platform boundary
+
+**Decision:** public text values use `std::string`. Timing, chip information,
+SNTP, console output, and persistence use ESP-IDF facilities. ArduinoOTA is
+available only in an Arduino framework build with `NM_ENABLE_OTA=1`.
+
+**Reason:** the library should build under ESP-IDF without carrying Arduino
+types or services through its Resource and network APIs.
+
+**Consequence:** the former LittleFS files are not migrated. SPIFFS formats the
+partition on first mount when it contains incompatible data; stored settings,
+jobs, and remote-source bindings need to be configured again. The build
+telemetry document no longer contains `arduino_version`.

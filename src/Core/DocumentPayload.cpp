@@ -5,10 +5,10 @@ namespace
 {
 /// @brief ArduinoJson accepts this sink through its ordinary writer interface.
 /// Its block write keeps MessagePack zero bytes intact.
-class StringSink
+class ByteSink
 {
 public:
-    explicit StringSink(std::string &out) : out_(out) {}
+    explicit ByteSink(std::string &out) : out_(out) {}
 
     size_t write(uint8_t value)
     {
@@ -88,7 +88,7 @@ PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentFormat for
     }
     out.reserve(expected);
 
-    StringSink sink(out);
+    ByteSink sink(out);
     const size_t written = packed ? serializeMsgPack(doc, sink) : serializeJson(doc, sink);
     if (written != expected || out.length() != expected)
     {

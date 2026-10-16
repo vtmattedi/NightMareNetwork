@@ -5,6 +5,7 @@
 #include "DeviceIdentity.h"
 #include "Time.h"
 #include <esp_system.h>
+#include <cmath>
 #include <Network/Connectivity.h>
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
@@ -49,7 +50,7 @@ static bool parseTxPowerArg(std::string arg, int &quarterDbm)
         return false;
     const float dbm = NightMare::Text::toFloat(arg);
     const int quarter = static_cast<int>(dbm * 4.0f + (dbm < 0 ? -0.5f : 0.5f));
-    if (quarter == NightMare::NM_TX_POWER_AUTO || fabsf(dbm * 4.0f - quarter) > 0.01f ||
+    if (quarter == NightMare::NM_TX_POWER_AUTO || std::fabs(dbm * 4.0f - quarter) > 0.01f ||
         !WiFi_isValidTxPower(quarter))
         return false;
     quarterDbm = quarter;
