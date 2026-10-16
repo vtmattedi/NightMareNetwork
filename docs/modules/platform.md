@@ -630,6 +630,9 @@ NM_ENABLE_WEBSOCKET
 NM_ENABLE_LVGL
 ```
 
+An ESP-IDF build with `NM_ENABLE_WEBSOCKET=1` also needs
+`CONFIG_HTTPD_WS_SUPPORT=y` in `sdkconfig.defaults`.
+
 They are not part of the core Resource architecture and have not received the same freeze-level architecture pass.
 
 New core design should not use those modules as precedent for Resource/network semantics.

@@ -1,5 +1,4 @@
 #include "DocumentPayload.h"
-#include <esp_heap_caps.h>
 
 namespace
 {
@@ -81,12 +80,11 @@ PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentFormat for
     // up front also stops the sink reallocating as it appends, and it is the
     // honest place for this to fail: if the heap cannot offer this block now,
     // it could not have held the payload either.
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < expected + 1)
+    if (!NightMare::Text::tryReserve(out, expected))
     {
         out = std::string();
         return PayloadResult::NoContiguousBlock;
     }
-    out.reserve(expected);
 
     ByteSink sink(out);
     const size_t written = packed ? serializeMsgPack(doc, sink) : serializeJson(doc, sink);

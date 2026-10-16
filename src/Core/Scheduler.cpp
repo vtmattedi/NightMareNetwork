@@ -487,7 +487,7 @@ bool Scheduler::load()
     if (!NightMare::Storage::exists(JobsFile))
         return true;
     std::string file;
-    if (!NightMare::Storage::read(JobsFile, file, 32768))
+    if (!NightMare::Storage::read(JobsFile, file, SIZE_MAX))
         return false;
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);

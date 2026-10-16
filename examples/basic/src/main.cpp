@@ -31,7 +31,10 @@ static void publishUptime()
 static void preferLocalBroker(bool firstConnection)
 {
     if (firstConnection)
-        NightMare::SelectConnection(NightMare::ConnectionType::LOCAL_MQTT);
+    {
+        NightMare::Mqtt_enable(NightMare::MqttProfile::LOCAL);
+        NightMare::SelectConnection(NightMare::ConnectionType::MQTT);
+    }
 }
 
 void setup()
@@ -52,7 +55,7 @@ void setup()
     gScheduler.everyMonotonic("app.uptime", publishUptime, 1000);
 
     // The standard lifecycle starts Remote MQTT on the first WiFi connection.
-    // For this local development example, switch immediately to Local MQTT.
+    // For this local development example, switch to the Local MQTT profile.
     WiFi_onConnected(preferLocalBroker);
 
     startNightMareESP();

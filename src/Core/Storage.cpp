@@ -134,7 +134,10 @@ bool write(const std::string &path, const std::string &data, bool atomic)
 bool remove(const std::string &path)
 {
     const std::string name = physicalPath(path);
-    return mount() && !name.empty() && std::remove(name.c_str()) == 0;
+    if (!mount() || name.empty() || std::remove(name.c_str()) != 0)
+        return false;
+    const std::string backup = name + ".bak";
+    return !fileExists(backup) || std::remove(backup.c_str()) == 0;
 }
 
 bool rename(const std::string &from, const std::string &to)

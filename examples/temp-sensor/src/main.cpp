@@ -54,7 +54,10 @@ static void pollSensor()
 static void preferLocalBroker(bool firstConnection)
 {
     if (firstConnection)
-        NightMare::SelectConnection(NightMare::ConnectionType::LOCAL_MQTT);
+    {
+        NightMare::Mqtt_enable(NightMare::MqttProfile::LOCAL);
+        NightMare::SelectConnection(NightMare::ConnectionType::MQTT);
+    }
 }
 
 void setup()

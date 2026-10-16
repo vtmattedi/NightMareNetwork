@@ -6,11 +6,6 @@
 #include "Storage.h"
 #include <ArduinoJson.h>
 
-namespace
-{
-constexpr size_t MaxSettingsBytes = 32768;
-}
-
 StateStore PersistentSettings(true);
 
 bool StateStore::begin()
@@ -45,7 +40,7 @@ bool StateStore::load()
     }
 
     std::string file;
-    if (!NightMare::Storage::read(SETTINGS_FILE, file, MaxSettingsBytes))
+    if (!NightMare::Storage::read(SETTINGS_FILE, file, SIZE_MAX))
         return false;
     JsonDocument doc;
     const DeserializationError error = deserializeJson(doc, file);
@@ -67,8 +62,7 @@ bool StateStore::save()
         return false;
     const std::string json = RuntimeState::toJson();
 
-    return json.size() <= MaxSettingsBytes &&
-           NightMare::Storage::write(SETTINGS_FILE, json, true);
+    return NightMare::Storage::write(SETTINGS_FILE, json, true);
 }
 
 bool StateStore::set(const std::string &key, const std::string &value)
