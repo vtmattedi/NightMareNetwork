@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 #include <errno.h>
 #include <limits>
@@ -25,11 +26,11 @@ enum class NetValueType : uint8_t
     COLOUR
 };
 
-/// @brief Translates a value between its C++ type and the String used on the
+/// @brief Translates a value between its C++ type and the std::string used on the
 /// wire. This is the typed boundary for NetValue<T> only: actions describe their
 /// arguments with runtime metadata instead of a single T.
 /// Left undefined on purpose: an unsupported T fails to compile at the codec
-/// rather than silently degrading to a String somewhere deeper in the stack.
+/// rather than silently degrading to a std::string somewhere deeper in the stack.
 template <typename T, typename Enable = void>
 struct NetCodec;
 
@@ -44,15 +45,15 @@ namespace NetCodecDetail
     struct IntegerText<true>
     {
         template <typename T>
-        static String encode(T value)
+        static std::string encode(T value)
         {
             char buffer[24];
             snprintf(buffer, sizeof(buffer), "%lld", (long long)value);
-            return String(buffer);
+            return std::string(buffer);
         }
 
         template <typename T>
-        static bool decode(const String &text, T &out)
+        static bool decode(const std::string &text, T &out)
         {
             const char *begin = text.c_str();
             char *end = nullptr;
@@ -72,15 +73,15 @@ namespace NetCodecDetail
     struct IntegerText<false>
     {
         template <typename T>
-        static String encode(T value)
+        static std::string encode(T value)
         {
             char buffer[24];
             snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)value);
-            return String(buffer);
+            return std::string(buffer);
         }
 
         template <typename T>
-        static bool decode(const String &text, T &out)
+        static bool decode(const std::string &text, T &out)
         {
             const char *begin = text.c_str();
             if (*begin == '-') // strtoull wraps negatives instead of rejecting them.
@@ -100,7 +101,7 @@ namespace NetCodecDetail
     // Shortest representation that still decodes back to the same value, so
     // payloads stay readable ("23.5") without a round trip changing the value
     // and looking like a remote update.
-    inline String encodeReal(double value, int maxPrecision, bool narrowToFloat)
+    inline std::string encodeReal(double value, int maxPrecision, bool narrowToFloat)
     {
         // %.17g needs at most 24 characters. GCC cannot see that through a
         // runtime precision, so the length is checked rather than trusted.
@@ -112,12 +113,12 @@ namespace NetCodecDetail
                 break;
             const double parsed = strtod(buffer, nullptr);
             if (narrowToFloat ? ((float)parsed == (float)value) : (parsed == value))
-                return String(buffer);
+                return std::string(buffer);
         }
         const int written = snprintf(buffer, sizeof(buffer), "%.*g", maxPrecision, value);
         if (written < 0 || written >= (int)sizeof(buffer))
-            return String();
-        return String(buffer);
+            return std::string();
+        return std::string(buffer);
     }
 }
 
@@ -126,16 +127,16 @@ struct NetCodec<bool>
 {
     static constexpr NetValueType Type = NetValueType::BOOLEAN;
 
-    static String encode(const bool &value) { return value ? "true" : "false"; }
+    static std::string encode(const bool &value) { return value ? "true" : "false"; }
 
-    static bool decode(const String &encoded, bool &out)
+    static bool decode(const std::string &encoded, bool &out)
     {
-        if (encoded.equalsIgnoreCase("true") || encoded == "1")
+        if (NightMare::Text::equalsIgnoreCase(encoded, "true") || encoded == "1")
         {
             out = true;
             return true;
         }
-        if (encoded.equalsIgnoreCase("false") || encoded == "0")
+        if (NightMare::Text::equalsIgnoreCase(encoded, "false") || encoded == "0")
         {
             out = false;
             return true;
@@ -150,12 +151,12 @@ struct NetCodec<T, typename std::enable_if<std::is_integral<T>::value &&
 {
     static constexpr NetValueType Type = NetValueType::INTEGER;
 
-    static String encode(const T &value)
+    static std::string encode(const T &value)
     {
         return NetCodecDetail::IntegerText<std::is_signed<T>::value>::encode(value);
     }
 
-    static bool decode(const String &encoded, T &out)
+    static bool decode(const std::string &encoded, T &out)
     {
         if (encoded.length() == 0)
             return false;
@@ -168,13 +169,13 @@ struct NetCodec<T, typename std::enable_if<std::is_floating_point<T>::value>::ty
 {
     static constexpr NetValueType Type = NetValueType::FLOAT;
 
-    static String encode(const T &value)
+    static std::string encode(const T &value)
     {
         const bool narrowToFloat = std::is_same<T, float>::value;
         return NetCodecDetail::encodeReal((double)value, narrowToFloat ? 9 : 17, narrowToFloat);
     }
 
-    static bool decode(const String &encoded, T &out)
+    static bool decode(const std::string &encoded, T &out)
     {
         const char *begin = encoded.c_str();
         if (*begin == '\0')
@@ -189,15 +190,15 @@ struct NetCodec<T, typename std::enable_if<std::is_floating_point<T>::value>::ty
 };
 
 /// An empty payload on the wire means "deleted / unavailable", so the empty
-/// String is not a value a resource can hold.
+/// std::string is not a value a resource can hold.
 template <>
-struct NetCodec<String>
+struct NetCodec<std::string>
 {
     static constexpr NetValueType Type = NetValueType::STRING;
 
-    static String encode(const String &value) { return value; }
+    static std::string encode(const std::string &value) { return value; }
 
-    static bool decode(const String &encoded, String &out)
+    static bool decode(const std::string &encoded, std::string &out)
     {
         if (encoded.length() == 0)
             return false;
@@ -211,8 +212,8 @@ struct NetCodec<TimeType>
 {
     static constexpr NetValueType Type = NetValueType::TIME;
 
-    static String encode(const TimeType &value) { return encodeTime(value); }
-    static bool decode(const String &encoded, TimeType &out)
+    static std::string encode(const TimeType &value) { return encodeTime(value); }
+    static bool decode(const std::string &encoded, TimeType &out)
     {
         return decodeTime(encoded, out);
     }
@@ -223,8 +224,8 @@ struct NetCodec<ColourType>
 {
     static constexpr NetValueType Type = NetValueType::COLOUR;
 
-    static String encode(const ColourType &value) { return encodeColour(value); }
-    static bool decode(const String &encoded, ColourType &out)
+    static std::string encode(const ColourType &value) { return encodeColour(value); }
+    static bool decode(const std::string &encoded, ColourType &out)
     {
         return decodeColour(encoded, out);
     }

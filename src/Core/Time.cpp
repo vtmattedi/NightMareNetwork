@@ -24,25 +24,25 @@ tm localParts(time_t epoch)
     return result;
 }
 
-String strftimeString(const tm &parts, const char *format)
+std::string strftimeString(const tm &parts, const char *format)
 {
     char buffer[32] = {};
-    return strftime(buffer, sizeof(buffer), format, &parts) != 0 ? String(buffer) : String();
+    return strftime(buffer, sizeof(buffer), format, &parts) != 0 ? std::string(buffer) : std::string();
 }
 
-String durationString(uint64_t seconds, bool countdown, bool negative)
+std::string durationString(uint64_t seconds, bool countdown, bool negative)
 {
-    String value;
+    std::string value;
     if (negative)
         value += '-';
 
     if (!countdown)
     {
         if (seconds < 90)
-            return value + String(static_cast<unsigned long>(seconds)) + " sec.";
+            return value + std::to_string(static_cast<unsigned long>(seconds)) + " sec.";
         if (seconds < 90 * SecondsPerMinute)
-            return value + String(static_cast<unsigned long>(seconds / SecondsPerMinute)) + " min.";
-        return value + String(static_cast<unsigned long>(seconds / SecondsPerHour)) + " hours.";
+            return value + std::to_string(static_cast<unsigned long>(seconds / SecondsPerMinute)) + " min.";
+        return value + std::to_string(static_cast<unsigned long>(seconds / SecondsPerHour)) + " hours.";
     }
 
     const uint64_t hours = seconds / SecondsPerHour;
@@ -55,7 +55,7 @@ String durationString(uint64_t seconds, bool countdown, bool negative)
     else
         snprintf(buffer, sizeof(buffer), "%s%02u:%02u", negative ? "-" : "",
                  minutes, remainingSeconds);
-    return String(buffer);
+    return std::string(buffer);
 }
 }
 
@@ -84,7 +84,7 @@ int day(time_t epoch) { return utcParts(epoch).tm_mday; }
 int month(time_t epoch) { return utcParts(epoch).tm_mon + 1; }
 int year(time_t epoch) { return utcParts(epoch).tm_year + 1900; }
 
-String timestampToDateString(time_t timestamp, TimeStampFormat format)
+std::string timestampToDateString(time_t timestamp, TimeStampFormat format)
 {
     const time_t current = now();
     if (format == TimeSinceStamp || format == CountdownFromTimestamp)
@@ -112,9 +112,9 @@ String timestampToDateString(time_t timestamp, TimeStampFormat format)
         return strftimeString(parts, "%H:%M:%S");
     case OnlyTimeLive:
     {
-        String value = strftimeString(parts, "%H:%M");
+        std::string value = strftimeString(parts, "%H:%M");
         if ((current & 1) != 0 && value.length() >= 3)
-            value.setCharAt(2, ' ');
+            value[2] = ' ';
         return value;
     }
     case DowDate:
@@ -123,20 +123,22 @@ String timestampToDateString(time_t timestamp, TimeStampFormat format)
     case CountdownFromTimestamp:
         break;
     }
-    return String();
+    return std::string();
 }
 
-time_t timestampOfNextOccurrence(const String &timeString)
+time_t timestampOfNextOccurrence(const std::string &timeString)
 {
     if (!valid())
         return 0;
-    if (timeString.length() != 5 || timeString.charAt(2) != ':' ||
-        !isDigit(timeString.charAt(0)) || !isDigit(timeString.charAt(1)) ||
-        !isDigit(timeString.charAt(3)) || !isDigit(timeString.charAt(4)))
+    if (timeString.length() != 5 || timeString[2] != ':' ||
+        !std::isdigit(static_cast<unsigned char>(timeString[0])) ||
+        !std::isdigit(static_cast<unsigned char>(timeString[1])) ||
+        !std::isdigit(static_cast<unsigned char>(timeString[3])) ||
+        !std::isdigit(static_cast<unsigned char>(timeString[4])))
         return 0;
 
-    const int targetHour = timeString.substring(0, 2).toInt();
-    const int targetMinute = timeString.substring(3, 5).toInt();
+    const int targetHour = NightMare::Text::toLong(NightMare::Text::slice(timeString, 0, 2));
+    const int targetMinute = NightMare::Text::toLong(NightMare::Text::slice(timeString, 3, 5));
     if (targetHour > 23 || targetMinute > 59)
         return 0;
 

@@ -1203,13 +1203,13 @@ namespace NightMare::EspNowClient
         return currentCid();
     }
 
-    String gatewayId()
+    std::string gatewayId()
     {
         char id[sizeof(selectedGatewayId)] = {};
         portENTER_CRITICAL(&lock);
         memcpy(id, selectedGatewayId, sizeof(id));
         portEXIT_CRITICAL(&lock);
-        return String(id);
+        return std::string(id);
     }
 
     void onState(StateCallback callback)

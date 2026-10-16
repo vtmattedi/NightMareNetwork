@@ -14,8 +14,8 @@ void ws_scheduler_task(void *param)
         {
             bool sensors_requested = ws_clients.scheduler_requests & WS_SENSORS_REQUEST_MASK;
             bool mux_requested = ws_clients.scheduler_requests & WS_MUX_REQUEST_MASK;
-            String sensors_data = "";
-            String mux_data = "";
+            std::string sensors_data = "";
+            std::string mux_data = "";
             if (sensors_requested)
             {
                 sensors_data = handleNightMareCommand("SENSORSDATA").response;
@@ -33,7 +33,7 @@ void ws_scheduler_task(void *param)
 
                 if (requests & WS_SENSORS_REQUEST_MASK)
                 {
-                    String message = "1:" + sensors_data;
+                    std::string message = "1:" + sensors_data;
                     httpd_ws_frame_t frame = {
                         .type = HTTPD_WS_TYPE_TEXT,
                         .payload = (uint8_t *)message.c_str(),
@@ -47,7 +47,7 @@ void ws_scheduler_task(void *param)
                 }
                 if (requests & WS_MUX_REQUEST_MASK)
                 {
-                    String message = "2:" + mux_data;
+                    std::string message = "2:" + mux_data;
                     httpd_ws_frame_t frame = {
                         .type = HTTPD_WS_TYPE_TEXT,
                         .payload = (uint8_t *)message.c_str(),
@@ -115,7 +115,7 @@ esp_err_t ws_handler(httpd_req_t *req)
     }
 
     buf[ws_pkt.len] = 0;
-    String message = "";
+    std::string message = "";
     if (strcmp((char *)buf, "req_sensors") == 0)
     {
         message = "01:" + handleNightMareCommand("SENSORS").response;
@@ -135,7 +135,7 @@ esp_err_t ws_handler(httpd_req_t *req)
     else
     {
         message = "00:";
-        message += handleNightMareCommand(String((char *)buf, ws_pkt.len)).response;
+        message += handleNightMareCommand(std::string((char *)buf, ws_pkt.len)).response;
     }
     httpd_ws_frame_t out = {
         .type = HTTPD_WS_TYPE_TEXT,

@@ -61,9 +61,9 @@
 #include <Util/LVGL_Util.h>
 #endif
 
-static const char MattediWorksPresents[] PROGMEM = "\r\n\r\n\033[1;97mMattedi\033[0m\033[38;5;208mWorks\033[0m \033[3mpresents:\033[0m";
+static const char MattediWorksPresents[] = "\r\n\r\n\033[1;97mMattedi\033[0m\033[38;5;208mWorks\033[0m \033[3mpresents:\033[0m";
 
-static const char NightMareNetworkFiglet[] PROGMEM = R"FIG(
+static const char NightMareNetworkFiglet[] = R"FIG(
 
  _   _ _       _     _   __  __                _   _      _                      _    
 | \ | (_) __ _| |__ | |_|  \/  | __ _ _ __ ___| \ | | ___| |___      _____  _ __| | __

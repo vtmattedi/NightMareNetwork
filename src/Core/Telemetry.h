@@ -2,7 +2,8 @@
 #include <NightMare/Features.h>
 
 #if NM_ENABLE_TELEMETRY
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <ArduinoJson.h>
 #include <Core/Config.h>
 #include <Core/DocumentPayload.h>
@@ -29,12 +30,12 @@ enum class InfoType : uint8_t
 /// @brief Maps a section name to its type, ignoring case: INFO, IDENTITY,
 /// HARDWARE, BUILD, BOOT, SYSTEM, NETWORK, HEARTBEAT. Empty means INFO;
 /// anything else is INVALID.
-InfoType getInfoType(const String &type);
+InfoType getInfoType(const std::string &type);
 
 struct TelemetryResult
 {
     bool valid = false;
-    String data;
+    std::string data;
 };
 
 // Device-wide information, split by how often it changes. Four retained documents
@@ -57,13 +58,13 @@ public:
 
     /// @brief Any section, as JSON. valid is false for INVALID or on overflow.
     TelemetryResult getInfo(InfoType type = InfoType::INFO) const;
-    TelemetryResult getInfo(const String &type) const;
+    TelemetryResult getInfo(const std::string &type) const;
 
     /// @brief Publishes INFO, SYSTEM, NETWORK, or HEARTBEAT. The heartbeat is
     /// non-retained; the other documents are retained. A subsection of INFO
     /// has no topic of its own, so it returns false.
     bool publishInfo(InfoType type = InfoType::INFO);
-    bool publishInfo(const String &type);
+    bool publishInfo(const std::string &type);
 
     /// @brief Builds the validated hardware configuration JSON document.
     TelemetryResult getHardware() const;
@@ -73,7 +74,7 @@ public:
 
     /// @brief Expands the current positional hardware encoding to its named
     /// logical JSON shape. Rejects unknown versions and malformed layouts.
-    static bool decodeHardware(const String &encoded, JsonDocument &into);
+    static bool decodeHardware(const std::string &encoded, JsonDocument &into);
 
     /// @brief Publishes the retained hardware configuration document.
     bool publishHardware();

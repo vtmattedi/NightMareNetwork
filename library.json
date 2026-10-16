@@ -1,11 +1,10 @@
 {
   "name": "NightMareNetwork",
   "version": "0.2.0",
-  "frameworks": ["arduino"],
+  "frameworks": ["arduino", "espidf"],
   "platforms": ["espressif32"],
   "dependencies": [
-    {"owner": "bblanchon", "name": "ArduinoJson", "version": "^7.0.0"},
-    {"name": "ArduinoOTA"}
+    {"owner": "bblanchon", "name": "ArduinoJson", "version": "^7.0.0"}
   ],
   "export": {"exclude": ["Legacy/**", "FailedAttempt/**", "new/**", "tests/**"]},
   "build": {

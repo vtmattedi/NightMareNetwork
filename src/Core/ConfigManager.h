@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,7 +13,7 @@ constexpr size_t ConfigManagerMaxConfigs = 64;
 constexpr uint8_t ConfigManifestEncodingVersion = 1;
 constexpr uint8_t ConfigManifestVersion = 1;
 
-using ConfigChangeHandler = bool (*)(const String &key, const String &value);
+using ConfigChangeHandler = bool (*)(const std::string &key, const std::string &value);
 
 /// @brief Persistent registry, text ingress and declaration manifest for Config<T>.
 /// This manager owns no Config objects and has no connection role. Persistence
@@ -29,24 +30,24 @@ public:
     bool restore();
     bool restored() const { return restored_; }
 
-    String handle(const String &command);
+    std::string handle(const std::string &command);
     void setChangeHandler(ConfigChangeHandler handler) { changeHandler_ = handler; }
 
     /// @brief Write the canonical MessagePack manifest into caller storage.
     /// On insufficient capacity, returns false and reports the required byte
     /// count in written without modifying the buffer.
     bool buildManifestMsgPack(uint8_t *buffer, size_t capacity, size_t &written) const;
-    String buildManifestBase64() const;
+    std::string buildManifestBase64() const;
 
     size_t count() const { return configCount_; }
 
 private:
-    ConfigBase *find(const String &name) const;
-    static String storageKey(const String &name);
+    ConfigBase *find(const std::string &name) const;
+    static std::string storageKey(const std::string &name);
     bool restoreOne(ConfigBase &config);
-    bool persist(ConfigBase *config, const String &encodedValue);
-    bool serializeManifest(String &payload) const;
-    String list() const;
+    bool persist(ConfigBase *config, const std::string &encodedValue);
+    bool serializeManifest(std::string &payload) const;
+    std::string list() const;
 
     ConfigBase *configs_[ConfigManagerMaxConfigs] = {};
     size_t configCount_ = 0;

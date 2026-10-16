@@ -6,7 +6,7 @@
 #include "StateStore.h"
 #include "Time.h"
 #include <ArduinoJson.h>
-#include <LittleFS.h>
+#include "Storage.h"
 #include <freertos/semphr.h>
 
 namespace
@@ -59,7 +59,7 @@ namespace
         return scope == SchedulerJobScope::USER ? "user" : "managed";
     }
 
-    bool parseScope(const String &text, SchedulerJobScope &scope)
+    bool parseScope(const std::string &text, SchedulerJobScope &scope)
     {
         if (text == "user")
             scope = SchedulerJobScope::USER;
@@ -77,10 +77,10 @@ void Scheduler::ensureInitialized()
 {
     if (initialized_)
     {
-        if (!storageReady_ && static_cast<int32_t>(millis() - nextStorageRetry_) >= 0)
+        if (!storageReady_ && static_cast<int32_t>(NightMare::Platform::monotonicMillis() - nextStorageRetry_) >= 0)
         {
             storageReady_ = PersistentSettings.begin();
-            nextStorageRetry_ = millis() + StorageRetryMs;
+            nextStorageRetry_ = NightMare::Platform::monotonicMillis() + StorageRetryMs;
             if (storageReady_)
                 load();
         }
@@ -88,7 +88,7 @@ void Scheduler::ensureInitialized()
     }
     initialized_ = true;
     storageReady_ = PersistentSettings.begin();
-    nextStorageRetry_ = millis() + StorageRetryMs;
+    nextStorageRetry_ = NightMare::Platform::monotonicMillis() + StorageRetryMs;
     if (storageReady_)
         load();
 }
@@ -149,7 +149,7 @@ bool Scheduler::persists(const Job &job)
     return job.active && job.clock == SchedulerClock::Wall && job.callback == nullptr;
 }
 
-int32_t Scheduler::add(SchedulerJobScope scope, const String &label, const String &command,
+int32_t Scheduler::add(SchedulerJobScope scope, const std::string &label, const std::string &command,
                        SchedulerClock clock, uint32_t due, uint32_t interval,
                        SchedulerCallback callback)
 {
@@ -197,8 +197,8 @@ int32_t Scheduler::add(SchedulerJobScope scope, const String &label, const Strin
     return -1;
 }
 
-int32_t Scheduler::scheduleAtWall(SchedulerJobScope scope, const String &label,
-                                  const String &command, SchedulerCallback callback,
+int32_t Scheduler::scheduleAtWall(SchedulerJobScope scope, const std::string &label,
+                                  const std::string &command, SchedulerCallback callback,
                                   uint32_t epochSeconds)
 {
     if (epochSeconds == 0)
@@ -206,18 +206,18 @@ int32_t Scheduler::scheduleAtWall(SchedulerJobScope scope, const String &label,
     return add(scope, label, command, SchedulerClock::Wall, epochSeconds, 0, callback);
 }
 
-int32_t Scheduler::scheduleAfter(SchedulerJobScope scope, const String &label,
-                                 const String &command, SchedulerCallback callback,
+int32_t Scheduler::scheduleAfter(SchedulerJobScope scope, const std::string &label,
+                                 const std::string &command, SchedulerCallback callback,
                                  uint32_t delayMs)
 {
     JobGuard guard;
     if (delayMs > MaxInterval)
         return -1;
-    return add(scope, label, command, SchedulerClock::Monotonic, millis() + delayMs, 0, callback);
+    return add(scope, label, command, SchedulerClock::Monotonic, NightMare::Platform::monotonicMillis() + delayMs, 0, callback);
 }
 
-int32_t Scheduler::scheduleEveryWall(SchedulerJobScope scope, const String &label,
-                                     const String &command, SchedulerCallback callback,
+int32_t Scheduler::scheduleEveryWall(SchedulerJobScope scope, const std::string &label,
+                                     const std::string &command, SchedulerCallback callback,
                                      uint32_t intervalSeconds)
 {
     JobGuard guard;
@@ -229,64 +229,64 @@ int32_t Scheduler::scheduleEveryWall(SchedulerJobScope scope, const String &labe
     return add(scope, label, command, SchedulerClock::Wall, due, intervalSeconds, callback);
 }
 
-int32_t Scheduler::scheduleEveryMonotonic(SchedulerJobScope scope, const String &label,
-                                          const String &command, SchedulerCallback callback,
+int32_t Scheduler::scheduleEveryMonotonic(SchedulerJobScope scope, const std::string &label,
+                                          const std::string &command, SchedulerCallback callback,
                                           uint32_t intervalMs)
 {
     JobGuard guard;
     if (intervalMs == 0 || intervalMs > MaxInterval)
         return -1;
-    return add(scope, label, command, SchedulerClock::Monotonic, millis() + intervalMs,
+    return add(scope, label, command, SchedulerClock::Monotonic, NightMare::Platform::monotonicMillis() + intervalMs,
                intervalMs, callback);
 }
 
-int32_t Scheduler::atWall(const String &label, const String &command, uint32_t epochSeconds,
+int32_t Scheduler::atWall(const std::string &label, const std::string &command, uint32_t epochSeconds,
                           SchedulerJobScope scope)
 {
     return scheduleAtWall(scope, label, command, nullptr, epochSeconds);
 }
 
-int32_t Scheduler::atWall(const String &label, SchedulerCallback callback, uint32_t epochSeconds)
+int32_t Scheduler::atWall(const std::string &label, SchedulerCallback callback, uint32_t epochSeconds)
 {
-    return scheduleAtWall(SchedulerJobScope::MANAGED, label, String(), callback, epochSeconds);
+    return scheduleAtWall(SchedulerJobScope::MANAGED, label, std::string(), callback, epochSeconds);
 }
 
-int32_t Scheduler::after(const String &label, const String &command, uint32_t delayMs,
+int32_t Scheduler::after(const std::string &label, const std::string &command, uint32_t delayMs,
                          SchedulerJobScope scope)
 {
     return scheduleAfter(scope, label, command, nullptr, delayMs);
 }
 
-int32_t Scheduler::after(const String &label, SchedulerCallback callback, uint32_t delayMs)
+int32_t Scheduler::after(const std::string &label, SchedulerCallback callback, uint32_t delayMs)
 {
-    return scheduleAfter(SchedulerJobScope::MANAGED, label, String(), callback, delayMs);
+    return scheduleAfter(SchedulerJobScope::MANAGED, label, std::string(), callback, delayMs);
 }
 
-int32_t Scheduler::everyWall(const String &label, const String &command, uint32_t intervalSeconds,
+int32_t Scheduler::everyWall(const std::string &label, const std::string &command, uint32_t intervalSeconds,
                              SchedulerJobScope scope)
 {
     return scheduleEveryWall(scope, label, command, nullptr, intervalSeconds);
 }
 
-int32_t Scheduler::everyWall(const String &label, SchedulerCallback callback, uint32_t intervalSeconds)
+int32_t Scheduler::everyWall(const std::string &label, SchedulerCallback callback, uint32_t intervalSeconds)
 {
-    return scheduleEveryWall(SchedulerJobScope::MANAGED, label, String(), callback,
+    return scheduleEveryWall(SchedulerJobScope::MANAGED, label, std::string(), callback,
                              intervalSeconds);
 }
 
-int32_t Scheduler::everyMonotonic(const String &label, const String &command, uint32_t intervalMs,
+int32_t Scheduler::everyMonotonic(const std::string &label, const std::string &command, uint32_t intervalMs,
                                   SchedulerJobScope scope)
 {
     return scheduleEveryMonotonic(scope, label, command, nullptr, intervalMs);
 }
 
-int32_t Scheduler::everyMonotonic(const String &label, SchedulerCallback callback, uint32_t intervalMs)
+int32_t Scheduler::everyMonotonic(const std::string &label, SchedulerCallback callback, uint32_t intervalMs)
 {
-    return scheduleEveryMonotonic(SchedulerJobScope::MANAGED, label, String(), callback,
+    return scheduleEveryMonotonic(SchedulerJobScope::MANAGED, label, std::string(), callback,
                                   intervalMs);
 }
 
-int32_t Scheduler::timer(const String &label, SchedulerCallback callback, uint32_t intervalMs)
+int32_t Scheduler::timer(const std::string &label, SchedulerCallback callback, uint32_t intervalMs)
 {
     return everyMonotonic(label, callback, intervalMs);
 }
@@ -294,7 +294,7 @@ int32_t Scheduler::timer(const String &label, SchedulerCallback callback, uint32
 int32_t Scheduler::setTimeout(SchedulerCallback callback, uint32_t delayMs)
 {
     JobGuard guard;
-    return after(String("Timeout_") + String(nextTimeoutId_++), callback, delayMs);
+    return after(std::string("Timeout_") + std::to_string(nextTimeoutId_++), callback, delayMs);
 }
 
 bool Scheduler::removeJob(Job &job)
@@ -310,7 +310,7 @@ bool Scheduler::removeJob(Job &job)
     return true;
 }
 
-bool Scheduler::remove(const String &label, SchedulerJobScope scope)
+bool Scheduler::remove(const std::string &label, SchedulerJobScope scope)
 {
     JobGuard guard;
     ensureInitialized();
@@ -348,7 +348,7 @@ bool Scheduler::clear(SchedulerJobScope scope)
     return true;
 }
 
-String Scheduler::list(SchedulerJobScope scope)
+std::string Scheduler::list(SchedulerJobScope scope)
 {
     JobGuard guard;
     ensureInitialized();
@@ -381,10 +381,10 @@ String Scheduler::list(SchedulerJobScope scope)
     const bool wallReady = wallTimeReady();
     doc["wallReady"] = wallReady;
     doc["wallNow"] = wallReady ? NightMare::Time::now() : 0;
-    doc["monotonicMs"] = millis();
+    doc["monotonicMs"] = NightMare::Platform::monotonicMillis();
     // No overflow check: an ArduinoJson 7 document has no capacity, and this one
     // is bounded by MaxJobs either way.
-    String output;
+    std::string output;
     serializeJson(doc, output);
     return output;
 }
@@ -397,7 +397,7 @@ void Scheduler::tick()
     ensureInitialized();
 
     dispatching_ = true;
-    const uint32_t monotonicNow = millis();
+    const uint32_t monotonicNow = NightMare::Platform::monotonicMillis();
     const bool wallReady = wallTimeReady();
     const uint32_t wallNow = wallReady ? NightMare::Time::now() : 0;
     const uint32_t lastExistingId = nextId_ - 1;
@@ -445,7 +445,7 @@ void Scheduler::tick()
             previous.callback();
         else
             handleNightMareCommand(previous.command,
-                                   NightmareContext(NM_CMD_SRC_JOB, String(previous.id)));
+                                   NightmareContext(NM_CMD_SRC_JOB, std::to_string(previous.id)));
         guard.lock();
     }
     dispatching_ = false;
@@ -476,25 +476,21 @@ bool Scheduler::writeJobs(const SchedulerJobScope *omit)
         item["interval"] = job.interval;
     }
     // Bounded by MaxJobs, and an ArduinoJson 7 document cannot overflow.
-    File file = LittleFS.open(JobsFile, "w");
-    if (!file)
-        return false;
-    size_t written = serializeJson(doc, file);
-    file.close();
-    return written != 0;
+    std::string encoded;
+    const size_t written = serializeJson(doc, encoded);
+    return written != 0 && NightMare::Storage::write(JobsFile, encoded);
 }
 
 bool Scheduler::load()
 {
     // No file simply means no persisted jobs.
-    if (!LittleFS.exists(JobsFile))
+    if (!NightMare::Storage::exists(JobsFile))
         return true;
-    File file = LittleFS.open(JobsFile, "r");
-    if (!file)
+    std::string file;
+    if (!NightMare::Storage::read(JobsFile, file, 32768))
         return false;
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
-    file.close();
     if (error)
         return false;
 
@@ -502,10 +498,10 @@ bool Scheduler::load()
     {
         // An entry without a valid scope is not read: there is no older format to honour.
         SchedulerJobScope scope;
-        if (!parseScope(item["scope"].as<String>(), scope))
+        if (!parseScope(item["scope"].as<std::string>(), scope))
             continue;
-        String label = item["label"].as<String>();
-        String command = item["command"].as<String>();
+        std::string label = item["label"].as<std::string>();
+        std::string command = item["command"].as<std::string>();
         uint32_t due = item["due"] | 0UL;
         uint32_t interval = item["interval"] | 0UL;
         uint32_t id = item["id"] | 0UL;

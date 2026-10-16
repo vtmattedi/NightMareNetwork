@@ -9,6 +9,8 @@
 #include <Network/WiFiIP/NmWifiEsp.h>
 #include <atomic>
 #include <esp_sntp.h>
+#include <cstdlib>
+#include <ctime>
 
 namespace
 {
@@ -45,7 +47,16 @@ bool startSntpTimeSync()
 
     SystemState.clear(SystemFlag::TimeSynced);
     esp_sntp_set_time_sync_notification_cb(sntpTimeAvailable);
-    configTzTime(timezone, NM_NTP_SERVER_1, NM_NTP_SERVER_2, NM_NTP_SERVER_3);
+    if (setenv("TZ", timezone, 1) != 0)
+        return false;
+    tzset();
+    if (esp_sntp_enabled())
+        esp_sntp_stop();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, NM_NTP_SERVER_1);
+    esp_sntp_setservername(1, NM_NTP_SERVER_2);
+    esp_sntp_setservername(2, NM_NTP_SERVER_3);
+    esp_sntp_init();
     LOG("Time", "SNTP synchronization started (%s)", timezone);
     return true;
 }

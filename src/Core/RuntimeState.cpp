@@ -4,7 +4,7 @@
 
 namespace
 {
-void appendJsonString(String &output, const String &input)
+void appendJsonString(std::string &output, const std::string &input)
 {
     output += '"';
     for (size_t i = 0; i < input.length(); ++i)
@@ -31,7 +31,7 @@ void appendJsonString(String &output, const String &input)
 }
 }
 
-bool RuntimeState::set(const String &key, const String &value)
+bool RuntimeState::set(const std::string &key, const std::string &value)
 {
     if (key.length() == 0)
         return false;
@@ -51,7 +51,7 @@ bool RuntimeState::set(const String &key, const String &value)
     return true;
 }
 
-String RuntimeState::get(const String &key, const String &defaultValue) const
+std::string RuntimeState::get(const std::string &key, const std::string &defaultValue) const
 {
     for (size_t i = 0; i < count_; ++i)
         if (entries_[i].key == key)
@@ -59,17 +59,17 @@ String RuntimeState::get(const String &key, const String &defaultValue) const
     return defaultValue;
 }
 
-bool RuntimeState::setFlag(const String &key, bool value)
+bool RuntimeState::setFlag(const std::string &key, bool value)
 {
     return set(key, value ? "1" : "0");
 }
 
-bool RuntimeState::getFlag(const String &key) const
+bool RuntimeState::getFlag(const std::string &key) const
 {
     return get(key, "0") == "1";
 }
 
-bool RuntimeState::exists(const String &key) const
+bool RuntimeState::exists(const std::string &key) const
 {
     for (size_t i = 0; i < count_; ++i)
         if (entries_[i].key == key)
@@ -77,7 +77,7 @@ bool RuntimeState::exists(const String &key) const
     return false;
 }
 
-bool RuntimeState::remove(const String &key)
+bool RuntimeState::remove(const std::string &key)
 {
     for (size_t i = 0; i < count_; ++i)
     {
@@ -97,9 +97,9 @@ void RuntimeState::clear()
         entries_[--count_] = Entry{};
 }
 
-String RuntimeState::toJson() const
+std::string RuntimeState::toJson() const
 {
-    String output = "{";
+    std::string output = "{";
     for (size_t i = 0; i < count_; ++i)
     {
         if (i != 0)

@@ -11,7 +11,8 @@
 ///         Extracted from Misc.h.
 /*----------------------------------------------------------*/
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <lvgl.h>
 
 #pragma region "LVGL Helper Functions"
@@ -20,8 +21,8 @@ void set_lv_state(lv_obj_t *obj, bool value, lv_state_t state = LV_STATE_CHECKED
 void set_lv_visible(lv_obj_t *obj, bool value);
 void set_lv_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE_DEFAULT);
 void set_lv_label_color(lv_obj_t *obj, int color, lv_style_selector_t style = LV_STATE_DEFAULT);
-String get_color_fixed_6_str(int hexcode);
-String insert_color(String text, int color);
+std::string get_color_fixed_6_str(int hexcode);
+std::string insert_color(std::string text, int color);
 
 #pragma endregion
 #endif // NM_ENABLE_LVGL

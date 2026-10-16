@@ -87,6 +87,10 @@
 #ifndef NM_ENABLE_OTA
 #define NM_ENABLE_OTA 0
 #endif
+
+#if NM_ENABLE_OTA && !defined(ARDUINO)
+#error "NM_ENABLE_OTA requires the Arduino framework; other NightMare modules support ESP-IDF"
+#endif
 #ifndef NM_ENABLE_HTTP
 #define NM_ENABLE_HTTP 0
 #endif

@@ -20,28 +20,28 @@ bool commandSpace(char value)
            value == '\v' || value == '\f';
 }
 
-size_t skipCommandSpace(const String &text, size_t position)
+size_t skipCommandSpace(const std::string &text, size_t position)
 {
     while (position < text.length() && commandSpace(text[position]))
         ++position;
     return position;
 }
 
-String commandToken(const String &text, size_t &position)
+std::string commandToken(const std::string &text, size_t &position)
 {
     position = skipCommandSpace(text, position);
     const size_t start = position;
     while (position < text.length() && !commandSpace(text[position]))
         ++position;
-    return text.substring(start, position);
+    return NightMare::Text::slice(text, start, position);
 }
 
-bool onlyCommandSpace(const String &text, size_t position)
+bool onlyCommandSpace(const std::string &text, size_t position)
 {
     return skipCommandSpace(text, position) == text.length();
 }
 
-bool validConfigName(const String &name)
+bool validConfigName(const std::string &name)
 {
     if (name.length() == 0)
         return false;
@@ -75,15 +75,15 @@ const char *valueTypeName(NetValueType type)
     }
 }
 
-String encodeBase64(const String &input)
+std::string encodeBase64(const std::string &input)
 {
     static const char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const size_t inputLength = input.length();
     const size_t outputLength = ((inputLength + 2) / 3) * 4;
-    String output;
-    if (outputLength != 0 && !output.reserve(outputLength))
-        return String();
+    std::string output;
+    if (outputLength != 0 && !NightMare::Text::tryReserve(output, outputLength))
+        return std::string();
 
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(input.c_str());
     for (size_t i = 0; i < inputLength; i += 3)
@@ -97,7 +97,7 @@ String encodeBase64(const String &input)
         output += remaining > 1 ? alphabet[(block >> 6) & 0x3f] : '=';
         output += remaining > 2 ? alphabet[block & 0x3f] : '=';
     }
-    return output.length() == outputLength ? output : String();
+    return output.length() == outputLength ? output : std::string();
 }
 }
 
@@ -147,7 +147,7 @@ bool ConfigManager::unbind(ConfigBase *config)
     return false;
 }
 
-ConfigBase *ConfigManager::find(const String &name) const
+ConfigBase *ConfigManager::find(const std::string &name) const
 {
     for (size_t i = 0; i < configCount_; ++i)
     {
@@ -157,12 +157,12 @@ ConfigBase *ConfigManager::find(const String &name) const
     return nullptr;
 }
 
-String ConfigManager::storageKey(const String &name)
+std::string ConfigManager::storageKey(const std::string &name)
 {
-    return String(NightMare::PersistentKey::ConfigPrefix) + name;
+    return std::string(NightMare::PersistentKey::ConfigPrefix) + name;
 }
 
-bool ConfigManager::persist(ConfigBase *config, const String &encodedValue)
+bool ConfigManager::persist(ConfigBase *config, const std::string &encodedValue)
 {
     if (config == nullptr || !config->bound_)
         return false;
@@ -171,10 +171,10 @@ bool ConfigManager::persist(ConfigBase *config, const String &encodedValue)
 
 bool ConfigManager::restoreOne(ConfigBase &config)
 {
-    const String key = storageKey(config.name_);
+    const std::string key = storageKey(config.name_);
     if (PersistentSettings.exists(key))
     {
-        const String saved = PersistentSettings.get(key);
+        const std::string saved = PersistentSettings.get(key);
         if (config.restoreEncodedValue(saved))
             return true;
 
@@ -182,7 +182,7 @@ bool ConfigManager::restoreOne(ConfigBase &config)
                     config.name_.c_str());
     }
 
-    const String canonicalDefault = config.encodedDefaultValue();
+    const std::string canonicalDefault = config.encodedDefaultValue();
     if (!config.restoreEncodedValue(canonicalDefault))
     {
         config.restoreDefaultValue();
@@ -215,7 +215,7 @@ bool ConfigManager::restore()
     return complete;
 }
 
-String ConfigManager::list() const
+std::string ConfigManager::list() const
 {
     JsonDocument doc;
     JsonArray items = doc.to<JsonArray>();
@@ -229,17 +229,17 @@ String ConfigManager::list() const
         item["value"] = config.encodedValue();
     }
 
-    String output;
+    std::string output;
     if (serializeWholeDocument(doc, DocumentFormat::JSON, output) != PayloadResult::Complete)
         return "ERROR: unable to build config list";
     return output;
 }
 
-String ConfigManager::handle(const String &command)
+std::string ConfigManager::handle(const std::string &command)
 {
     size_t position = 0;
-    String action = commandToken(command, position);
-    action.toLowerCase();
+    std::string action = commandToken(command, position);
+    NightMare::Text::toLower(action);
 
     if (action == "list")
     {
@@ -252,22 +252,22 @@ String ConfigManager::handle(const String &command)
     {
         if (!onlyCommandSpace(command, position))
             return "ERROR: usage: manifest";
-        const String encoded = buildManifestBase64();
-        return encoded.length() == 0 ? String("ERROR: unable to build config manifest") : encoded;
+        const std::string encoded = buildManifestBase64();
+        return encoded.length() == 0 ? std::string("ERROR: unable to build config manifest") : encoded;
     }
 
     if (action == "get")
     {
-        const String name = commandToken(command, position);
+        const std::string name = commandToken(command, position);
         if (name.length() == 0 || !onlyCommandSpace(command, position))
             return "ERROR: usage: get <name>";
         ConfigBase *config = find(name);
-        return config == nullptr ? String("ERROR: unknown config") : config->encodedValue();
+        return config == nullptr ? std::string("ERROR: unknown config") : config->encodedValue();
     }
 
     if (action == "set")
     {
-        const String name = commandToken(command, position);
+        const std::string name = commandToken(command, position);
         if (name.length() == 0)
             return "ERROR: usage: set <name> <payload>";
         ConfigBase *config = find(name);
@@ -277,24 +277,24 @@ String ConfigManager::handle(const String &command)
         position = skipCommandSpace(command, position);
         if (position >= command.length())
             return "ERROR: usage: set <name> <payload>";
-        const String payload = command.substring(position);
+        const std::string payload = NightMare::Text::slice(command, position);
         if (!config->canDecodeEncodedValue(payload))
             return "ERROR: invalid value";
         if (changeHandler_ != nullptr && !changeHandler_(config->name_, payload))
             return "ERROR: change rejected";
-        String canonical;
+        std::string canonical;
         if (!config->prepareEncodedWrite(payload, canonical))
             return "ERROR: change rejected";
         if (!persist(config, canonical))
             return "ERROR: persistence failed";
-        return config->restoreEncodedValue(canonical) ? String("OK")
-                                                       : String("ERROR: invalid value");
+        return config->restoreEncodedValue(canonical) ? std::string("OK")
+                                                       : std::string("ERROR: invalid value");
     }
 
     return "ERROR: expected list, get, set, or manifest";
 }
 
-bool ConfigManager::serializeManifest(String &payload) const
+bool ConfigManager::serializeManifest(std::string &payload) const
 {
     JsonDocument doc;
     JsonArray root = doc.to<JsonArray>();
@@ -316,7 +316,7 @@ bool ConfigManager::serializeManifest(String &payload) const
 bool ConfigManager::buildManifestMsgPack(uint8_t *buffer, size_t capacity,
                                          size_t &written) const
 {
-    String payload;
+    std::string payload;
     if (!serializeManifest(payload))
     {
         written = 0;
@@ -330,10 +330,10 @@ bool ConfigManager::buildManifestMsgPack(uint8_t *buffer, size_t capacity,
     return true;
 }
 
-String ConfigManager::buildManifestBase64() const
+std::string ConfigManager::buildManifestBase64() const
 {
-    String payload;
+    std::string payload;
     if (!serializeManifest(payload))
-        return String();
+        return std::string();
     return encodeBase64(payload);
 }

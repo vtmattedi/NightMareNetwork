@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <time.h>
 
 namespace NightMare
@@ -35,25 +36,25 @@ int month(time_t epoch = now());
 int year(time_t epoch = now());
 
 // Human-facing formatting uses the process TZ configured by the application.
-String timestampToDateString(time_t timestamp, TimeStampFormat format = DateAndTime);
+std::string timestampToDateString(time_t timestamp, TimeStampFormat format = DateAndTime);
 
-inline String timeString(time_t timestamp = now())
+inline std::string timeString(time_t timestamp = now())
 {
     return timestampToDateString(timestamp, OnlyTime);
 }
 
-inline String fullTimeString(time_t timestamp = now())
+inline std::string fullTimeString(time_t timestamp = now())
 {
     return timestampToDateString(timestamp, OnlyTimeWithSeconds);
 }
 
-inline String dateString(time_t timestamp = now())
+inline std::string dateString(time_t timestamp = now())
 {
     return timestampToDateString(timestamp, OnlyDate);
 }
 
 // Returns the next local occurrence of HH:MM, or 0 for malformed input.
-time_t timestampOfNextOccurrence(const String &timeString);
+time_t timestampOfNextOccurrence(const std::string &timeString);
 }
 }
 

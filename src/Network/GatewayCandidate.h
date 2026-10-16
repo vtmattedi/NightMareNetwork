@@ -3,7 +3,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <Network/NmConnection.h>
 
 namespace NightMare
@@ -11,20 +12,20 @@ namespace NightMare
 struct GatewayCandidateStatus
 {
     bool known = false;
-    String id;
-    String generation;
+    std::string id;
+    std::string generation;
     bool espNowReady = false;
     bool remoteMqttReady = false;
     bool localMqttReady = false;
-    String ssid;
-    String bssid;
+    std::string ssid;
+    std::string bssid;
     uint8_t channel = 0;
 };
 
 struct GatewayRadioContext
 {
-    String ssid;
-    String bssid;
+    std::string ssid;
+    std::string bssid;
     uint8_t channel = 0;
 };
 
@@ -36,7 +37,7 @@ bool GatewayCandidateProbable(const GatewayCandidateStatus &candidate,
 
 // Consumes retained <gateway-id>/gateway/network announcements. False means
 // the message was not a gateway contract message or was malformed.
-bool GatewayCandidateHandleMessage(const String &topic, const String &payload,
+bool GatewayCandidateHandleMessage(const std::string &topic, const std::string &payload,
                                    bool retained);
 GatewayCandidateStatus GatewayCandidateGet();
 bool GatewayCandidateIsProbable(MqttProfile requiredUplink);

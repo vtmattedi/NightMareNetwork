@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <esp_mac.h>
+#include <cstring>
 
 DeviceIdentity gDeviceIdentity;
 
@@ -16,7 +18,7 @@ namespace
 // device name, and one record is all v1 allows.
 constexpr uint8_t AllCleanupFlags = CLEANUP_RESOURCES | CLEANUP_STATUS;
 
-bool applyTimezone(const String &timezone)
+bool applyTimezone(const std::string &timezone)
 {
     if (setenv("TZ", timezone.c_str(), 1) != 0)
         return false;
@@ -25,7 +27,7 @@ bool applyTimezone(const String &timezone)
 }
 }
 
-bool DeviceIdentity::validDeviceName(const String &name)
+bool DeviceIdentity::validDeviceName(const std::string &name)
 {
     if (name.length() == 0 || name.length() > 64 || name == "all")
         return false;
@@ -38,7 +40,7 @@ bool DeviceIdentity::validDeviceName(const String &name)
     return true;
 }
 
-bool DeviceIdentity::validTimezone(const String &timezone)
+bool DeviceIdentity::validTimezone(const std::string &timezone)
 {
     if (timezone.length() == 0 || timezone.length() > 128)
         return false;
@@ -55,7 +57,11 @@ bool DeviceIdentity::begin()
 {
     if (initialized_)
         return true;
-    const uint64_t mac = ESP.getEfuseMac();
+    uint8_t macBytes[6] = {};
+    if (esp_efuse_mac_get_default(macBytes) != ESP_OK)
+        return false;
+    uint64_t mac = 0;
+    std::memcpy(&mac, macBytes, sizeof(macBytes));
     char id[17];
     // uint32_t is long on these toolchains, so %x would be the wrong conversion.
     snprintf(id, sizeof(id), "%08lx%08lx", static_cast<unsigned long>(mac >> 32),
@@ -63,13 +69,13 @@ bool DeviceIdentity::begin()
     deviceId_ = id;
 
     // Keep the existing default prefix and persisted key for existing devices.
-    const String defaultName = String("Esp32-nm-") + String(static_cast<uint32_t>(mac), HEX);
+    const std::string defaultName = std::string("Esp32-nm-") + NightMare::Text::hex(static_cast<uint32_t>(mac));
     hardwareSignature_ = defaultName;
-    String storedName = defaultName;
-    const String configuredTimezone = String(NM_TIMEZONE);
-    const String defaultTimezone = validTimezone(configuredTimezone)
-                                       ? configuredTimezone : String("UTC0");
-    String storedTimezone = defaultTimezone;
+    std::string storedName = defaultName;
+    const std::string configuredTimezone = std::string(NM_TIMEZONE);
+    const std::string defaultTimezone = validTimezone(configuredTimezone)
+                                       ? configuredTimezone : std::string("UTC0");
+    std::string storedTimezone = defaultTimezone;
 #if NM_ENABLE_SETTINGS
     const bool settingsReady = PersistentSettings.begin();
     if (settingsReady)
@@ -104,13 +110,13 @@ void DeviceIdentity::loadPendingCleanup()
 #if NM_ENABLE_SETTINGS
     if (!PersistentSettings.exists(NightMare::PersistentKey::PendingIdentityCleanup))
         return;
-    const String record = PersistentSettings.get(
-        NightMare::PersistentKey::PendingIdentityCleanup, String());
-    const int separator = record.lastIndexOf('/');
+    const std::string record = PersistentSettings.get(
+        NightMare::PersistentKey::PendingIdentityCleanup, std::string());
+    const int separator = NightMare::Text::lastIndexOf(record, '/');
     if (separator > 0)
     {
-        const String oldName = record.substring(0, separator);
-        const long flags = record.substring(separator + 1).toInt();
+        const std::string oldName = NightMare::Text::slice(record, 0, separator);
+        const long flags = NightMare::Text::toLong(NightMare::Text::slice(record, separator + 1));
         // A record naming the current identity comes from a crash between the
         // two writes of an adoption: nothing moved, so there is nothing to clean,
         // and cleaning would delete this device's own live data.
@@ -133,43 +139,43 @@ bool DeviceIdentity::persistPendingCleanup()
         return !PersistentSettings.exists(NightMare::PersistentKey::PendingIdentityCleanup) ||
                PersistentSettings.remove(NightMare::PersistentKey::PendingIdentityCleanup);
     return PersistentSettings.set(NightMare::PersistentKey::PendingIdentityCleanup,
-                                  pendingOldName_ + "/" + String(pendingFlags_));
+                                  pendingOldName_ + "/" + std::to_string(pendingFlags_));
 #else
     return true;
 #endif
 }
 
-const String &DeviceIdentity::getDeviceName()
+const std::string &DeviceIdentity::getDeviceName()
 {
     begin();
     return deviceName_;
 }
 
-const String &DeviceIdentity::getDeviceId()
+const std::string &DeviceIdentity::getDeviceId()
 {
     begin();
     return deviceId_;
 }
 
-const String &DeviceIdentity::getHardwareSignature()
+const std::string &DeviceIdentity::getHardwareSignature()
 {
     begin();
     return hardwareSignature_;
 }
 
-const String &DeviceIdentity::getTimezone()
+const std::string &DeviceIdentity::getTimezone()
 {
     begin();
     return timezone_;
 }
 
-bool DeviceIdentity::setTimezone(const String &timezone)
+bool DeviceIdentity::setTimezone(const std::string &timezone)
 {
     if (!begin() || !validTimezone(timezone))
         return false;
     if (timezone == timezone_)
         return true;
-    const String previousTimezone = timezone_;
+    const std::string previousTimezone = timezone_;
     if (!applyTimezone(timezone))
         return false;
 #if NM_ENABLE_SETTINGS
@@ -186,24 +192,24 @@ bool DeviceIdentity::setTimezone(const String &timezone)
     return true;
 }
 
-bool DeviceIdentity::isDevice(const String &fullTopic)
+bool DeviceIdentity::isDevice(const std::string &fullTopic)
 {
-    const String &name = getDeviceName();
-    return fullTopic == name || fullTopic.startsWith(name + "/");
+    const std::string &name = getDeviceName();
+    return fullTopic == name || NightMare::Text::startsWith(fullTopic, name + "/");
 }
 
-bool DeviceIdentity::relativeTopic(const String &fullTopic, String &relative)
+bool DeviceIdentity::relativeTopic(const std::string &fullTopic, std::string &relative)
 {
     if (!isDevice(fullTopic) || fullTopic.length() == deviceName_.length())
         return false;
-    relative = fullTopic.substring(deviceName_.length() + 1);
+    relative = NightMare::Text::slice(fullTopic, deviceName_.length() + 1);
     return true;
 }
 
-String DeviceIdentity::topic(const String &relative)
+std::string DeviceIdentity::topic(const std::string &relative)
 {
-    const String &name = getDeviceName();
-    if (relative.startsWith("/"))
+    const std::string &name = getDeviceName();
+    if (NightMare::Text::startsWith(relative, "/"))
         return name + relative;
     return name + "/" + relative;
 }
@@ -213,7 +219,7 @@ void DeviceIdentity::lockAddress()
     addressLocked_ = true;
 }
 
-bool DeviceIdentity::beginAdoption(const String &newName)
+bool DeviceIdentity::beginAdoption(const std::string &newName)
 {
     begin();
     if (!validDeviceName(newName))
@@ -229,7 +235,7 @@ bool DeviceIdentity::beginAdoption(const String &newName)
     if (newName == deviceName_)
         return true;
 
-    const String oldName = deviceName_;
+    const std::string oldName = deviceName_;
 #if NM_ENABLE_SETTINGS
     // The cleanup record goes first. If power fails before the name is written,
     // begin() finds a record naming the current identity and discards it; in
@@ -238,13 +244,13 @@ bool DeviceIdentity::beginAdoption(const String &newName)
     pendingFlags_ = AllCleanupFlags;
     if (!persistPendingCleanup())
     {
-        pendingOldName_ = String();
+        pendingOldName_ = std::string();
         pendingFlags_ = 0;
         return false;
     }
     if (!PersistentSettings.set(NightMare::PersistentKey::DeviceName, newName))
     {
-        pendingOldName_ = String();
+        pendingOldName_ = std::string();
         pendingFlags_ = 0;
         persistPendingCleanup();
         return false;
@@ -293,10 +299,10 @@ bool DeviceIdentity::markIdentityCleanupComplete(IdentityCleanupFlags flag)
         return true;
 
     const uint8_t previousFlags = pendingFlags_;
-    const String previousName = pendingOldName_;
+    const std::string previousName = pendingOldName_;
     pendingFlags_ = static_cast<uint8_t>(pendingFlags_ & ~flag);
     if (pendingFlags_ == 0)
-        pendingOldName_ = String();
+        pendingOldName_ = std::string();
     if (persistPendingCleanup())
         return true;
 

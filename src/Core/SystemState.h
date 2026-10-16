@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <freertos/FreeRTOS.h>
 
 enum class SystemFlag : uint16_t

@@ -26,7 +26,7 @@ namespace
 {
 #if NM_ENABLE_CONSOLE
 bool firstConnection = true;
-bool validControlId(const String &id)
+bool validControlId(const std::string &id)
 {
     if (id.length() == 0 || id.length() > 64)
         return false;
@@ -48,7 +48,7 @@ CommandSource activeSource()
                : NM_CMD_SRC_MQTT;
 }
 
-void runCommand(const String &payload, const String &replyTopic)
+void runCommand(const std::string &payload, const std::string &replyTopic)
 {
     NightmareContext context(activeSource(), replyTopic);
     NightMareResults result = handleNightMareCommand(payload, context);
@@ -59,14 +59,14 @@ void runCommand(const String &payload, const String &replyTopic)
 #endif
 
 #if NM_ENABLE_TIME_SYNC
-bool syncTime(const String &payload)
+bool syncTime(const std::string &payload)
 {
     if (payload.length() > 256)
         return true;
     JsonDocument doc;
     if (deserializeJson(doc, payload) || doc["timestamp"].isNull() || doc["offset"].isNull())
         return true;
-    String timestampText;
+    std::string timestampText;
     serializeJson(doc["timestamp"], timestampText);
     char *end = nullptr;
     double timestamp = strtod(timestampText.c_str(), &end);
@@ -127,7 +127,7 @@ void onConnected()
 #endif
 }
 
-bool handleMessage(const String &fullTopic, const String &payload, bool retained)
+bool handleMessage(const std::string &fullTopic, const std::string &payload, bool retained)
 {
     if (NightMare::GatewayCandidateHandleMessage(fullTopic, payload, retained))
         return true;
@@ -142,21 +142,21 @@ bool handleMessage(const String &fullTopic, const String &payload, bool retained
 #endif
 
 #if NM_ENABLE_CONSOLE
-    String relative;
+    std::string relative;
     const bool addressedHere = gDeviceIdentity.relativeTopic(fullTopic, relative);
     if (fullTopic == "all/console/in" || (addressedHere && relative == "console/in"))
     {
         runCommand(payload, gDeviceIdentity.topic("console/out"));
         return true;
     }
-    if (addressedHere && relative.startsWith("console/controlled/") &&
-        relative.endsWith("/in"))
+    if (addressedHere && NightMare::Text::startsWith(relative, "console/controlled/") &&
+        NightMare::Text::endsWith(relative, "/in"))
     {
-        const String id = relative.substring(sizeof("console/controlled/") - 1,
+        const std::string id = NightMare::Text::slice(relative, sizeof("console/controlled/") - 1,
                                              relative.length() - sizeof("/in") + 1);
         if (!validControlId(id))
             return true;
-        String reply = "console/controlled/";
+        std::string reply = "console/controlled/";
         reply += id;
         reply += "/out";
         runCommand(payload, gDeviceIdentity.topic(reply));

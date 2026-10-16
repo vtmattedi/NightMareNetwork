@@ -4,6 +4,7 @@
 #include "ConfigManager.h"
 #include "DeviceIdentity.h"
 #include "Time.h"
+#include <esp_system.h>
 #include <Network/Connectivity.h>
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
@@ -29,16 +30,16 @@
 #include <Network/EspNow/EspNowClient.h>
 #endif
 #if NM_CONSOLE_BUILTINS
-#include <LittleFS.h>
+#include "Storage.h"
 #endif
 
 #if NM_ENABLE_WIFI
 // "AUTO" or a dBm value such as "8.5" -> the driver's quarter-dBm level. Exact
 // only: 9 is rejected rather than rounded to 8.5.
-static bool parseTxPowerArg(String arg, int &quarterDbm)
+static bool parseTxPowerArg(std::string arg, int &quarterDbm)
 {
-    arg.trim();
-    arg.toUpperCase();
+    NightMare::Text::trim(arg);
+    NightMare::Text::toUpper(arg);
     if (arg == "AUTO")
     {
         quarterDbm = NightMare::NM_TX_POWER_AUTO;
@@ -46,7 +47,7 @@ static bool parseTxPowerArg(String arg, int &quarterDbm)
     }
     if (arg.length() == 0)
         return false;
-    const float dbm = arg.toFloat();
+    const float dbm = NightMare::Text::toFloat(arg);
     const int quarter = static_cast<int>(dbm * 4.0f + (dbm < 0 ? -0.5f : 0.5f));
     if (quarter == NightMare::NM_TX_POWER_AUTO || fabsf(dbm * 4.0f - quarter) > 0.01f ||
         !WiFi_isValidTxPower(quarter))
@@ -67,7 +68,7 @@ void setCommandResolver(NightMareResults (*resolver)(const NightMareMessage &mes
 /// @brief Parses a command string into a NightMareMessage struct.
 /// @param message The command string to parse.
 /// @return A NightMareMessage struct containing the parsed command and its arguments.
-NightMareMessage parseNightMareMessage(const String &message)
+NightMareMessage parseNightMareMessage(const std::string &message)
 {
     /* NightMare Message Parser:
 
@@ -84,13 +85,13 @@ NightMareMessage parseNightMareMessage(const String &message)
 
     */
     NightMareMessage parsedMsg;
-    String current_string = "";
+    std::string current_string = "";
     int index = 0;
     bool in_quotes = false;
-    String quote = "";
+    std::string quote = "";
     for (size_t i = 0; i < message.length(); i++)
     {
-        char c = message.charAt(i);
+        char c = message[i];
         if (c == ' ' && !in_quotes)
         {
             index++;
@@ -125,9 +126,9 @@ NightMareMessage parseNightMareMessage(const String &message)
                 parsedMsg.args[index - 1] += c;
         }
     }
-    parsedMsg.command.toUpperCase();
+    NightMare::Text::toUpper(parsedMsg.command);
     parsedMsg.subcommand = parsedMsg.args[0];
-    parsedMsg.subcommand.toUpperCase();
+    NightMare::Text::toUpper(parsedMsg.subcommand);
     return parsedMsg;
 }
 
@@ -138,11 +139,11 @@ NightMareMessage parseNightMareMessage(const String &message)
 /// @param maxLength The limit to enforce.
 /// @param error Set to the reason when this returns false; left alone on success.
 /// @return True when `str` is within the limit, false when it overran.
-bool ensureSize(const String &str, size_t maxLength, String &error)
+bool ensureSize(const std::string &str, size_t maxLength, std::string &error)
 {
     if (str.length() <= maxLength)
         return true;
-    error = "input too long: " + String((uint32_t)str.length()) + " chars, limit is " + String((uint32_t)maxLength);
+    error = "input too long: " + std::to_string((uint32_t)str.length()) + " chars, limit is " + std::to_string((uint32_t)maxLength);
     return false;
 }
 
@@ -155,7 +156,7 @@ static inline bool isTokenSeparator(char c)
 
 /// @brief Files one finished token into the message. Slot 0 is the command, the rest are args.
 /// @return False when there are more tokens than slots, having marked `msg` invalid.
-static bool storeToken(NightMareMessage &msg, uint8_t slot, const String &token)
+static bool storeToken(NightMareMessage &msg, uint8_t slot, const std::string &token)
 {
     if (slot == 0)
     {
@@ -165,7 +166,7 @@ static bool storeToken(NightMareMessage &msg, uint8_t slot, const String &token)
     if (slot > NM_MAX_ARGS)
     {
         msg.valid = false;
-        msg.error = "too many arguments, limit is " + String(NM_MAX_ARGS);
+        msg.error = "too many arguments, limit is " + std::to_string(NM_MAX_ARGS);
         return false;
     }
     msg.args[slot - 1] = token;
@@ -202,7 +203,7 @@ enum NightMareParseState
 /// Malformed input is reported rather than guessed at: check `valid` before using the result.
 /// @param message The command string to parse.
 /// @return The parsed message, or one with `valid` false and `error` set.
-NightMareMessage parseNightMareMessage2(const String &message)
+NightMareMessage parseNightMareMessage2(const std::string &message)
 {
     NightMareMessage msg;
 
@@ -215,11 +216,11 @@ NightMareMessage parseNightMareMessage2(const String &message)
     // One allocation, reused for every token, so the scan itself never reallocates. Checked because
     // token += c discards its own failure: on a dead heap it would truncate silently and hand back
     // a confidently wrong parse, which is the one thing this parser exists to prevent.
-    String token;
-    if (!token.reserve(message.length()))
+    std::string token;
+    if (!NightMare::Text::tryReserve(token, message.length()))
     {
         msg.valid = false;
-        msg.error = "out of memory reserving " + String((uint32_t)message.length()) + " chars";
+        msg.error = "out of memory reserving " + std::to_string((uint32_t)message.length()) + " chars";
         return msg;
     }
 
@@ -228,16 +229,16 @@ NightMareMessage parseNightMareMessage2(const String &message)
 
     for (size_t i = 0; i < message.length(); i++)
     {
-        char c = message.charAt(i);
+        char c = message[i];
 
         // A backslash escapes only the two delimiters. Before anything else it is kept as typed and
         // the next character is left to the normal rules, so /a\b.json and C:\tmp round-trip
         // unchanged and a backslash never has to be doubled.
         if (c == '\\')
         {
-            char next = (i + 1 < message.length()) ? message.charAt(i + 1) : '\0';
+            char next = (i + 1 < message.length()) ? message[i + 1] : '\0';
             if (next == '"' || next == '`')
-                token += message.charAt(++i);
+                token += message[++i];
             else
                 token += '\\';
             if (state == NM_PARSE_SEP)
@@ -251,19 +252,19 @@ NightMareMessage parseNightMareMessage2(const String &message)
         if (c == '`' && state != NM_PARSE_QUOTED)
         {
             size_t fence = 1;
-            while (i + fence < message.length() && message.charAt(i + fence) == '`')
+            while (i + fence < message.length() && message[i + fence] == '`')
                 fence++;
             size_t j = i + fence; // first content character
             bool closed = false;
             while (j < message.length())
             {
-                if (message.charAt(j) != '`')
+                if (message[j] != '`')
                 {
-                    token += message.charAt(j++);
+                    token += message[j++];
                     continue;
                 }
                 size_t run = 1;
-                while (j + run < message.length() && message.charAt(j + run) == '`')
+                while (j + run < message.length() && message[j + run] == '`')
                     run++;
                 if (run == fence)
                 {
@@ -327,9 +328,9 @@ NightMareMessage parseNightMareMessage2(const String &message)
     }
 
     msg.argc = slot - 1; // slot counts the command word, argc does not
-    msg.command.toUpperCase();
+    NightMare::Text::toUpper(msg.command);
     msg.subcommand = msg.args[0];
-    msg.subcommand.toUpperCase();
+    NightMare::Text::toUpper(msg.subcommand);
     return msg;
 }
 
@@ -345,34 +346,22 @@ NightMareMessage parseNightMareMessage2(const String &message)
 /// @param files The array to append the entries to.
 /// @param path Directory to walk, with a leading slash and no trailing slash ("" for the root).
 /// @param depth Remaining levels to descend; recursion stops at 0.
-static void listFileTree(JsonArray &files, const String &path, uint8_t depth)
+static void listFileTree(JsonArray &files, const std::string &path, uint8_t depth)
 {
-    File dir = LittleFS.open(path.length() ? path.c_str() : "/");
-    if (!dir || !dir.isDirectory())
+    std::vector<NightMare::Storage::Entry> entries;
+    if (!NightMare::Storage::list(entries))
         return;
-    File entry = dir.openNextFile();
-    while (entry)
+    for (const auto &entry : entries)
     {
-        // File::name() is the bare entry name on newer cores and the full path on older ones,
-        // so build the path from the parent rather than trusting either.
-        String name = entry.name();
-        int slash = name.lastIndexOf('/');
-        if (slash >= 0)
-            name = name.substring(slash + 1);
-        String fullPath = path + "/" + name;
-        bool isDir = entry.isDirectory();
         JsonObject entryObj = files.add<JsonObject>();
-        entryObj["name"] = isDir ? fullPath + "/" : fullPath;
-        entryObj["size"] = isDir ? 0 : entry.size();
-        entry.close();
-        if (isDir && depth > 0)
-            listFileTree(files, fullPath, depth - 1);
-        entry = dir.openNextFile();
+        entryObj["name"] = entry.name;
+        entryObj["size"] = entry.size;
     }
-    dir.close();
+    (void)path;
+    (void)depth;
 }
 
-static NightMareResults executeAdoptCommand(const String &newName, NightmareContext context)
+static NightMareResults executeAdoptCommand(const std::string &newName, NightmareContext context)
 {
     NightMareResults result;
     result.result = false;
@@ -413,7 +402,7 @@ static void refreshIdentityDocuments()
 #endif
 }
 
-static NightMareResults executeTimezoneCommand(const String &timezone,
+static NightMareResults executeTimezoneCommand(const std::string &timezone,
                                                NightmareContext context)
 {
     NightMareResults result;
@@ -440,7 +429,7 @@ static NightMareResults executeTimezoneCommand(const String &timezone,
 
 #if NM_ENABLE_JOBS
 /// Parse a decimal job time or ID without accepting signs or trailing text.
-static bool parseJobNumber(const String &text, uint32_t &value)
+static bool parseJobNumber(const std::string &text, uint32_t &value)
 {
     if (text.length() == 0)
         return false;
@@ -481,13 +470,13 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
     }
     else if (message.subcommand == "DELETE")
     {
-        const String &target = message.args[1];
+        const std::string &target = message.args[1];
         if (target.length() == 0)
             result.response = "Usage: JOB DELETE <label|#id>";
         else if (target[0] == '#')
         {
             uint32_t id = 0;
-            if (!parseJobNumber(target.substring(1), id))
+            if (!parseJobNumber(NightMare::Text::slice(target, 1), id))
                 result.response = "Invalid job ID.";
             else
             {
@@ -504,14 +493,14 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
     else if (message.subcommand == "AT" || message.subcommand == "AFTER" ||
              message.subcommand == "EVERY")
     {
-        const String &label = message.args[1];
+        const std::string &label = message.args[1];
         uint32_t when = 0;
-        String command;
-        String clock;
+        std::string command;
+        std::string clock;
         if (message.subcommand == "EVERY")
         {
             clock = message.args[2];
-            clock.toUpperCase();
+            NightMare::Text::toUpper(clock);
             command = message.args[4];
             if (clock != "WALL" && clock != "MONO")
             {
@@ -550,7 +539,7 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
             id = gScheduler.everyMonotonic(label, command, when, Scope);
         result.result = id >= 0;
         if (result.result)
-            result.response = String("Job created with ID ") + String(id);
+            result.response = std::string("Job created with ID ") + std::to_string(id);
         else
             result.response = "Could not create job (invalid time, duplicate label, full list, or storage unavailable).";
     }
@@ -563,7 +552,7 @@ static NightMareResults executeJobCommand(const NightMareMessage &message, Night
 #endif // NM_ENABLE_JOBS
 
 /// Parse and run one command through the built-in handler or registered resolver.
-NightMareResults handleNightMareCommand(const String &message, NightmareContext context)
+NightMareResults handleNightMareCommand(const std::string &message, NightmareContext context)
 {
     NightMareResults result;
     result.response = "No command resolved";
@@ -585,7 +574,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         ++commandStart;
     if (commandStart < message.length() && message[commandStart] == '>')
     {
-        const String expression = message.substring(commandStart + 1);
+        const std::string expression = NightMare::Text::slice(message, commandStart + 1);
         if (!ensureSize(expression, NetResourceMaxCommandLength, result.response))
         {
             result.result = false;
@@ -595,7 +584,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         const ActionResult resourceResult = gResourcesManager.executeCommand(expression);
         result.result = resourceResult.success;
         result.response = resourceResult.result;
-        if (!result.result && !result.response.startsWith("ERROR:"))
+        if (!result.result && !NightMare::Text::startsWith(result.response, "ERROR:"))
             result.response = "ERROR: " + result.response;
         return result;
     }
@@ -619,14 +608,14 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     while (configCommandEnd < message.length() &&
            !isTokenSeparator(message[configCommandEnd]))
         ++configCommandEnd;
-    String commandName = message.substring(configCommandStart, configCommandEnd);
-    if (commandName.equalsIgnoreCase("CONFIG"))
+    std::string commandName = NightMare::Text::slice(message, configCommandStart, configCommandEnd);
+    if (NightMare::Text::equalsIgnoreCase(commandName, "CONFIG"))
     {
         size_t configStart = configCommandEnd;
         while (configStart < message.length() && isTokenSeparator(message[configStart]))
             ++configStart;
-        result.response = configManager().handle(message.substring(configStart));
-        result.result = !result.response.startsWith("ERROR:");
+        result.response = configManager().handle(NightMare::Text::slice(message, configStart));
+        result.result = !NightMare::Text::startsWith(result.response, "ERROR:");
         return result;
     }
 
@@ -761,13 +750,13 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     }
     else if (parsedMsg.command == "REBOOT")
     {
-        ESP.restart();
+        esp_restart();
         result.response = "Rebooting...";
     }
     else if (parsedMsg.command == "TEST")
     {
         NightMareMessage testMsg = parseNightMareMessage(parsedMsg.args[0]);
-        String res = "Parsed Test Message: \n";
+        std::string res = "Parsed Test Message: \n";
         res += "Command: " + testMsg.command + "\n";
         res += "Subcommand: " + testMsg.subcommand + "\n";
         res += "Args: [";
@@ -799,9 +788,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             doc["local"] = clockValid
                                ? NightMare::Time::timestampToDateString(
                                      epoch, NightMare::Time::DateAndTime)
-                               : String();
+                               : std::string();
             doc["timezone"] = gDeviceIdentity.getTimezone();
-            doc["uptime_ms"] = millis();
+            doc["uptime_ms"] = NightMare::Platform::monotonicMillis();
             serializeJson(doc, result.response);
             result.result = true;
         }
@@ -819,12 +808,12 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             // and by the size of the filesystem it is listing.
             if (measureJson(doc) > FS_LIST_JSON_CAPACITY)
             {
-                result.response = "Too many files to list: the tree exceeds " + String(FS_LIST_JSON_CAPACITY) + " bytes of JSON.";
+                result.response = "Too many files to list: the tree exceeds " + std::to_string(FS_LIST_JSON_CAPACITY) + " bytes of JSON.";
                 result.result = false;
             }
             else
             {
-                String resStr = "";
+                std::string resStr = "";
                 serializeJson(doc, resStr);
                 result.response = resStr;
                 result.result = true;
@@ -832,7 +821,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         }
         else if (parsedMsg.subcommand == "READ")
         {
-            String filename = parsedMsg.args[1];
+            std::string filename = parsedMsg.args[1];
             if (filename.length() == 0)
             {
                 result.response = "No filename provided to READ.";
@@ -840,13 +829,12 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             }
             else
             {
-                if (LittleFS.exists(filename))
+                if (NightMare::Storage::exists(filename))
                 {
-                    File file = LittleFS.open(filename, "r");
-                    if (file)
+                    std::string file;
+                    if (NightMare::Storage::read(filename, file, FS_LIST_JSON_CAPACITY))
                     {
-                        result.response = file.readString();
-                        file.close();
+                        result.response = file;
                         result.result = true;
                     }
                     else
@@ -865,18 +853,20 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
         else if (parsedMsg.subcommand == "STATUS")
         {
             JsonDocument doc;
-            doc["totalBytes"] = LittleFS.totalBytes();
-            doc["usedBytes"] = LittleFS.usedBytes();
-            doc["usedPercentage"] = (double)(LittleFS.usedBytes() * 100) / (double)LittleFS.totalBytes();
+            size_t totalBytes = 0, usedBytes = 0;
+            NightMare::Storage::info(totalBytes, usedBytes);
+            doc["totalBytes"] = totalBytes;
+            doc["usedBytes"] = usedBytes;
+            doc["usedPercentage"] = totalBytes ? (double)(usedBytes * 100) / (double)totalBytes : 0;
             doc["initialized"] = SystemState.get(SystemFlag::PersistentStorageReady);
-            String resStr = "";
+            std::string resStr = "";
             serializeJson(doc, resStr);
             result.response = resStr;
             result.result = true;
         }
         else if (parsedMsg.subcommand == "DELETE")
         {
-            String filename = parsedMsg.args[1];
+            std::string filename = parsedMsg.args[1];
             if (filename.length() == 0)
             {
                 result.response = "No filename provided to DELETE.";
@@ -884,9 +874,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             }
             else
             {
-                if (LittleFS.exists(filename))
+                if (NightMare::Storage::exists(filename))
                 {
-                    if (LittleFS.remove(filename))
+                    if (NightMare::Storage::remove(filename))
                     {
                         result.response = "File '" + filename + "' deleted successfully.";
                         result.result = true;
@@ -916,7 +906,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
                 result.response = "Filesystem not mounted.";
                 result.result = false;
             }
-            else if (LittleFS.format())
+            else if (NightMare::Storage::format())
             {
                 result.response = "Filesystem formatted successfully.";
                 result.result = true;
@@ -953,9 +943,9 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             finishJson(doc, ok);
         };
 #if NM_ENABLE_NETWORK
-        auto parseConnection = [](String value, NightMare::ConnectionType &connection)
+        auto parseConnection = [](std::string value, NightMare::ConnectionType &connection)
         {
-            value.toUpperCase();
+            NightMare::Text::toUpper(value);
             if (value == "MQTT") connection = NightMare::ConnectionType::MQTT;
             else if (value == "ESP_NOW") connection = NightMare::ConnectionType::ESP_NOW;
             else if (value == "AUTO") connection = NightMare::ConnectionType::AUTO;
@@ -1027,7 +1017,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_WIFI
         else if (parsedMsg.subcommand == "WIFI")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             if (action == "GET")
             {
                 JsonDocument doc;
@@ -1134,7 +1124,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #else
         else if (parsedMsg.subcommand == "WIFI")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             JsonDocument doc;
             if (action == "GET")
             {
@@ -1150,7 +1140,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_NETWORK_ESPNOW
         else if (parsedMsg.subcommand == "ESPNOW")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             if (action == "GET")
             { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::EspNow_enabled(); doc["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state()); finishJson(doc, true); }
             else if (action == "ENABLE") lifecycleResult(NightMare::EspNow_enable(), "radio_not_ready", NightMare::EspNow_state());
@@ -1160,7 +1150,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #else
         else if (parsedMsg.subcommand == "ESPNOW")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             JsonDocument doc;
             if (action == "GET")
             { doc["supported"] = false; doc["enabled"] = false; doc["state"] = "STOPPED"; finishJson(doc, true); }
@@ -1171,13 +1161,13 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_MQTT
         else if (parsedMsg.subcommand == "MQTT")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             if (action == "GET")
             { JsonDocument doc; doc["supported"] = true; doc["enabled"] = NightMare::Mqtt_enabled(); doc["profile"] = NightMare::MqttProfileName(NightMare::Mqtt_profile()); doc["state"] = NightMare::ConnectivityStateName(NightMare::Mqtt_state()); finishJson(doc, true); }
             else if (action == "ENABLE")
             {
                 NightMare::MqttProfile profile = NightMare::Mqtt_profile();
-                String requested = parsedMsg.args[2]; requested.toUpperCase();
+                std::string requested = parsedMsg.args[2]; NightMare::Text::toUpper(requested);
                 const bool known = requested.length() == 0 || requested == "REMOTE" || requested == "LOCAL";
                 if (requested == "REMOTE") profile = NightMare::MqttProfile::REMOTE;
                 else if (requested == "LOCAL") profile = NightMare::MqttProfile::LOCAL;
@@ -1194,7 +1184,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #else
         else if (parsedMsg.subcommand == "MQTT")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             JsonDocument doc;
             if (action == "GET")
             { doc["supported"] = false; doc["enabled"] = false; doc["profile"] = "MQTT"; doc["state"] = "STOPPED"; finishJson(doc, true); }
@@ -1205,7 +1195,7 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
 #if NM_ENABLE_NETWORK
         else if (parsedMsg.subcommand == "TRANSPORT")
         {
-            String action = parsedMsg.args[1]; action.toUpperCase();
+            std::string action = parsedMsg.args[1]; NightMare::Text::toUpper(action);
             if (action == "GET")
             { JsonDocument doc; doc["preferred"] = NightMare::ConnectionTypeName(NightMare::GetPreferredConnection()); doc["active"] = NightMare::ConnectionTypeName(NightMare::GetActiveConnection()); doc["state"] = NightMare::ConnectionStateName(NightMare::GetConnectionState()); finishJson(doc, true); }
             else if (action == "SET")
@@ -1239,12 +1229,12 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             esp_err_t res = setHttpHighPriority(priority);
             if (res == ESP_OK)
             {
-                result.response = "HTTP server priority set to " + String(priority ? "HIGH" : "NORMAL") + ".";
+                result.response = "HTTP server priority set to " + std::string(priority ? "HIGH" : "NORMAL") + ".";
                 result.result = true;
             }
             else
             {
-                result.response = "Failed to set HTTP server priority to " + String(priority ? "HIGH" : "NORMAL") + ".";
+                result.response = "Failed to set HTTP server priority to " + std::string(priority ? "HIGH" : "NORMAL") + ".";
                 result.result = false;
             }
         }
@@ -1319,13 +1309,13 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
     {
         if (parsedMsg.subcommand == "LIST")
         {
-            result.response += "Total WS active clients: " + String(ws_clients.count) + "\n";
+            result.response += "Total WS active clients: " + std::to_string(ws_clients.count) + "\n";
             for (size_t i = 0; i < HTTPD_MAX_OPEN_SOCKETS; i++)
             {
                 if (ws_clients.wsList[i].active)
                 {
-                    result.response += "Client " + String(i) + ": Socket " +
-                                       String(ws_clients.wsList[i].sockfd) + "\n";
+                    result.response += "Client " + std::to_string(i) + ": Socket " +
+                                       std::to_string(ws_clients.wsList[i].sockfd) + "\n";
                 }
             }
         }
@@ -1364,44 +1354,50 @@ NightMareResults handleNightMareCommand(const String &message, NightmareContext 
             snprintf(buffer, sizeof(buffer), "Command \'%s\' executed successfully.", parsedMsg.command.c_str());
         else
             snprintf(buffer, sizeof(buffer), "Command \'%s\' unrecognized.", parsedMsg.command.c_str());
-        result.response = String(buffer);
+        result.response = std::string(buffer);
     }
     result.context = context;
     return result;
 }
 
 #if NM_CONSOLE_SERIAL
+#include <fcntl.h>
+#include <unistd.h>
 
 /// @brief Listens to Serial input and resolves commands using the NightMare command resolver.
 /// This function uses Serial.readStringUntil to read input until the specified character is encountered.
 /// @param _Serial A HardwareSerial Object Pointer.
 /// @param readUntilChar The character to read until (default is '\n')
 /// @note: If readUntilChar is set to 0, it will read until no more data is available in the buffer, allowing for multi-line commands.
-void NightMareCommand_SerialResolver(SERIALTYPE *_Serial, char readUntilChar)
+void NightMareCommand_SerialResolver()
 {
-    if (_Serial == nullptr)
-        return;
-    if (_Serial->available())
+    static std::string command;
+    static bool configured = false;
+    if (!configured)
     {
-        String cmd = "";
-        if (readUntilChar != 0)
+        const int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (flags >= 0)
+            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        configured = true;
+    }
+    char next;
+    while (read(STDIN_FILENO, &next, 1) == 1)
+    {
+        if (next == '\n' || next == '\r')
         {
-            cmd = _Serial->readStringUntil(readUntilChar);
-        }
-        else
-        {
-            while (_Serial->available())
+            NightMare::Text::trim(command);
+            if (!command.empty())
             {
-                cmd += (char)_Serial->read();
-                delayMicroseconds(10); // Small delay to allow buffer to fill
+                NightMareResults result = handleNightMareCommand(
+                    command, NightmareContext(NM_CMD_SRC_SERIAL, "Serial"));
+                if (result.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
+                    std::printf("%s\n", result.response.c_str());
             }
+            command.clear();
+            continue;
         }
-        cmd.trim();
-        NightMareResults res = handleNightMareCommand(cmd, NightmareContext(NM_CMD_SRC_SERIAL, "Serial", _Serial));
-        if (res.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
-        {
-            _Serial->println(res.response);
-        }
+        if (command.size() < NM_MAX_MESSAGE_LEN)
+            command += next;
     }
 }
 

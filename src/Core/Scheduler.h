@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_SCHEDULER
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -41,8 +42,8 @@ struct Job
     bool active = false;
     uint32_t id = 0;
     SchedulerJobScope scope = SchedulerJobScope::MANAGED;
-    String label;
-    String command;
+    std::string label;
+    std::string command;
     SchedulerClock clock = SchedulerClock::Monotonic;
     uint32_t due = 0;
     uint32_t interval = 0; // Zero means run once.
@@ -70,35 +71,35 @@ public:
 
     // A command job is MANAGED unless a JOB command creates it as USER. A
     // callback job is always MANAGED: nothing outside C++ can make one.
-    int32_t atWall(const String &label, const String &command, uint32_t epochSeconds,
+    int32_t atWall(const std::string &label, const std::string &command, uint32_t epochSeconds,
                    SchedulerJobScope scope = SchedulerJobScope::MANAGED);
-    int32_t atWall(const String &label, SchedulerCallback callback, uint32_t epochSeconds);
+    int32_t atWall(const std::string &label, SchedulerCallback callback, uint32_t epochSeconds);
 
-    int32_t after(const String &label, const String &command, uint32_t delayMs,
+    int32_t after(const std::string &label, const std::string &command, uint32_t delayMs,
                   SchedulerJobScope scope = SchedulerJobScope::MANAGED);
-    int32_t after(const String &label, SchedulerCallback callback, uint32_t delayMs);
+    int32_t after(const std::string &label, SchedulerCallback callback, uint32_t delayMs);
 
-    int32_t everyWall(const String &label, const String &command, uint32_t intervalSeconds,
+    int32_t everyWall(const std::string &label, const std::string &command, uint32_t intervalSeconds,
                       SchedulerJobScope scope = SchedulerJobScope::MANAGED);
-    int32_t everyWall(const String &label, SchedulerCallback callback, uint32_t intervalSeconds);
+    int32_t everyWall(const std::string &label, SchedulerCallback callback, uint32_t intervalSeconds);
 
-    int32_t everyMonotonic(const String &label, const String &command, uint32_t intervalMs,
+    int32_t everyMonotonic(const std::string &label, const std::string &command, uint32_t intervalMs,
                            SchedulerJobScope scope = SchedulerJobScope::MANAGED);
-    int32_t everyMonotonic(const String &label, SchedulerCallback callback, uint32_t intervalMs);
+    int32_t everyMonotonic(const std::string &label, SchedulerCallback callback, uint32_t intervalMs);
 
     // Conveniences over the forms above: a recurring monotonic callback whose
     // first run is one interval from now, and a one-shot with a generated label.
-    int32_t timer(const String &label, SchedulerCallback callback, uint32_t intervalMs);
+    int32_t timer(const std::string &label, SchedulerCallback callback, uint32_t intervalMs);
     int32_t setTimeout(SchedulerCallback callback, uint32_t delayMs);
 
     // Scoped because a label alone no longer names one job. The MANAGED default
     // lets framework code remove its own jobs without ever touching a USER job
     // that happens to share the label.
-    bool remove(const String &label, SchedulerJobScope scope = SchedulerJobScope::MANAGED);
+    bool remove(const std::string &label, SchedulerJobScope scope = SchedulerJobScope::MANAGED);
     bool remove(uint32_t id, SchedulerJobScope scope = SchedulerJobScope::MANAGED);
     // Removes every job of one scope; JOB CLEAR uses USER.
     bool clear(SchedulerJobScope scope);
-    String list(SchedulerJobScope scope);
+    std::string list(SchedulerJobScope scope);
     // Called by the scheduler task in TASK mode; by the application in MANUAL mode.
     void tick();
 
@@ -117,17 +118,17 @@ private:
     // Storage and persisted jobs. Never chooses a run mode.
     void ensureInitialized();
     // Each clock/repeat shape computes its deadline here, for either target.
-    int32_t scheduleAtWall(SchedulerJobScope scope, const String &label, const String &command,
+    int32_t scheduleAtWall(SchedulerJobScope scope, const std::string &label, const std::string &command,
                            SchedulerCallback callback, uint32_t epochSeconds);
-    int32_t scheduleAfter(SchedulerJobScope scope, const String &label, const String &command,
+    int32_t scheduleAfter(SchedulerJobScope scope, const std::string &label, const std::string &command,
                           SchedulerCallback callback, uint32_t delayMs);
-    int32_t scheduleEveryWall(SchedulerJobScope scope, const String &label, const String &command,
+    int32_t scheduleEveryWall(SchedulerJobScope scope, const std::string &label, const std::string &command,
                               SchedulerCallback callback, uint32_t intervalSeconds);
-    int32_t scheduleEveryMonotonic(SchedulerJobScope scope, const String &label,
-                                   const String &command, SchedulerCallback callback,
+    int32_t scheduleEveryMonotonic(SchedulerJobScope scope, const std::string &label,
+                                   const std::string &command, SchedulerCallback callback,
                                    uint32_t intervalMs);
     // The single place a job is created and validated.
-    int32_t add(SchedulerJobScope scope, const String &label, const String &command,
+    int32_t add(SchedulerJobScope scope, const std::string &label, const std::string &command,
                 SchedulerClock clock, uint32_t due, uint32_t interval, SchedulerCallback callback);
     // Removes the matching job, saving if it was persisted. Rolls back on failure.
     bool removeJob(Job &job);

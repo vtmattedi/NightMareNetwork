@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 enum class IdentityCleanupResult : uint8_t
 {

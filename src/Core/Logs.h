@@ -4,7 +4,8 @@
 #include <NightMareConfig.h>
 #endif
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 // NM_LOG_LEVEL can be supplied by the project's configuration.
 // 0 disables logging; 1-5 enable Error, Warning, Info, Debug, and Trace.
 #define NM_LOG_LEVEL_OFF 0
@@ -18,8 +19,8 @@
 #define NM_LOG_LEVEL NM_LOG_LEVEL_OFF
 #endif
 
-// 1 stamps each line with the local wall-clock time (HH:MM:SS) instead of millis(). Until the
-// clock is valid (before the first time sync) the line falls back to millis().
+// 1 stamps each line with the local wall-clock time (HH:MM:SS) instead of NightMare::Platform::monotonicMillis(). Until the
+// clock is valid (before the first time sync) the line falls back to NightMare::Platform::monotonicMillis().
 #ifndef NM_LOG_USE_TIME_OF_DAY
 #define NM_LOG_USE_TIME_OF_DAY 0
 #endif

@@ -1,12 +1,13 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 // ESP MQTT client and broker lifecycle. Topics arrive unmodified.
 namespace NmMqttEsp
 {
-using MessageHandler = void (*)(const String &topic, const String &payload, bool retained);
+using MessageHandler = void (*)(const std::string &topic, const std::string &payload, bool retained);
 using ConnectedHandler = void (*)(bool lanBroker);
 using DisconnectedHandler = void (*)(bool lanBroker);
 using ErrorHandler = void (*)(bool lanBroker);

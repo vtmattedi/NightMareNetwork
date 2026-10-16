@@ -1,8 +1,9 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
-// Generic in-memory String key/value store. It never accesses storage.
+// Generic in-memory std::string key/value store. It never accesses storage.
 class RuntimeState
 {
 public:
@@ -11,21 +12,21 @@ public:
     static constexpr size_t MaxEntries = 128;
     virtual ~RuntimeState() = default;
 
-    virtual bool set(const String &key, const String &value);
-    virtual String get(const String &key, const String &defaultValue = "") const;
-    bool setFlag(const String &key, bool value);
-    bool getFlag(const String &key) const;
-    virtual bool exists(const String &key) const;
-    virtual bool remove(const String &key);
+    virtual bool set(const std::string &key, const std::string &value);
+    virtual std::string get(const std::string &key, const std::string &defaultValue = "") const;
+    bool setFlag(const std::string &key, bool value);
+    bool getFlag(const std::string &key) const;
+    virtual bool exists(const std::string &key) const;
+    virtual bool remove(const std::string &key);
     virtual void clear();
     virtual size_t size() const { return count_; }
-    virtual String toJson() const;
+    virtual std::string toJson() const;
 
 private:
     struct Entry
     {
-        String key;
-        String value;
+        std::string key;
+        std::string value;
     };
     Entry entries_[MaxEntries];
     size_t count_ = 0;

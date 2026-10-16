@@ -20,8 +20,8 @@ constexpr uint8_t ErrorsBeforeSwitchFailure = 2;
 struct QueuedMessage
 {
     bool active = false;
-    String topic;
-    String payload;
+    std::string topic;
+    std::string payload;
     bool retained = false;
 };
 
@@ -76,8 +76,8 @@ void flushQueuedMessages()
             xSemaphoreGive(queueMutex);
             continue;
         }
-        const String topic = pending[i].topic;
-        const String payload = pending[i].payload;
+        const std::string topic = pending[i].topic;
+        const std::string payload = pending[i].payload;
         const bool retained = pending[i].retained;
         xSemaphoreGive(queueMutex);
 
@@ -93,7 +93,7 @@ void flushQueuedMessages()
     }
 }
 
-void messageReceived(const String &topic, const String &payload, bool retained)
+void messageReceived(const std::string &topic, const std::string &payload, bool retained)
 {
     if (NightMare::GetActiveConnection() == NightMare::ConnectionType::MQTT)
         NmMessageRouter::handleMessage(topic, payload, retained);
@@ -213,10 +213,10 @@ void onWiFiState(bool connected)
     serviceChanged();
 }
 
-bool queueAsyncMessage(const String &topic, const String &message,
+bool queueAsyncMessage(const std::string &topic, const std::string &message,
                        bool insertOwner, bool retained)
 {
-    const String fullTopic = insertOwner ? gDeviceIdentity.topic(topic) : topic;
+    const std::string fullTopic = insertOwner ? gDeviceIdentity.topic(topic) : topic;
     if (publish(fullTopic.c_str(),
                 reinterpret_cast<const uint8_t *>(message.c_str()),
                 message.length(), retained))

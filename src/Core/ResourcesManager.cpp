@@ -3,12 +3,12 @@
 #include "ResourcesManager.h"
 #include "DeviceIdentity.h"
 #include "DocumentPayload.h"
+#include "Storage.h"
 #if NM_ENABLE_SETTINGS
 #include "StateStore.h"
 #endif
 
 #include <ArduinoJson.h>
-#include <LittleFS.h>
 #if NM_PLATFORM_ESP32
 #include <esp_heap_caps.h>
 #endif
@@ -22,7 +22,6 @@ namespace
         ResourcesManager::MaxResources * (MaxSegmentLength * 6 + 16) + 2;
     constexpr const char *RemoteResourcesFile = "/remoteresources.json";
     constexpr const char *ResourceSettingsFile = "/resourcesettings.json";
-    constexpr const char *ResourceSettingsTempFile = "/resourcesettings.tmp";
     constexpr size_t MaxResourceSettingsLength =
         ResourcesManager::MaxResources * (MaxSegmentLength + 80) + 2;
     /// Every device's manifest, for a handler that wants the whole network.
@@ -35,31 +34,22 @@ namespace
 #if NM_ENABLE_SETTINGS
         return PersistentSettings.begin();
 #else
-        static bool mounted = false;
-        if (!mounted)
-            mounted = LittleFS.begin(true);
-        return mounted;
+        return NightMare::Storage::mount();
 #endif
     }
 
     bool readRemoteSourceDocument(JsonDocument &doc, bool &exists)
     {
-        exists = LittleFS.exists(RemoteResourcesFile);
+        exists = NightMare::Storage::exists(RemoteResourcesFile);
         if (!exists)
         {
             doc.to<JsonObject>();
             return true;
         }
-        File file = LittleFS.open(RemoteResourcesFile, "r");
-        if (!file)
+        std::string file;
+        if (!NightMare::Storage::read(RemoteResourcesFile, file, MaxRemoteResourcesLength))
             return false;
-        if (file.size() > MaxRemoteResourcesLength)
-        {
-            file.close();
-            return false;
-        }
         const DeserializationError error = deserializeJson(doc, file);
-        file.close();
         return !error && doc.is<JsonObject>();
     }
 
@@ -68,31 +58,23 @@ namespace
         const size_t expected = measureJson(doc);
         if (expected > MaxRemoteResourcesLength)
             return false;
-        File file = LittleFS.open(RemoteResourcesFile, "w");
-        if (!file)
-            return false;
-        const size_t written = serializeJson(doc, file);
-        file.close();
-        return written == expected;
+        std::string encoded;
+        return serializeJson(doc, encoded) == expected &&
+               NightMare::Storage::write(RemoteResourcesFile, encoded);
     }
 
     bool readResourceSettingsDocument(JsonDocument &doc, bool &exists)
     {
-        exists = LittleFS.exists(ResourceSettingsFile);
+        exists = NightMare::Storage::exists(ResourceSettingsFile);
         if (!exists)
         {
             doc.to<JsonObject>();
             return true;
         }
-        File file = LittleFS.open(ResourceSettingsFile, "r");
-        if (!file || file.size() > MaxResourceSettingsLength)
-        {
-            if (file)
-                file.close();
+        std::string file;
+        if (!NightMare::Storage::read(ResourceSettingsFile, file, MaxResourceSettingsLength))
             return false;
-        }
         const DeserializationError error = deserializeJson(doc, file);
-        file.close();
         return !error && doc.is<JsonObject>();
     }
 
@@ -101,30 +83,9 @@ namespace
         const size_t expected = measureJson(doc);
         if (expected > MaxResourceSettingsLength)
             return false;
-        if (LittleFS.exists(ResourceSettingsTempFile) &&
-            !LittleFS.remove(ResourceSettingsTempFile))
-            return false;
-        File file = LittleFS.open(ResourceSettingsTempFile, "w");
-        if (!file)
-            return false;
-        const size_t written = serializeJson(doc, file);
-        file.flush();
-        file.close();
-        if (written != expected)
-        {
-            LittleFS.remove(ResourceSettingsTempFile);
-            return false;
-        }
-        File verification = LittleFS.open(ResourceSettingsTempFile, "r");
-        const bool complete = verification && verification.size() == expected;
-        if (verification)
-            verification.close();
-        if (!complete || !LittleFS.rename(ResourceSettingsTempFile, ResourceSettingsFile))
-        {
-            LittleFS.remove(ResourceSettingsTempFile);
-            return false;
-        }
-        return true;
+        std::string encoded;
+        return serializeJson(doc, encoded) == expected &&
+               NightMare::Storage::write(ResourceSettingsFile, encoded, true);
     }
 
 /// @brief The encoding `>manifest` uses when given no argument. Written as a
@@ -134,13 +95,13 @@ namespace
 #define NM_MANIFEST_FORMAT_STR(x) NM_MANIFEST_FORMAT_STR2(x)
 
     /// @brief "json" or "mpack", case-insensitively. Empty selects the default.
-    bool parseDocumentFormat(const String &text, DocumentFormat &format)
+    bool parseDocumentFormat(const std::string &text, DocumentFormat &format)
     {
-        String wanted = text;
-        wanted.trim();
+        std::string wanted = text;
+        NightMare::Text::trim(wanted);
         if (wanted.length() == 0)
             wanted = NM_MANIFEST_FORMAT_STR(NM_DEFAULT_MANIFEST_FORMAT);
-        wanted.toLowerCase();
+        NightMare::Text::toLower(wanted);
 
         if (wanted == "json")
         {
@@ -160,20 +121,20 @@ namespace
         return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
     }
 
-    size_t skipCommandSpace(const String &text, size_t position)
+    size_t skipCommandSpace(const std::string &text, size_t position)
     {
         while (position < text.length() && commandSpace(text[position]))
             ++position;
         return position;
     }
 
-    String commandToken(const String &text, size_t &position)
+    std::string commandToken(const std::string &text, size_t &position)
     {
         position = skipCommandSpace(text, position);
         const size_t start = position;
         while (position < text.length() && !commandSpace(text[position]))
             ++position;
-        return text.substring(start, position);
+        return NightMare::Text::slice(text, start, position);
     }
 
     const char *kindName(NetResourceType kind)
@@ -245,7 +206,7 @@ namespace
     // not declare yet, and an optional argument may be absent. An empty payload is
     // an object with no fields. JSON is the canonical machine payload; positional
     // human syntax belongs to the command layer and never arrives here.
-    bool assertActionPayload(const NetActionResource &action, const String &payload, String &error)
+    bool assertActionPayload(const NetActionResource &action, const std::string &payload, std::string &error)
     {
         JsonDocument doc;
         JsonObjectConst fields;
@@ -266,12 +227,12 @@ namespace
             {
                 if (!arg.required)
                     continue;
-                error = String("missing argument '") + arg.name + "'";
+                error = std::string("missing argument '") + arg.name + "'";
                 return false;
             }
             if (!argumentTypeMatches(arg.type, value))
             {
-                error = String("argument '") + arg.name + "' is not " + valueTypeName(arg.type);
+                error = std::string("argument '") + arg.name + "' is not " + valueTypeName(arg.type);
                 return false;
             }
         }
@@ -280,10 +241,10 @@ namespace
 #endif
 }
 
-InternalCommands parseInternalCommand(const String &command)
+InternalCommands parseInternalCommand(const std::string &command)
 {
-    String normalized = command;
-    normalized.toUpperCase();
+    std::string normalized = command;
+    NightMare::Text::toUpper(normalized);
     if (normalized == "LIST")
         return InternalCommands::LIST;
     if (normalized == "MANIFEST")
@@ -295,7 +256,7 @@ InternalCommands parseInternalCommand(const String &command)
     return InternalCommands::NONE;
 }
 
-ParsedCommand parseCommand(const String &expression)
+ParsedCommand parseCommand(const std::string &expression)
 {
     ParsedCommand result;
     if (expression.length() == 0)
@@ -305,7 +266,7 @@ ParsedCommand parseCommand(const String &expression)
     // action starts immediately, while resource addressing starts with space.
     result.internalSyntax = !commandSpace(expression[0]);
     size_t position = 0;
-    const String first = commandToken(expression, position);
+    const std::string first = commandToken(expression, position);
 
     if (result.internalSyntax)
     {
@@ -315,13 +276,13 @@ ParsedCommand parseCommand(const String &expression)
         {
             result.target = commandToken(expression, position);
             if (position < expression.length())
-                result.payload = expression.substring(position + 1);
+                result.payload = NightMare::Text::slice(expression, position + 1);
         }
         else if (position < expression.length())
         {
             // Keep manager arguments opaque so each manager action owns its
             // own argument grammar.
-            result.payload = expression.substring(position + 1);
+            result.payload = NightMare::Text::slice(expression, position + 1);
         }
         return result;
     }
@@ -333,13 +294,13 @@ ParsedCommand parseCommand(const String &expression)
     position = verbStart;
     result.verb = commandToken(expression, position);
     if (position < expression.length())
-        result.payload = expression.substring(position + 1);
+        result.payload = NightMare::Text::slice(expression, position + 1);
     return result;
 }
 
 ResourcesManager gResourcesManager;
 
-bool ResourcesManager::validSegment(const String &segment)
+bool ResourcesManager::validSegment(const std::string &segment)
 {
     if (segment.length() == 0 || segment.length() > MaxSegmentLength)
         return false;
@@ -357,7 +318,7 @@ bool ResourcesManager::validActionSchema(const NetActionResource &action)
     for (size_t i = 0; i < action.argumentCount(); ++i)
     {
         const ActionArgMetadata &arg = action.argument(i);
-        if (arg.name == nullptr || !validSegment(String(arg.name)))
+        if (arg.name == nullptr || !validSegment(std::string(arg.name)))
             return false;
         for (size_t j = 0; j < i; ++j)
             if (strcmp(action.argument(j).name, arg.name) == 0)
@@ -391,7 +352,7 @@ bool ResourcesManager::hasResolvedSource(const NetResource &resource)
            validSegment(resource.isOwned() ? resource.name_ : resource.sourceResourceName_);
 }
 
-bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const
+bool ResourcesManager::remoteOwnerInUse(const std::string &deviceName, const NetResource *exclude) const
 {
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -404,11 +365,11 @@ bool ResourcesManager::remoteOwnerInUse(const String &deviceName, const NetResou
     return false;
 }
 
-String ResourcesManager::ingressTopicFor(const NetResource &resource, const String &deviceName,
-                                         const String &resourceName) const
+std::string ResourcesManager::ingressTopicFor(const NetResource &resource, const std::string &deviceName,
+                                         const std::string &resourceName) const
 {
     if (!DeviceIdentity::validDeviceName(deviceName) || !validSegment(resourceName))
-        return String();
+        return std::string();
 
     if (resource.kind_ == NetResourceType::VALUE)
     {
@@ -419,23 +380,23 @@ String ResourcesManager::ingressTopicFor(const NetResource &resource, const Stri
         const NetValueResource &value = static_cast<const NetValueResource &>(resource);
         if (value.access_ == AccessPolicy::READ_WRITE)
             return resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::SET);
-        return String();
+        return std::string();
     }
 
     // Events are transient occurrences. A Remote one listens to its owner; the
     // implementing device only publishes, so it has no ingress at all.
     if (resource.kind_ == NetResourceType::EVENT)
         return resource.isOwned()
-                   ? String()
+                   ? std::string()
                    : resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::EVENT);
 
     // Only the implementing device listens for invocations.
     if (resource.isOwned())
         return resolveResourceTopic(deviceName, resourceName, ResourceTopicOperation::INVOKE);
-    return String();
+    return std::string();
 }
 
-String ResourcesManager::ingressTopicFor(const NetResource &resource) const
+std::string ResourcesManager::ingressTopicFor(const NetResource &resource) const
 {
     return ingressTopicFor(resource, resolveResourceOwner(resource),
                            resource.isOwned() ? resource.name_ : resource.sourceResourceName_);
@@ -469,7 +430,7 @@ void ResourcesManager::setEncodedManifestHandler(EncodedManifestHandler handler)
         subscriber_->unsubscribe(AllEncodedManifestsFilter);
 }
 
-bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
+bool ResourcesManager::decodeManifest(const std::string &encoded, JsonDocument &into)
 {
     JsonDocument packed;
     if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) || !packed.is<JsonArray>())
@@ -552,7 +513,7 @@ bool ResourcesManager::decodeManifest(const String &encoded, JsonDocument &into)
     return true;
 }
 
-bool ResourcesManager::decodeConsumeManifest(const String &encoded, JsonDocument &into)
+bool ResourcesManager::decodeConsumeManifest(const std::string &encoded, JsonDocument &into)
 {
     JsonDocument packed;
     if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) ||
@@ -638,7 +599,7 @@ void ResourcesManager::subscribeResource(const NetResource &resource, bool inclu
         hasResolvedSource(resource))
         subscriber_->subscribe(resolveResourceManifestTopic(resource.ownerDevice_.deviceName,
                                                             DocumentFormat::MSGPACK));
-    const String ingress = ingressTopicFor(resource);
+    const std::string ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->subscribe(ingress);
 }
@@ -647,7 +608,7 @@ void ResourcesManager::unsubscribeResource(const NetResource &resource, bool rem
 {
     if (subscriber_ == nullptr)
         return;
-    const String ingress = ingressTopicFor(resource);
+    const std::string ingress = ingressTopicFor(resource);
     if (ingress.length() != 0)
         subscriber_->unsubscribe(ingress);
     if (removeManifest && !resource.isOwned() &&
@@ -679,7 +640,7 @@ void ResourcesManager::subscribeAll()
     }
 }
 
-bool ResourcesManager::needsSubscription(const String &topicFilter) const
+bool ResourcesManager::needsSubscription(const std::string &topicFilter) const
 {
     if (topicFilter.length() == 0)
         return false;
@@ -702,12 +663,12 @@ bool ResourcesManager::needsSubscription(const String &topicFilter) const
     return false;
 }
 
-NetResource *ResourcesManager::findResource(const String &deviceName, const String &name) const
+NetResource *ResourcesManager::findResource(const std::string &deviceName, const std::string &name) const
 {
     for (int i = 0; i < resourceCount_; ++i)
     {
         NetResource *resource = resources_[i];
-        const String &addressName = resource->isOwned() ? resource->name_
+        const std::string &addressName = resource->isOwned() ? resource->name_
                                                        : resource->sourceResourceName_;
         if (resolveResourceOwner(*resource) == deviceName && addressName == name)
             return resource;
@@ -715,7 +676,7 @@ NetResource *ResourcesManager::findResource(const String &deviceName, const Stri
     return nullptr;
 }
 
-NetResource *ResourcesManager::findResourceByName(const String &name, bool &ambiguous) const
+NetResource *ResourcesManager::findResourceByName(const std::string &name, bool &ambiguous) const
 {
     ambiguous = false;
     NetResource *match = nullptr;
@@ -734,31 +695,31 @@ NetResource *ResourcesManager::findResourceByName(const String &name, bool &ambi
     return match;
 }
 
-NetResource *ResourcesManager::findCommandResource(const String &address, bool &ambiguous) const
+NetResource *ResourcesManager::findCommandResource(const std::string &address, bool &ambiguous) const
 {
     ambiguous = false;
-    const int slash = address.indexOf('/');
+    const int slash = NightMare::Text::indexOf(address, '/');
     if (slash < 0)
         return findResourceByName(address, ambiguous);
     if (slash == 0 || slash == static_cast<int>(address.length()) - 1 ||
-        address.indexOf('/', slash + 1) >= 0)
+        NightMare::Text::indexOf(address, '/', slash + 1) >= 0)
         return nullptr;
 
-    const String owner = address.substring(0, slash);
-    const String name = address.substring(slash + 1);
+    const std::string owner = NightMare::Text::slice(address, 0, slash);
+    const std::string name = NightMare::Text::slice(address, slash + 1);
     if (!DeviceIdentity::validDeviceName(owner) || !validSegment(name))
         return nullptr;
     return findResource(owner, name);
 }
 
 // Unlike findResource(), this cannot be fooled by `self` appearing first.
-bool ResourcesManager::addressTakenByOther(const String &deviceName, const String &name,
+bool ResourcesManager::addressTakenByOther(const std::string &deviceName, const std::string &name,
                                            const NetResource *self) const
 {
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource *resource = resources_[i];
-        const String &addressName = resource->isOwned() ? resource->name_
+        const std::string &addressName = resource->isOwned() ? resource->name_
                                                        : resource->sourceResourceName_;
         if (resource != self && resolveResourceOwner(*resource) == deviceName &&
             addressName == name)
@@ -767,19 +728,19 @@ bool ResourcesManager::addressTakenByOther(const String &deviceName, const Strin
     return false;
 }
 
-bool ResourcesManager::parseSourceAddress(const String &encoded, String &owner,
-                                          String &resourceName)
+bool ResourcesManager::parseSourceAddress(const std::string &encoded, std::string &owner,
+                                          std::string &resourceName)
 {
-    String source = encoded;
-    source.trim();
-    const int slash = source.indexOf('/');
+    std::string source = encoded;
+    NightMare::Text::trim(source);
+    const int slash = NightMare::Text::indexOf(source, '/');
     if (slash <= 0 || slash == static_cast<int>(source.length()) - 1 ||
-        source.indexOf('/', slash + 1) >= 0)
+        NightMare::Text::indexOf(source, '/', slash + 1) >= 0)
         return false;
-    owner = source.substring(0, slash);
-    resourceName = source.substring(slash + 1);
-    owner.trim();
-    resourceName.trim();
+    owner = NightMare::Text::slice(source, 0, slash);
+    resourceName = NightMare::Text::slice(source, slash + 1);
+    NightMare::Text::trim(owner);
+    NightMare::Text::trim(resourceName);
     return DeviceIdentity::validDeviceName(owner) && validSegment(resourceName);
 }
 
@@ -798,7 +759,7 @@ bool ResourcesManager::persistRemoteSource(const NetResource &resource) const
     JsonObject bindings = doc.as<JsonObject>();
     if (sourceConfigured(resource) && hasResolvedSource(resource))
     {
-        String source = resource.ownerDevice_.deviceName;
+        std::string source = resource.ownerDevice_.deviceName;
         source += '/';
         source += resource.sourceResourceName_;
         bindings[resource.name_] = source;
@@ -808,7 +769,7 @@ bool ResourcesManager::persistRemoteSource(const NetResource &resource) const
     return writeRemoteSourceDocument(doc);
 }
 
-bool ResourcesManager::removePersistedRemoteSource(const String &localName) const
+bool ResourcesManager::removePersistedRemoteSource(const std::string &localName) const
 {
     if (!beginRemoteResourceStorage())
         return false;
@@ -834,7 +795,7 @@ bool ResourcesManager::saveRemoteSources() const
         const NetResource &resource = *resources_[i];
         if (resource.isOwned() || !hasResolvedSource(resource))
             continue;
-        String source = resource.ownerDevice_.deviceName;
+        std::string source = resource.ownerDevice_.deviceName;
         source += '/';
         source += resource.sourceResourceName_;
         bindings[resource.name_] = source;
@@ -862,11 +823,11 @@ bool ResourcesManager::loadRemoteSources()
     {
         bool ambiguous = false;
         NetResource *resource = findResourceByName(binding.key().c_str(), ambiguous);
-        String owner;
-        String resourceName;
+        std::string owner;
+        std::string resourceName;
         if (ambiguous || resource == nullptr || resource->isOwned() ||
             !binding.value().is<const char *>() ||
-            !parseSourceAddress(binding.value().as<String>(), owner, resourceName) ||
+            !parseSourceAddress(binding.value().as<std::string>(), owner, resourceName) ||
             !configureRemoteSource(*resource, owner, resourceName, false))
             changed = true;
     }
@@ -878,11 +839,11 @@ bool ResourcesManager::loadRemoteSources()
         if (resource.isOwned() || !hasResolvedSource(resource))
             continue;
         ++expectedCount;
-        String expected = resource.ownerDevice_.deviceName;
+        std::string expected = resource.ownerDevice_.deviceName;
         expected += '/';
         expected += resource.sourceResourceName_;
         JsonVariantConst storedValue = bindings[resource.name_];
-        if (!storedValue.is<const char *>() || storedValue.as<String>() != expected)
+        if (!storedValue.is<const char *>() || storedValue.as<std::string>() != expected)
             changed = true;
     }
     if (!exists || bindings.size() != expectedCount)
@@ -1164,7 +1125,7 @@ bool ResourcesManager::bindResource(NetResource *resource)
         return false;
     }
 
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    const std::string &thisDevice = gDeviceIdentity.getDeviceName();
     if (resource->isOwned())
     {
         if (!DeviceIdentity::validDeviceName(thisDevice))
@@ -1274,7 +1235,7 @@ void ResourcesManager::unbindResource(NetResource *resource)
             static_cast<NetValueResource *>(resource)->hasAuthoritativeValue_ &&
             hasResolvedSource(*resource))
             publisher_->publish(resolveResourceTopic(*resource, ResourceTopicOperation::STATE),
-                                String(), true);
+                                std::string(), true);
 
         for (int j = i; j < resourceCount_ - 1; ++j)
             resources_[j] = resources_[j + 1];
@@ -1296,8 +1257,8 @@ void ResourcesManager::unbindResource(NetResource *resource)
     }
 }
 
-bool ResourcesManager::configureRemoteSource(NetResource &resource, const String &deviceName,
-                                             const String &resourceName, bool persist)
+bool ResourcesManager::configureRemoteSource(NetResource &resource, const std::string &deviceName,
+                                             const std::string &resourceName, bool persist)
 {
     if (resource.isOwned() || !validSegment(resource.name_))
         return false;
@@ -1323,7 +1284,7 @@ bool ResourcesManager::configureRemoteSource(NetResource &resource, const String
     }
 
     const NetDeviceIdentity oldOwner = resource.ownerDevice_;
-    const String oldName = resource.sourceResourceName_;
+    const std::string oldName = resource.sourceResourceName_;
     resource.ownerDevice_ = NetDeviceIdentity(deviceName);
     resource.sourceResourceName_ = resourceName;
     resource.resetRemoteState();
@@ -1332,7 +1293,7 @@ bool ResourcesManager::configureRemoteSource(NetResource &resource, const String
     if (persist && !persistRemoteSource(resource))
     {
         const NetDeviceIdentity failedOwner = resource.ownerDevice_;
-        const String failedName = resource.sourceResourceName_;
+        const std::string failedName = resource.sourceResourceName_;
         resource.ownerDevice_ = oldOwner;
         resource.sourceResourceName_ = oldName;
         resource.resetRemoteState();
@@ -1345,7 +1306,7 @@ bool ResourcesManager::configureRemoteSource(NetResource &resource, const String
 }
 
 void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
-                                           const String &oldName)
+                                           const std::string &oldName)
 {
     if (resource.resourceManager_ != this || resource.isOwned())
         return;
@@ -1360,7 +1321,7 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 
     if (subscriber_ != nullptr)
     {
-        const String oldIngress = ingressTopicFor(resource, oldOwner.deviceName, oldName);
+        const std::string oldIngress = ingressTopicFor(resource, oldOwner.deviceName, oldName);
         if (oldIngress.length() != 0)
             subscriber_->unsubscribe(oldIngress);
         // The resource already carries the new owner, so it no longer counts
@@ -1374,14 +1335,14 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
     if (!sourceConfigured(resource))
         return; // Registered, but not pointed at anything yet.
 
-    const String newOwner = resource.ownerDevice_.deviceName;
+    const std::string newOwner = resource.ownerDevice_.deviceName;
 
     if (subscriber_ != nullptr)
     {
         if (ownerChanged && !remoteOwnerInUse(newOwner, &resource))
             subscriber_->subscribe(
                 resolveResourceManifestTopic(newOwner, DocumentFormat::MSGPACK));
-        const String ingress = ingressTopicFor(resource);
+        const std::string ingress = ingressTopicFor(resource);
         if (ingress.length() != 0)
             subscriber_->subscribe(ingress);
     }
@@ -1389,11 +1350,11 @@ void ResourcesManager::notifySourceChanged(NetResource &resource, const NetDevic
 
 bool ResourcesManager::publishManifest()
 {
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    const std::string &thisDevice = gDeviceIdentity.getDeviceName();
     bool published = publisher_ != nullptr && DeviceIdentity::validDeviceName(thisDevice);
 
     // MessagePack is canonical. Only its outcome controls dirty/retry state.
-    String packed;
+    std::string packed;
     if (published)
         published = serializeManifest(packed, DocumentFormat::MSGPACK) &&
                     publisher_->publish(
@@ -1403,7 +1364,7 @@ bool ResourcesManager::publishManifest()
 #if NM_ENABLE_JSON_WIRE
     if (published)
     {
-        String json;
+        std::string json;
         if (!serializeManifest(json, DocumentFormat::JSON) ||
             !publisher_->publish(resolveResourceManifestTopic(thisDevice, DocumentFormat::JSON),
                                  json, true))
@@ -1413,34 +1374,34 @@ bool ResourcesManager::publishManifest()
 
     manifestDirty_ = !published;
     if (!published)
-        nextManifestRetryMs_ = static_cast<uint32_t>(millis()) + NetResourceManifestRetryMs;
+        nextManifestRetryMs_ = static_cast<uint32_t>(NightMare::Platform::monotonicMillis()) + NetResourceManifestRetryMs;
     return published;
 }
 
 bool ResourcesManager::publishManifest(DocumentFormat format)
 {
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    const std::string &thisDevice = gDeviceIdentity.getDeviceName();
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
-    String payload;
+    std::string payload;
     return serializeManifest(payload, format) &&
            publisher_->publish(resolveResourceManifestTopic(thisDevice, format), payload, true);
 }
 
 bool ResourcesManager::publishConsumeManifest()
 {
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    const std::string &thisDevice = gDeviceIdentity.getDeviceName();
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
 
-    String packed;
+    std::string packed;
     if (!serializeConsumeManifest(packed, DocumentFormat::MSGPACK) ||
         !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice,
                                                                  DocumentFormat::MSGPACK),
                              packed, true))
         return false;
 #if NM_ENABLE_JSON_WIRE
-    String json;
+    std::string json;
     if (!serializeConsumeManifest(json, DocumentFormat::JSON) ||
         !publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice,
                                                                  DocumentFormat::JSON),
@@ -1452,10 +1413,10 @@ bool ResourcesManager::publishConsumeManifest()
 
 bool ResourcesManager::publishConsumeManifest(DocumentFormat format)
 {
-    const String &thisDevice = gDeviceIdentity.getDeviceName();
+    const std::string &thisDevice = gDeviceIdentity.getDeviceName();
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(thisDevice))
         return false;
-    String payload;
+    std::string payload;
     return serializeConsumeManifest(payload, format) &&
            publisher_->publish(resolveResourceConsumeManifestTopic(thisDevice, format),
                                payload, true);
@@ -1674,7 +1635,7 @@ void ResourcesManager::buildPositionalConsumeManifest(JsonDocument &doc) const
     }
 }
 
-bool ResourcesManager::serializeManifest(String &payload, DocumentFormat format) const
+bool ResourcesManager::serializeManifest(std::string &payload, DocumentFormat format) const
 {
     // ArduinoJson 7 documents size themselves, growing through a chain of small
     // pools instead of one block fixed at construction. That deletes the
@@ -1716,13 +1677,13 @@ bool ResourcesManager::serializeManifest(String &payload, DocumentFormat format)
     {
         LOG_WARNING("RM", "Manifest is %u bytes, over the %u-byte ceiling; publishing nothing",
                     (unsigned)payload.length(), (unsigned)MaxManifestLength);
-        payload = String();
+        payload = std::string();
         return false;
     }
     return true;
 }
 
-bool ResourcesManager::serializeConsumeManifest(String &payload, DocumentFormat format) const
+bool ResourcesManager::serializeConsumeManifest(std::string &payload, DocumentFormat format) const
 {
     JsonDocument doc;
     const bool packed = format == DocumentFormat::MSGPACK;
@@ -1734,7 +1695,7 @@ bool ResourcesManager::serializeConsumeManifest(String &payload, DocumentFormat 
                                payload) != PayloadResult::Complete ||
         payload.length() > MaxManifestLength)
     {
-        payload = String();
+        payload = std::string();
         return false;
     }
     return true;
@@ -1749,7 +1710,7 @@ bool ResourcesManager::publishState(NetValueResource &resource)
     // The wire format is the codec's own representation: "23.5", "true", raw
     // string. The declared type is already in the manifest. Empty would read as
     // a deletion, and the size limit holds however the value got here.
-    const String encoded = resource.encodedValue();
+    const std::string encoded = resource.encodedValue();
     if (encoded.length() == 0 || encoded.length() > MaxValueLength)
     {
         LOG_WARNING("RM", "Not publishing '%s': encoded length %u is outside 1..%u",
@@ -1758,7 +1719,7 @@ bool ResourcesManager::publishState(NetValueResource &resource)
     }
     const bool published = publisher_->publish(
         resolveResourceTopic(resource, ResourceTopicOperation::STATE), encoded, true);
-    const uint32_t now = static_cast<uint32_t>(millis());
+    const uint32_t now = static_cast<uint32_t>(NightMare::Platform::monotonicMillis());
     if (published)
     {
         resource.lastAdvertisementMs_ = now;
@@ -1780,8 +1741,8 @@ bool ResourcesManager::withdrawState(NetValueResource &resource)
         return false;
     }
     const bool published = publisher_->publish(
-        resolveResourceTopic(resource, ResourceTopicOperation::STATE), String(), true);
-    const uint32_t now = static_cast<uint32_t>(millis());
+        resolveResourceTopic(resource, ResourceTopicOperation::STATE), std::string(), true);
+    const uint32_t now = static_cast<uint32_t>(NightMare::Platform::monotonicMillis());
     resource.withdrawalPending_ = !published;
     resource.advertisementRetryScheduled_ = !published;
     if (!published)
@@ -1791,9 +1752,9 @@ bool ResourcesManager::withdrawState(NetValueResource &resource)
 
 ActionResult ResourcesManager::listResources() const
 {
-    auto displayName = [](const NetResource &resource) -> String
+    auto displayName = [](const NetResource &resource) -> std::string
     {
-        return resource.name_.length() == 0 ? String("<unnamed>") : resource.name_;
+        return resource.name_.length() == 0 ? std::string("<unnamed>") : resource.name_;
     };
     auto shortNameIsAmbiguous = [this](const NetResource &candidate) -> bool
     {
@@ -1805,14 +1766,14 @@ ActionResult ResourcesManager::listResources() const
                 return true;
         return false;
     };
-    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> String
+    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> std::string
     {
         // An event has no value to show, only its role, where a Remote one
         // listens, and when it last happened. The source stands in for the
         // "@owner" disambiguation below.
         if (resource.kind_ == NetResourceType::EVENT)
         {
-            String description = resource.isOwned() ? "managed" : "remote";
+            std::string description = resource.isOwned() ? "managed" : "remote";
             if (!resource.isOwned())
             {
                 description += " source=";
@@ -1826,21 +1787,21 @@ ActionResult ResourcesManager::listResources() const
                     description += '-';
             }
             description += " last_update_ms=";
-            description += String(static_cast<const NetEventResource &>(resource).lastUpdateMs_);
+            description += std::to_string(static_cast<const NetEventResource &>(resource).lastUpdateMs_);
             return description;
         }
 
-        String value;
+        std::string value;
         if (resource.kind_ == NetResourceType::ACTION)
             value = "-";
         else
         {
             const NetValueResource &typed = static_cast<const NetValueResource &>(resource);
             value = typed.hasValueImpl() ? typed.encodedCurrentValue()
-                                         : String("<unavailable>");
-            value.replace("\r", "\\r");
-            value.replace("\n", "\\n");
-            value.replace("\t", "\\t");
+                                         : std::string("<unavailable>");
+            NightMare::Text::replaceAll(value, "\r", "\\r");
+            NightMare::Text::replaceAll(value, "\n", "\\n");
+            NightMare::Text::replaceAll(value, "\t", "\\t");
         }
         if (!resource.isOwned() && shortNameIsAmbiguous(resource) &&
             resource.ownerDevice_.deviceName.length() != 0)
@@ -1864,8 +1825,8 @@ ActionResult ResourcesManager::listResources() const
             nameWidth = nameLength;
     }
 
-    String response;
-    auto appendColumn = [&response](const String &text, size_t width)
+    std::string response;
+    auto appendColumn = [&response](const std::string &text, size_t width)
     {
         response += text;
         for (size_t i = text.length(); i < width; ++i)
@@ -1885,7 +1846,7 @@ ActionResult ResourcesManager::listResources() const
         response += "  ";
         response += displayValue(resource);
         if (response.length() > MaxManifestLength)
-            return {false, String("Resource list too large")};
+            return {false, std::string("Resource list too large")};
     }
     return {true, response};
 }
@@ -1916,7 +1877,7 @@ bool ResourcesManager::publishResourceStates()
     return published;
 }
 
-bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
+bool ResourcesManager::withdrawIdentity(const std::string &oldDeviceName)
 {
     // Never the running identity: that data is live, not leftover.
     if (publisher_ == nullptr || !DeviceIdentity::validDeviceName(oldDeviceName) ||
@@ -1933,7 +1894,7 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
             continue;
         if (!publisher_->publish(resolveResourceTopic(oldDeviceName, resource.name_,
                                                       ResourceTopicOperation::STATE),
-                                 String(), true))
+                                 std::string(), true))
             withdrawn = false;
     }
     // This protocol pass deliberately adds no document-topic migration or
@@ -1942,7 +1903,7 @@ bool ResourcesManager::withdrawIdentity(const String &oldDeviceName)
     return withdrawn;
 }
 
-bool ResourcesManager::setValue(NetValueResource &resource, const String &encoded)
+bool ResourcesManager::setValue(NetValueResource &resource, const std::string &encoded)
 {
     if (resource.resourceManager_ != this || encoded.length() == 0 ||
         encoded.length() > MaxValueLength)
@@ -2075,7 +2036,7 @@ bool ResourcesManager::resetPollOverride(NetValueResource &resource)
 
 void ResourcesManager::tick()
 {
-    const uint32_t now = static_cast<uint32_t>(millis());
+    const uint32_t now = static_cast<uint32_t>(NightMare::Platform::monotonicMillis());
     if (manifestDirty_ && static_cast<int32_t>(now - nextManifestRetryMs_) >= 0)
     {
         publishManifest();
@@ -2134,7 +2095,7 @@ void ResourcesManager::tick()
 // permanent RAM to save a walk that is already cheap.
 void ResourcesManager::propagateToDependents(const NetValueResource &source)
 {
-    const String encoded = source.encodedCurrentValue();
+    const std::string encoded = source.encodedCurrentValue();
     if (encoded.length() == 0 || encoded.length() > MaxValueLength)
         return;
 
@@ -2188,7 +2149,7 @@ void ResourcesManager::withdrawFromDependents(const NetValueResource &source)
     }
 }
 
-bool ResourcesManager::invoke(NetActionResource &resource, const String &payload)
+bool ResourcesManager::invoke(NetActionResource &resource, const std::string &payload)
 {
     if (resource.resourceManager_ != this || payload.length() > MaxValueLength)
         return false;
@@ -2200,7 +2161,7 @@ bool ResourcesManager::invoke(NetActionResource &resource, const String &payload
     // case and is never itself a failure, nor is a manifest never received.
     if (resource.hasSchema())
     {
-        String error;
+        std::string error;
         if (!assertActionPayload(resource, payload, error))
         {
             LOG_WARNING("RM", "Not invoking '%s/%s': %s", resource.ownerDevice_.deviceName.c_str(),
@@ -2213,7 +2174,7 @@ bool ResourcesManager::invoke(NetActionResource &resource, const String &payload
                                payload, false);
 }
 
-bool ResourcesManager::fire(NetEventResource &resource, const String &encoded)
+bool ResourcesManager::fire(NetEventResource &resource, const std::string &encoded)
 {
     if (resource.resourceManager_ != this || !resource.isOwned() || encoded.length() == 0 ||
         encoded.length() > MaxValueLength)
@@ -2226,37 +2187,37 @@ bool ResourcesManager::fire(NetEventResource &resource, const String &encoded)
                                encoded, false);
 }
 
-ActionResult ResourcesManager::executeAction(NetActionResource &action, const String &canonicalPayload)
+ActionResult ResourcesManager::executeAction(NetActionResource &action, const std::string &canonicalPayload)
 {
     if (!action.isOwned())
-        return {false, String("not implemented by this device")};
+        return {false, std::string("not implemented by this device")};
     if (canonicalPayload.length() > MaxValueLength)
-        return {false, String("payload too large")};
+        return {false, std::string("payload too large")};
 #if NM_ENABLE_ACTION_PAYLOAD_ASSERTION
     // A managed action always has a declaration, even an empty one: zero
     // arguments still means "an empty payload or a JSON object".
-    String error;
+    std::string error;
     if (!assertActionPayload(action, canonicalPayload, error))
         return {false, error};
 #endif
     return action.execute(canonicalPayload);
 }
 
-ActionResult ResourcesManager::executeCommand(const String &expression)
+ActionResult ResourcesManager::executeCommand(const std::string &expression)
 {
     LOG("RM", "Executing command: '%s'", expression.c_str());
     const ParsedCommand command = parseCommand(expression);
     if (expression.length() == 0)
-        return {false, String("Usage: >list | >manifest | >drop <name|owner/name> | >raw <topic> [payload] | > <name|owner/name> [verb [payload]]")};
+        return {false, std::string("Usage: >list | >manifest | >drop <name|owner/name> | >raw <topic> [payload] | > <name|owner/name> [verb [payload]]")};
 
     if (command.internalSyntax)
     {
         if (command.internalCommand == InternalCommands::LIST)
         {
-            String arguments = command.payload;
-            arguments.trim();
+            std::string arguments = command.payload;
+            NightMare::Text::trim(arguments);
             if (arguments.length() != 0)
-                return {false, String("Usage: >list")};
+                return {false, std::string("Usage: >list")};
             return listResources();
         }
 
@@ -2264,141 +2225,141 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
         {
             // Binary MessagePack is not useful through a text response. Asking
             // for it republishes the retained compact manifest instead.
-            String arguments = command.payload;
-            arguments.trim();
+            std::string arguments = command.payload;
+            NightMare::Text::trim(arguments);
             size_t position = 0;
-            String first = commandToken(arguments, position);
-            String firstUpper = first;
-            firstUpper.toUpperCase();
+            std::string first = commandToken(arguments, position);
+            std::string firstUpper = first;
+            NightMare::Text::toUpper(firstUpper);
             const bool explicitPublish = firstUpper == "PUBLISH";
-            String formatArgument = explicitPublish ? commandToken(arguments, position) : first;
-            String extra = position < arguments.length() ? arguments.substring(position) : String();
-            extra.trim();
+            std::string formatArgument = explicitPublish ? commandToken(arguments, position) : first;
+            std::string extra = position < arguments.length() ? NightMare::Text::slice(arguments, position) : std::string();
+            NightMare::Text::trim(extra);
             if (extra.length() != 0)
-                return {false, String("Usage: >manifest [publish] [json|msgpack]")};
+                return {false, std::string("Usage: >manifest [publish] [json|msgpack]")};
 
             if (explicitPublish && formatArgument.length() == 0)
             {
                 const bool published = publishManifest();
-                return {published, published ? String("Republished.")
-                                             : String("Manifest publish failed.")};
+                return {published, published ? std::string("Republished.")
+                                             : std::string("Manifest publish failed.")};
             }
 
             DocumentFormat format = DocumentFormat::JSON;
             if (!parseDocumentFormat(formatArgument, format))
-                return {false, String("Usage: >manifest [publish] [json|msgpack]")};
+                return {false, std::string("Usage: >manifest [publish] [json|msgpack]")};
 
             if (explicitPublish || format == DocumentFormat::MSGPACK)
             {
                 const bool published = publishManifest(format);
-                return {published, published ? String("Republished.")
-                                             : String("Manifest publish failed.")};
+                return {published, published ? std::string("Republished.")
+                                             : std::string("Manifest publish failed.")};
             }
 
-            String manifest;
+            std::string manifest;
             if (!serializeManifest(manifest, format))
-                return {false, String("Could not serialize manifest")};
+                return {false, std::string("Could not serialize manifest")};
             return {true, manifest};
         }
 
         if (command.internalCommand == InternalCommands::DROP)
         {
             size_t position = 0;
-            const String name = commandToken(command.payload, position);
-            String extra = position < command.payload.length()
-                               ? command.payload.substring(position)
-                               : String();
-            extra.trim();
+            const std::string name = commandToken(command.payload, position);
+            std::string extra = position < command.payload.length()
+                               ? NightMare::Text::slice(command.payload, position)
+                               : std::string();
+            NightMare::Text::trim(extra);
             if (name.length() == 0 || extra.length() != 0)
-                return {false, String("Usage: >drop <name|owner/name>")};
+                return {false, std::string("Usage: >drop <name|owner/name>")};
 
             bool ambiguous = false;
             NetResource *resource = findCommandResource(name, ambiguous);
             if (ambiguous)
-                return {false, String("Resource name is ambiguous; use owner/name")};
+                return {false, std::string("Resource name is ambiguous; use owner/name")};
             if (resource == nullptr)
-                return {false, String("Resource not found")};
+                return {false, std::string("Resource not found")};
 
             unbindResource(resource);
-            return {true, String("Dropped resource: ") + name};
+            return {true, std::string("Dropped resource: ") + name};
         }
 
         if (command.internalCommand == InternalCommands::RAW)
         {
             if (command.target.length() == 0)
-                return {false, String("Usage: >raw <topic> [payload]")};
+                return {false, std::string("Usage: >raw <topic> [payload]")};
             const bool consumed = handleIngressMessage(command.target, command.payload);
-            return {consumed, consumed ? String("OK") : String("Resource topic not consumed")};
+            return {consumed, consumed ? std::string("OK") : std::string("Resource topic not consumed")};
         }
 
-        return {false, String("Unknown resource-manager action: ") + command.internalAction};
+        return {false, std::string("Unknown resource-manager action: ") + command.internalAction};
     }
 
     if (command.target.length() == 0)
-        return {false, String("Usage: > <name|owner/name> [get|set|invoke|source|advertise|poll] [payload]")};
+        return {false, std::string("Usage: > <name|owner/name> [get|set|invoke|source|advertise|poll] [payload]")};
 
-    auto invokeAction = [this](NetActionResource &action, const String &payload) -> ActionResult
+    auto invokeAction = [this](NetActionResource &action, const std::string &payload) -> ActionResult
     {
         if (action.isOwned())
         {
             ActionResult result = executeAction(action, payload);
             if (result.result.length() == 0)
-                result.result = result.success ? String("OK") : String("Action failed");
+                result.result = result.success ? std::string("OK") : std::string("Action failed");
             return result;
         }
         const bool accepted = invoke(action, payload);
-        return {accepted, accepted ? String("OK") : String("Could not publish action")};
+        return {accepted, accepted ? std::string("OK") : std::string("Could not publish action")};
     };
 
     bool ambiguous = false;
     NetResource *resource = findCommandResource(command.target, ambiguous);
     if (ambiguous)
-        return {false, String("Resource name is ambiguous; use owner/name")};
+        return {false, std::string("Resource name is ambiguous; use owner/name")};
     if (resource == nullptr)
-        return {false, String("Resource not found")};
+        return {false, std::string("Resource not found")};
 
-    String verb = command.verb;
-    verb.toUpperCase();
+    std::string verb = command.verb;
+    NightMare::Text::toUpper(verb);
     if (verb.length() == 0)
     {
         if (resource->kind_ == NetResourceType::ACTION)
-            return invokeAction(*static_cast<NetActionResource *>(resource), String());
+            return invokeAction(*static_cast<NetActionResource *>(resource), std::string());
 
         // There is no payload to return: an event is not state. Describe it.
         if (resource->kind_ == NetResourceType::EVENT)
         {
-            String description = "EVENT ";
+            std::string description = "EVENT ";
             description += resource->name_;
             description += " last_update_ms=";
-            description += String(static_cast<NetEventResource *>(resource)->lastUpdateMs_);
+            description += std::to_string(static_cast<NetEventResource *>(resource)->lastUpdateMs_);
             return {true, description};
         }
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (!value.hasValueImpl())
-            return {false, String("Value unavailable")};
+            return {false, std::string("Value unavailable")};
         return {true, value.encodedCurrentValue()};
     }
 
     if (verb == "SOURCE")
     {
         if (resource->isOwned())
-            return {false, String("SOURCE requires a Remote resource")};
+            return {false, std::string("SOURCE requires a Remote resource")};
 
-        String payload = command.payload;
-        payload.trim();
+        std::string payload = command.payload;
+        NightMare::Text::trim(payload);
         if (payload.length() == 0)
         {
             if (!sourceConfigured(*resource))
-                return {true, String("CLEAR")};
+                return {true, std::string("CLEAR")};
             return {true, resource->ownerDevice_.deviceName + '/' +
                               resource->sourceResourceName_};
         }
 
-        String owner;
-        String sourceName;
-        String upper = payload;
-        upper.toUpperCase();
+        std::string owner;
+        std::string sourceName;
+        std::string upper = payload;
+        NightMare::Text::toUpper(upper);
         bool clear = upper == "CLEAR";
         bool valid = clear;
 
@@ -2410,20 +2371,20 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
                 JsonObjectConst object = doc.as<JsonObjectConst>();
                 if (object["source"].is<const char *>())
                 {
-                    String encoded = object["source"].as<String>();
-                    encoded.trim();
-                    String encodedUpper = encoded;
-                    encodedUpper.toUpperCase();
+                    std::string encoded = object["source"].as<std::string>();
+                    NightMare::Text::trim(encoded);
+                    std::string encodedUpper = encoded;
+                    NightMare::Text::toUpper(encodedUpper);
                     clear = encodedUpper == "CLEAR";
                     valid = clear || parseSourceAddress(encoded, owner, sourceName);
                 }
                 else if (object["owner"].is<const char *>() &&
                          object["resource"].is<const char *>())
                 {
-                    owner = object["owner"].as<String>();
-                    sourceName = object["resource"].as<String>();
-                    owner.trim();
-                    sourceName.trim();
+                    owner = object["owner"].as<std::string>();
+                    sourceName = object["resource"].as<std::string>();
+                    NightMare::Text::trim(owner);
+                    NightMare::Text::trim(sourceName);
                     valid = DeviceIdentity::validDeviceName(owner) && validSegment(sourceName);
                 }
             }
@@ -2432,111 +2393,111 @@ ActionResult ResourcesManager::executeCommand(const String &expression)
             valid = parseSourceAddress(payload, owner, sourceName);
 
         if (!valid)
-            return {false, String("SOURCE expects OWNER/RESOURCE, CLEAR, or a source object")};
-        if (!configureRemoteSource(*resource, clear ? String() : owner,
-                                   clear ? String() : sourceName))
-            return {false, String("Could not save or apply source")};
-        return {true, clear ? String("CLEAR") : owner + '/' + sourceName};
+            return {false, std::string("SOURCE expects OWNER/RESOURCE, CLEAR, or a source object")};
+        if (!configureRemoteSource(*resource, clear ? std::string() : owner,
+                                   clear ? std::string() : sourceName))
+            return {false, std::string("Could not save or apply source")};
+        return {true, clear ? std::string("CLEAR") : owner + '/' + sourceName};
     }
 
     if (verb == "GET")
     {
         if (resource->kind_ != NetResourceType::VALUE)
-            return {false, String("GET requires a value resource")};
-        String unexpected = command.payload;
-        unexpected.trim();
+            return {false, std::string("GET requires a value resource")};
+        std::string unexpected = command.payload;
+        NightMare::Text::trim(unexpected);
         if (unexpected.length() != 0)
-            return {false, String("GET does not accept a payload")};
+            return {false, std::string("GET does not accept a payload")};
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (!value.hasValueImpl())
-            return {false, String("Value unavailable")};
+            return {false, std::string("Value unavailable")};
         return {true, value.encodedCurrentValue()};
     }
 
     if (verb == "ADVERTISE")
     {
         if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
-            return {false, String("ADVERTISE requires a Managed value resource")};
-        String payload = command.payload;
-        payload.trim();
+            return {false, std::string("ADVERTISE requires a Managed value resource")};
+        std::string payload = command.payload;
+        NightMare::Text::trim(payload);
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (payload.length() == 0)
-            return {true, String(value.advertisementPeriodMs_)};
+            return {true, std::to_string(value.advertisementPeriodMs_)};
         int32_t milliseconds = 0;
         if (!NetCodec<int32_t>::decode(payload, milliseconds))
-            return {false, String("ADVERTISE expects signed milliseconds")};
+            return {false, std::string("ADVERTISE expects signed milliseconds")};
         if (milliseconds < 0)
             milliseconds = NetResourceAdvertisementDisabled;
         if (!setAdvertisementPolicy(value, milliseconds))
-            return {false, String("Could not persist advertisement setting")};
-        return {true, String(milliseconds)};
+            return {false, std::string("Could not persist advertisement setting")};
+        return {true, std::to_string(milliseconds)};
     }
 
     if (verb == "POLL")
     {
         if (resource->kind_ != NetResourceType::VALUE || !resource->isOwned())
-            return {false, String("POLL requires a Managed value resource")};
+            return {false, std::string("POLL requires a Managed value resource")};
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (!value.hardwarePolicyDeclared_)
-            return {false, String("POLL requires a hardware policy")};
-        String payload = command.payload;
-        payload.trim();
+            return {false, std::string("POLL requires a hardware policy")};
+        std::string payload = command.payload;
+        NightMare::Text::trim(payload);
         if (payload.length() == 0)
-            return {true, String(value.hardwarePolicy_.pollMs)};
-        String upper = payload;
-        upper.toUpperCase();
+            return {true, std::to_string(value.hardwarePolicy_.pollMs)};
+        std::string upper = payload;
+        NightMare::Text::toUpper(upper);
         if (upper == "RESET")
         {
             if ((value.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0)
-                return {false, String("POLL is not configurable")};
+                return {false, std::string("POLL is not configurable")};
             if (!resetPollOverride(value))
-                return {false, String("Could not reset poll override")};
-            return {true, String(value.hardwarePolicy_.pollMs)};
+                return {false, std::string("Could not reset poll override")};
+            return {true, std::to_string(value.hardwarePolicy_.pollMs)};
         }
         int32_t milliseconds = 0;
         if (!NetCodec<int32_t>::decode(payload, milliseconds))
-            return {false, String("POLL expects signed milliseconds or RESET")};
+            return {false, std::string("POLL expects signed milliseconds or RESET")};
         if ((value.hardwarePolicy_.flags & CONFIGURABLE_POLL) == 0)
-            return {false, String("POLL is not configurable")};
+            return {false, std::string("POLL is not configurable")};
         if (milliseconds < 0 && (value.hardwarePolicy_.flags & CAN_DISABLE) == 0)
-            return {false, String("POLL cannot disable this hardware")};
+            return {false, std::string("POLL cannot disable this hardware")};
         if (!setPollOverride(value, milliseconds))
-            return {false, String("Could not persist poll override")};
-        return {true, String(milliseconds)};
+            return {false, std::string("Could not persist poll override")};
+        return {true, std::to_string(milliseconds)};
     }
 
     if (verb == "SET")
     {
         if (resource->kind_ != NetResourceType::VALUE)
-            return {false, String("SET requires a value resource")};
+            return {false, std::string("SET requires a value resource")};
         if (command.payload.length() == 0)
-            return {false, String("SET requires a payload")};
+            return {false, std::string("SET requires a payload")};
         if (command.payload.length() > MaxValueLength)
-            return {false, String("Payload too large")};
+            return {false, std::string("Payload too large")};
 
         NetValueResource &value = *static_cast<NetValueResource *>(resource);
         if (value.isOwned())
         {
             if (!applyManagedWrite(value, command.payload))
-                return {false, String("Value write rejected")};
+                return {false, std::string("Value write rejected")};
             return {true, value.encodedCurrentValue()};
         }
         const bool accepted = value.requestEncodedValue(command.payload);
-        return {accepted, accepted ? String("OK") : String("Could not publish value")};
+        return {accepted, accepted ? std::string("OK") : std::string("Could not publish value")};
     }
 
     if (verb != "INVOKE" && verb != "ACTION")
-        return {false, String("Unknown resource verb: ") + command.verb};
+        return {false, std::string("Unknown resource verb: ") + command.verb};
     if (resource->kind_ != NetResourceType::ACTION)
-        return {false, String("INVOKE requires an action resource")};
+        return {false, std::string("INVOKE requires an action resource")};
 
     if (command.payload.length() > MaxValueLength)
-        return {false, String("Payload too large")};
+        return {false, std::string("Payload too large")};
     return invokeAction(*static_cast<NetActionResource *>(resource), command.payload);
 }
 
-bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &message)
+bool ResourcesManager::applyRemoteState(NetValueResource &value, const std::string &message)
 {
     if (message.length() == 0)
     {
@@ -2566,7 +2527,7 @@ bool ResourcesManager::applyRemoteState(NetValueResource &value, const String &m
     return true;
 }
 
-bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &message)
+bool ResourcesManager::applyManagedWrite(NetValueResource &value, const std::string &message)
 {
     if (value.access_ != AccessPolicy::READ_WRITE)
     {
@@ -2596,7 +2557,7 @@ bool ResourcesManager::applyManagedWrite(NetValueResource &value, const String &
 // identical payload is a second occurrence and calls the handler again. An
 // empty payload cannot be an encoded T (fire() never sends one), so it is
 // treated as malformed along with anything the codec refuses.
-bool ResourcesManager::applyRemoteEvent(NetEventResource &event, const String &message)
+bool ResourcesManager::applyRemoteEvent(NetEventResource &event, const std::string &message)
 {
     if (message.length() == 0 || message.length() > MaxValueLength)
     {
@@ -2624,7 +2585,7 @@ bool ResourcesManager::applyRemoteEvent(NetEventResource &event, const String &m
 // (missing, mismatched, withdrawn or malformed) touches it, and nothing here
 // gates /state, /set or /invoke. Whether the message belongs to this Manager is
 // decided by handleIngressMessage(), not here.
-void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const String &message)
+void ResourcesManager::applyOtherDeviceManifest(const std::string &deviceName, const std::string &message)
 {
     if (message.length() > MaxManifestLength)
     {
@@ -2674,7 +2635,7 @@ void ResourcesManager::applyOtherDeviceManifest(const String &deviceName, const 
     manifestHandler_(deviceName, message);
 }
 
-void ResourcesManager::applyAdvertisementMetadata(const String &deviceName,
+void ResourcesManager::applyAdvertisementMetadata(const std::string &deviceName,
                                                   JsonArrayConst items)
 {
     for (int i = 0; i < resourceCount_; ++i)
@@ -2705,7 +2666,7 @@ void ResourcesManager::applyAdvertisementMetadata(const String &deviceName,
 // chose. Rule 4 governs the enum comparisons -- a value this build does not
 // recognise is reported as the number it is, never translated through a name
 // table that would quietly read it as something else.
-void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArrayConst items)
+void ResourcesManager::verifyAgainstManifest(const std::string &deviceName, JsonArrayConst items)
 {
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -2836,7 +2797,7 @@ void ResourcesManager::verifyAgainstManifest(const String &deviceName, JsonArray
 // build understands, so it never has to re-check either. An empty payload is a
 // retained withdrawal and is passed straight through, matching how the JSON
 // manifest reports the same thing.
-void ResourcesManager::applyEncodedManifest(const String &deviceName, const String &message)
+void ResourcesManager::applyEncodedManifest(const std::string &deviceName, const std::string &message)
 {
     if (message.length() > MaxManifestLength)
     {
@@ -2882,16 +2843,16 @@ void ResourcesManager::applyEncodedManifest(const String &deviceName, const Stri
         encodedManifestHandler_(deviceName, message);
 }
 
-bool ResourcesManager::handleIngressMessage(const String &topic, const String &message,
+bool ResourcesManager::handleIngressMessage(const std::string &topic, const std::string &message,
                                             bool retained)
 {
-    const int firstSlash = topic.indexOf('/');
+    const int firstSlash = NightMare::Text::indexOf(topic, '/');
     if (firstSlash <= 0)
         return false;
-    const String deviceName = topic.substring(0, firstSlash);
+    const std::string deviceName = NightMare::Text::slice(topic, 0, firstSlash);
     if (!DeviceIdentity::validDeviceName(deviceName))
         return false;
-    const String path = topic.substring(firstSlash + 1);
+    const std::string path = NightMare::Text::slice(topic, firstSlash + 1);
     // Manifests are a sibling subtree of resource, not a member of it, so the
     // two are told apart by prefix and never by counting segments.
     if (path == "manifest/json")
@@ -2917,16 +2878,16 @@ bool ResourcesManager::handleIngressMessage(const String &topic, const String &m
         applyEncodedManifest(deviceName, message);
         return true;
     }
-    if (!path.startsWith("resource/"))
+    if (!NightMare::Text::startsWith(path, "resource/"))
         return false;
 
-    const String tail = path.substring(sizeof("resource/") - 1);
-    const int finalSlash = tail.indexOf('/');
+    const std::string tail = NightMare::Text::slice(path, sizeof("resource/") - 1);
+    const int finalSlash = NightMare::Text::indexOf(tail, '/');
     if (finalSlash <= 0)
         return false;
-    const String name = tail.substring(0, finalSlash);
-    const String operation = tail.substring(finalSlash + 1);
-    if (!validSegment(name) || operation.indexOf('/') >= 0)
+    const std::string name = NightMare::Text::slice(tail, 0, finalSlash);
+    const std::string operation = NightMare::Text::slice(tail, finalSlash + 1);
+    if (!validSegment(name) || NightMare::Text::indexOf(operation, '/') >= 0)
         return false;
 
     NetResource *resource = findResource(deviceName, name);

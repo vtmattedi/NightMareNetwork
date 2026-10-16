@@ -1,5 +1,6 @@
 #pragma once
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <ArduinoJson.h>
 
 /// @brief Which encoding a document is serialized into. Deliberately separate
@@ -14,7 +15,7 @@ const char *documentFormatName(DocumentFormat format);
 
 /// @brief Build `<device>/<document-root>/<encoding>`.
 /// Document roots are namespaces and never payload topics themselves.
-String resolveDocumentTopic(const String &deviceName, const String &documentRoot,
+std::string resolveDocumentTopic(const std::string &deviceName, const std::string &documentRoot,
                             DocumentFormat format);
 
 /// @brief Why a payload could not be produced whole. Reported rather than
@@ -51,11 +52,11 @@ const char *describePayloadResult(PayloadResult result);
 ///    has no fixed capacity, so nothing overflows a buffer -- but an
 ///    allocation can still fail, and the value is then dropped silently.
 ///    doc.overflowed() is what says so; the serialized output looks fine.
-///  * The destination String could not grow. Its writer's block write returns
+///  * The destination std::string could not grow. Its writer's block write returns
 ///    the count it was asked for whether or not those characters landed, so a
 ///    short write is invisible in the return value.
-///  * The MessagePack contained a zero byte. ArduinoJson's String writer
-///    NUL-terminates its buffer and appends it with String::concat(const
+///  * The MessagePack contained a zero byte. ArduinoJson's std::string writer
+///    NUL-terminates its buffer and appends it with std::string::concat(const
 ///    char *), which measures with strlen, so the payload is cut at the first
 ///    zero. MessagePack writes the integer 0 as the byte 0x00 and enums
 ///    encoded by value start at 0, so for a compact manifest -- whose first
@@ -63,7 +64,7 @@ const char *describePayloadResult(PayloadResult result);
 ///    but the normal case.
 ///
 /// Both encodings are therefore written through a sink that appends with an
-/// explicit length and returns what it actually stored. The String is reserved
+/// explicit length and returns what it actually stored. The std::string is reserved
 /// to the measured size first, so the payload costs exactly one contiguous
 /// block: the one the finished payload has to occupy anyway, because that is
 /// what gets handed to the publisher.
@@ -71,4 +72,4 @@ const char *describePayloadResult(PayloadResult result);
 /// Measuring costs a second walk of the document and no allocation, which is
 /// the price of the guarantee.
 PayloadResult serializeWholeDocument(const JsonDocument &doc, DocumentFormat format,
-                                     String &out);
+                                     std::string &out);

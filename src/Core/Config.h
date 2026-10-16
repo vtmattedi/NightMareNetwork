@@ -10,12 +10,12 @@ class ConfigBase
 public:
     virtual ~ConfigBase() = default;
 
-    const String &name() const { return name_; }
+    const std::string &name() const { return name_; }
     bool requiresReboot() const { return requireReboot_; }
     NetValueType type() const { return valueType_; }
 
 protected:
-    ConfigBase(const String &name, bool requireReboot, NetValueType valueType)
+    ConfigBase(const std::string &name, bool requireReboot, NetValueType valueType)
         : name_(name), requireReboot_(requireReboot), valueType_(valueType)
     {
     }
@@ -23,14 +23,14 @@ protected:
     bool bound_ = false;
 
 private:
-    virtual String encodedValue() const = 0;
-    virtual String encodedDefaultValue() const = 0;
-    virtual bool canDecodeEncodedValue(const String &payload) const = 0;
-    virtual bool prepareEncodedWrite(const String &payload, String &canonical) = 0;
-    virtual bool restoreEncodedValue(const String &payload) = 0;
+    virtual std::string encodedValue() const = 0;
+    virtual std::string encodedDefaultValue() const = 0;
+    virtual bool canDecodeEncodedValue(const std::string &payload) const = 0;
+    virtual bool prepareEncodedWrite(const std::string &payload, std::string &canonical) = 0;
+    virtual bool restoreEncodedValue(const std::string &payload) = 0;
     virtual void restoreDefaultValue() = 0;
 
-    String name_;
+    std::string name_;
     bool requireReboot_ = false;
     NetValueType valueType_ = NetValueType::STRING;
     friend class ConfigManager;
@@ -54,7 +54,7 @@ public:
     /// Returning false leaves the current value unchanged.
     using WriteRequestHandler = bool (*)(Config<T> &config, const T &requested);
 
-    Config(const String &name, const T &defaultValue, bool requireReboot = false)
+    Config(const std::string &name, const T &defaultValue, bool requireReboot = false)
         : ConfigBase(name, requireReboot, NetCodec<T>::Type),
           defaultValue_(defaultValue), value_(defaultValue)
     {
@@ -73,7 +73,7 @@ public:
 
     bool set(const T &value)
     {
-        const String canonical = NetCodec<T>::encode(value);
+        const std::string canonical = NetCodec<T>::encode(value);
         T verified{};
         if (!NetCodec<T>::decode(canonical, verified) ||
             !configManager().persist(this, canonical))
@@ -83,16 +83,16 @@ public:
     }
 
 private:
-    String encodedValue() const override { return NetCodec<T>::encode(value_); }
-    String encodedDefaultValue() const override { return NetCodec<T>::encode(defaultValue_); }
+    std::string encodedValue() const override { return NetCodec<T>::encode(value_); }
+    std::string encodedDefaultValue() const override { return NetCodec<T>::encode(defaultValue_); }
 
-    bool canDecodeEncodedValue(const String &payload) const override
+    bool canDecodeEncodedValue(const std::string &payload) const override
     {
         T decoded{};
         return NetCodec<T>::decode(payload, decoded);
     }
 
-    bool prepareEncodedWrite(const String &payload, String &canonical) override
+    bool prepareEncodedWrite(const std::string &payload, std::string &canonical) override
     {
         T decoded{};
         if (!NetCodec<T>::decode(payload, decoded))
@@ -103,7 +103,7 @@ private:
         return true;
     }
 
-    bool restoreEncodedValue(const String &payload) override
+    bool restoreEncodedValue(const std::string &payload) override
     {
         T decoded{};
         if (!NetCodec<T>::decode(payload, decoded))

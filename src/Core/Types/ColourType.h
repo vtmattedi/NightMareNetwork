@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 namespace NightMare
 {
@@ -63,8 +64,8 @@ private:
 
 /// Opaque colours encode as the standard unsigned decimal 0xRRGGBB value.
 /// Colours with an explicit alpha encode as #RRGGBBAA.
-String encodeColour(const ColourType &colour);
+std::string encodeColour(const ColourType &colour);
 
 /// Accepts decimal 0xRRGGBB values, #/0x RRGGBB or RRGGBBAA, rgb(), rgba(), and hsv().
 /// Returns false and leaves `colour` unchanged when input is malformed or out of range.
-bool decodeColour(const String &encoded, ColourType &colour);
+bool decodeColour(const std::string &encoded, ColourType &colour);

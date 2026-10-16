@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <time.h>
 /// @brief A valid local time of day. It has no date, timezone, epoch, or
 /// duration semantics.
@@ -15,7 +16,7 @@ public:
     uint8_t minute() const { return minutes_; }
     uint8_t second() const { return seconds_; }
 
-    String toString() const;
+    std::string toString() const;
 
     bool operator==(const TimeType &other) const;
     bool operator!=(const TimeType &other) const { return !(*this == other); }
@@ -34,8 +35,8 @@ private:
 };
 
 /// Canonical `HH:MM:SS` representation.
-String encodeTime(const TimeType &time);
+std::string encodeTime(const TimeType &time);
 
 /// Accepts HH:MM:SS, HH:MM, HHMMSS, HHMM, H:M:S, and H:M.
 /// Returns false and leaves `time` unchanged when input is malformed or out of range.
-bool decodeTime(const String &encoded, TimeType &time);
+bool decodeTime(const std::string &encoded, TimeType &time);

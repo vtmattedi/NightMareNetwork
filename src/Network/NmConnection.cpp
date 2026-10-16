@@ -65,8 +65,8 @@ namespace NightMare
         struct DeferredMessage
         {
             bool active = false;
-            String topic;
-            String payload;
+            std::string topic;
+            std::string payload;
             bool retained = false;
         };
         DeferredMessage deferred[DeferredCapacity];
@@ -236,19 +236,19 @@ namespace NightMare
         class ConnectionResourceAdapter : public ResourcePublisher, public ResourceSubscriber
         {
         public:
-            bool publish(const String &topic, const String &payload, bool retained) override
+            bool publish(const std::string &topic, const std::string &payload, bool retained) override
             {
                 return Publish(topic.c_str(),
                                reinterpret_cast<const uint8_t *>(payload.c_str()),
                                payload.length(), retained);
             }
 
-            bool subscribe(const String &topicFilter) override
+            bool subscribe(const std::string &topicFilter) override
             {
                 return Subscribe(topicFilter.c_str());
             }
 
-            bool unsubscribe(const String &topicFilter) override
+            bool unsubscribe(const std::string &topicFilter) override
             {
                 return Unsubscribe(topicFilter.c_str());
             }
@@ -389,10 +389,10 @@ namespace NightMare
         if (connection != ConnectionType::AUTO && !connectionEnabled(connection))
             return false;
 
-        String request = "set ";
+        std::string request = "set ";
         request += preferredConnection.name();
         request += ' ';
-        request += String(static_cast<int>(connection));
+        request += std::to_string(static_cast<int>(connection));
         return configManager().handle(request) == "OK";
     }
 
@@ -508,14 +508,14 @@ namespace NightMare
         return true;
     }
 
-    bool PublishText(const String &topic, const String &payload, bool retained)
+    bool PublishText(const std::string &topic, const std::string &payload, bool retained)
     {
         return Publish(topic.c_str(),
                        reinterpret_cast<const uint8_t *>(payload.c_str()),
                        payload.length(), retained);
     }
 
-    bool PublishTextWhenConnected(const String &topic, const String &payload, bool retained)
+    bool PublishTextWhenConnected(const std::string &topic, const std::string &payload, bool retained)
     {
         if (PublishText(topic, payload, retained))
             return true;
@@ -538,19 +538,19 @@ namespace NightMare
         return false;
     }
 
-    String ConnectionDeviceStatusJson(const String &deviceName, bool online)
+    std::string ConnectionDeviceStatusJson(const std::string &deviceName, bool online)
     {
         JsonDocument doc;
         doc["name"] = deviceName;
         doc["hardware"] = gDeviceIdentity.getHardwareSignature();
         doc["timezone"] = gDeviceIdentity.getTimezone();
         doc["online"] = online;
-        String payload;
+        std::string payload;
         serializeJson(doc, payload);
         return payload;
     }
 
-    String ConnectionDeviceStatusJson(bool online)
+    std::string ConnectionDeviceStatusJson(bool online)
     {
         return ConnectionDeviceStatusJson(gDeviceIdentity.getDeviceName(), online);
     }

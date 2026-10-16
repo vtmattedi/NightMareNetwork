@@ -26,27 +26,27 @@ const char *operationSuffix(ResourceTopicOperation operation)
 
 // Read at resolution time rather than copied into the resource, so a managed
 // resource can never carry a stale name for this device.
-const String &resolveResourceOwner(const NetResource &resource)
+const std::string &resolveResourceOwner(const NetResource &resource)
 {
     return resource.isOwned() ? gDeviceIdentity.getDeviceName() : resource.ownerDevice_.deviceName;
 }
 
-const String &NetResource::owner() const
+const std::string &NetResource::owner() const
 {
     return resolveResourceOwner(*this);
 }
 
-String resolveResourceManifestTopic(const String &deviceName, DocumentFormat format)
+std::string resolveResourceManifestTopic(const std::string &deviceName, DocumentFormat format)
 {
     return resolveDocumentTopic(deviceName, "manifest", format);
 }
 
-String resolveResourceConsumeManifestTopic(const String &deviceName, DocumentFormat format)
+std::string resolveResourceConsumeManifestTopic(const std::string &deviceName, DocumentFormat format)
 {
     return resolveDocumentTopic(deviceName, "manifest/consume", format);
 }
 
-String resolveResourceRootTopic(const String &deviceName)
+std::string resolveResourceRootTopic(const std::string &deviceName)
 {
     return deviceName + "/resource";
 }
@@ -54,10 +54,10 @@ String resolveResourceRootTopic(const String &deviceName)
 // Built from the resource root, not from the manifest topic. They were the same
 // string once, and a resource address silently following a change to where the
 // manifest lives is exactly the coupling that separating them was meant to end.
-String resolveResourceTopic(const String &deviceName, const String &resourceName,
+std::string resolveResourceTopic(const std::string &deviceName, const std::string &resourceName,
                             ResourceTopicOperation operation)
 {
-    String topic = resolveResourceRootTopic(deviceName);
+    std::string topic = resolveResourceRootTopic(deviceName);
     topic += '/';
     topic += resourceName;
     topic += '/';
@@ -65,7 +65,7 @@ String resolveResourceTopic(const String &deviceName, const String &resourceName
     return topic;
 }
 
-String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation)
+std::string resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation)
 {
     return resolveResourceTopic(resource.owner(),
                                 resource.isRemote() ? resource.sourceResource() : resource.name(),
@@ -103,7 +103,7 @@ void NetResource::delistFromBinding()
 // Retargets a REMOTE resource. The role is fixed at declaration, so ownership
 // is deliberately not recalculated from the new device name: what this object
 // is and what it currently points at are separate questions.
-bool NetResource::setRemoteSource(const String &deviceName, const String &resourceName)
+bool NetResource::setRemoteSource(const std::string &deviceName, const std::string &resourceName)
 {
 #if NM_ENABLE_RESOURCES
     ResourcesManager *manager = resourceManager_ != nullptr ? resourceManager_ : &gResourcesManager;
@@ -118,7 +118,7 @@ bool NetResource::setRemoteSource(const String &deviceName, const String &resour
 
 bool NetResource::clearRemoteSource()
 {
-    return setRemoteSource(String(), String());
+    return setRemoteSource(std::string(), std::string());
 }
 
 bool NetValueResource::setDependency(const NetValueResource &source)
@@ -161,24 +161,24 @@ void NetValueResource::resetRemoteState()
     lastWriteMs_ = 0;
 }
 
-// Timing uses millis() rather than epoch time: it is monotonic, available
+// Timing uses NightMare::Platform::monotonicMillis() rather than epoch time: it is monotonic, available
 // before any time sync, and unsigned subtraction already handles rollover.
 bool NetValueResource::optimisticActive() const
 {
     if (syncStrategy_ != NetSyncStrategy::OPTIMISTIC || !hasOptimisticValue_)
         return false;
-    return (uint32_t)(millis() - lastWriteMs_) < optimisticWindowMs_;
+    return (uint32_t)(NightMare::Platform::monotonicMillis() - lastWriteMs_) < optimisticWindowMs_;
 }
 
 void NetValueResource::noteLocalWrite()
 {
-    lastWriteMs_ = (uint32_t)millis();
+    lastWriteMs_ = (uint32_t)NightMare::Platform::monotonicMillis();
     hasOptimisticValue_ = true;
 }
 
 void NetValueResource::noteOwnerUpdate()
 {
-    lastUpdateMs_ = (uint32_t)millis();
+    lastUpdateMs_ = (uint32_t)NightMare::Platform::monotonicMillis();
     freshness_ = ResourceFreshness::FRESH;
     if (!isOwned())
         available_ = true;
@@ -224,7 +224,7 @@ bool NetValueResource::setManagedHardwareConnected(bool connected)
     return true;
 }
 
-bool NetValueResource::dispatchLocalWrite(const String &encoded)
+bool NetValueResource::dispatchLocalWrite(const std::string &encoded)
 {
     if (!isOwned() && access_ != AccessPolicy::READ_WRITE)
     {
@@ -259,7 +259,7 @@ bool NetValueResource::dispatchLocalWrite(const String &encoded)
     return true;
 }
 
-bool NetActionResource::dispatchInvoke(const String &payload)
+bool NetActionResource::dispatchInvoke(const std::string &payload)
 {
 #if NM_ENABLE_RESOURCES
     if (resourceManager_ != nullptr)
@@ -274,7 +274,7 @@ bool NetActionResource::dispatchInvoke(const String &payload)
     return false;
 }
 
-bool NetEventResource::dispatchFire(const String &encoded)
+bool NetEventResource::dispatchFire(const std::string &encoded)
 {
     // Checked here, bound or not, so the answer does not depend on the connection.
     // An empty payload carries nothing a listener could decode.

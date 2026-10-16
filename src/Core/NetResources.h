@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include "DocumentPayload.h"
 #include <NightMare/Features.h>
 #include "NetCodec.h"
@@ -29,7 +30,7 @@ struct HardwarePolicy
 {
     int32_t pollMs = 0;
     uint8_t flags = 0;
-    String note;
+    std::string note;
 };
 
 // Append only: these are the numbers the compact manifests carry as `kind`.
@@ -60,8 +61,8 @@ enum class ResourceFreshness : uint8_t
 // The owner is identified by its device name in the current topic format.
 struct NetDeviceIdentity
 {
-    String deviceName;
-    NetDeviceIdentity(const String &name) : deviceName(name) {}
+    std::string deviceName;
+    NetDeviceIdentity(const std::string &name) : deviceName(name) {}
 };
 
 /* Resources are layered as:
@@ -69,7 +70,7 @@ struct NetDeviceIdentity
  *   application            T
  *                          |  NetValue<T>
  *                          v  NetCodec<T>
- *   ResourcesManager / MQTT   String
+ *   ResourcesManager / MQTT   std::string
  *
  * NetResource, NetValueResource and NetActionResource are non-template on
  * purpose: routing, manifests, subscriptions and the connection never see T.
@@ -119,11 +120,11 @@ public:
     // groups when related declarations naturally belong together. Colons are
     // ordinary name characters; this tooling hint is not enforced.
     /// @brief Stable local registry/configuration identity.
-    const String &name() const { return name_; }
+    const std::string &name() const { return name_; }
     /// @brief Remote source owner (or this device for a Managed resource).
-    const String &owner() const;
+    const std::string &owner() const;
     /// @brief Remote source Resource segment; empty until configured.
-    const String &sourceResource() const { return sourceResourceName_; }
+    const std::string &sourceResource() const { return sourceResourceName_; }
     NetResourceType kind() const { return kind_; }
     bool isBound() const { return resourceManager_ != nullptr; }
     bool isRemote() const { return role_ == ResourceRole::REMOTE; }
@@ -134,7 +135,7 @@ protected:
     // resolveResourceOwner). Nothing is copied at construction or bind time, so
     // a global declaration never has to know the local name. A REMOTE one may
     // also start without a source and be pointed at one later with setSource().
-    NetResource(const String &resourceName, const String &identity,
+    NetResource(const std::string &resourceName, const std::string &identity,
                 const NetResourceType resourceType, const ResourceRole resourceRole)
         : kind_(resourceType),
           name_(resourceName),
@@ -142,14 +143,14 @@ protected:
           role_(resourceRole),
           sourceResourceName_(resourceRole == ResourceRole::REMOTE && identity.length() != 0
                                   ? resourceName
-                                  : String())
+                                  : std::string())
     {
         enlistForBinding();
     }
     virtual ~NetResource() { delistFromBinding(); }
     /// @brief Points a REMOTE resource at a different source. Updates and
     /// persists the target only; the local name and role never change.
-    bool setRemoteSource(const String &deviceName, const String &resourceName);
+    bool setRemoteSource(const std::string &deviceName, const std::string &resourceName);
     bool clearRemoteSource();
 
     /// @brief Drops whatever was learned from the previous source.
@@ -157,10 +158,10 @@ protected:
 
 private:
     const NetResourceType kind_;
-    const String name_;
+    const std::string name_;
     NetDeviceIdentity ownerDevice_;
     const ResourceRole role_;
-    String sourceResourceName_;
+    std::string sourceResourceName_;
     ResourcesManager *resourceManager_ = nullptr; // Non-owning; set by bindResource().
 
     // Every resource is enlisted when constructed (safe during static
@@ -179,7 +180,7 @@ private:
     friend class NetValueResource;
     friend class NetActionResource;
     friend class NetEventResource;
-    friend const String &resolveResourceOwner(const NetResource &resource);
+    friend const std::string &resolveResourceOwner(const NetResource &resource);
 };
 
 /* Canonical addressing. Topics belong to the resource layer, so a resource can
@@ -298,26 +299,26 @@ enum class ManifestSlot : uint8_t
 /// @brief The device that implements the resource: the current identity for a
 /// MANAGED one, the configured source for a REMOTE one. A reference, because
 /// both live as long as the resource; the Manager calls this per registry entry.
-const String &resolveResourceOwner(const NetResource &resource);
+const std::string &resolveResourceOwner(const NetResource &resource);
 
-String resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation);
+std::string resolveResourceTopic(const NetResource &resource, ResourceTopicOperation operation);
 
 /// @brief Explicit address, for topics that are not the resource's current one,
 /// such as a previous identity being cleaned up.
-String resolveResourceTopic(const String &deviceName, const String &resourceName,
+std::string resolveResourceTopic(const std::string &deviceName, const std::string &resourceName,
                             ResourceTopicOperation operation);
 
 /// `<device>/manifest` itself is a namespace and carries no payload.
 /// @brief The manifest topic for one explicit encoding.
-String resolveResourceManifestTopic(const String &deviceName, DocumentFormat format);
+std::string resolveResourceManifestTopic(const std::string &deviceName, DocumentFormat format);
 
 /// @brief Retained dependencies derived from bound, resolved Remote Resources.
-String resolveResourceConsumeManifestTopic(const String &deviceName,
+std::string resolveResourceConsumeManifestTopic(const std::string &deviceName,
                                            DocumentFormat format);
 
 /// @brief `<device>/resource`: the root every resource hangs below. Separate
 /// from the manifest topic, deliberately -- see DocumentFormat.
-String resolveResourceRootTopic(const String &deviceName);
+std::string resolveResourceRootTopic(const std::string &deviceName);
 
 enum class NetSyncStrategy : uint8_t
 {
@@ -369,7 +370,7 @@ protected:
     bool setDependency(const NetValueResource &source);
 
 
-    NetValueResource(const String &resourceName, const String &resourceOwner,
+    NetValueResource(const std::string &resourceName, const std::string &resourceOwner,
                      AccessPolicy resourceAccess, NetValueType resourceValueType,
                      ResourceRole resourceRole)
         : NetResource(resourceName, resourceOwner, NetResourceType::VALUE, resourceRole),
@@ -415,15 +416,15 @@ private:
     bool advertisementRetryScheduled_ = false;
     bool withdrawalPending_ = false;
 
-    virtual String encodedValue() const = 0;
-    virtual String encodedCurrentValue() const = 0;
+    virtual std::string encodedValue() const = 0;
+    virtual std::string encodedCurrentValue() const = 0;
     // A local caller requests a value using its wire representation. Remote
     // values retain their normal optimistic-write behaviour through this path.
-    virtual bool requestEncodedValue(const String &encoded) = 0;
+    virtual bool requestEncodedValue(const std::string &encoded) = 0;
     // Ingress of owner state: this value is now the truth.
-    virtual bool applyEncodedOwnerValue(const String &encoded) = 0;
+    virtual bool applyEncodedOwnerValue(const std::string &encoded) = 0;
     // Ingress of a /set request aimed at a value this device owns.
-    virtual bool applyEncodedWrite(const String &encoded) = 0;
+    virtual bool applyEncodedWrite(const std::string &encoded) = 0;
 
     // Everything learned from a source is per-source, so retargeting clears it.
     void resetRemoteState() override;
@@ -431,13 +432,13 @@ private:
     // True while a local write should still shadow owner state.
     bool optimisticActive() const;
     // Access check plus manager dispatch for an application-initiated write.
-    bool dispatchLocalWrite(const String &encoded);
+    bool dispatchLocalWrite(const std::string &encoded);
     void noteLocalWrite();
     void noteOwnerUpdate();
 
     bool hasAuthoritativeValue_ = false;
     // Set by the first local write and never cleared: expiry is derived from
-    // millis() and lastWriteMs_, so no timer has to reset it.
+    // NightMare::Platform::monotonicMillis() and lastWriteMs_, so no timer has to reset it.
     bool hasOptimisticValue_ = false;
     uint32_t lastUpdateMs_ = 0;
     uint32_t lastWriteMs_ = 0;
@@ -461,12 +462,12 @@ public:
 
 protected:
     /// @brief A value owned by this device.
-    NetValue(const String &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ)
-        : NetValueResource(resourceName, String(), resourceAccess, NetCodec<T>::Type,
+    NetValue(const std::string &resourceName, AccessPolicy resourceAccess = AccessPolicy::READ)
+        : NetValueResource(resourceName, std::string(), resourceAccess, NetCodec<T>::Type,
                            ResourceRole::MANAGED) {}
 
     /// @brief A value owned by another device.
-    NetValue(const String &resourceName, const NetDeviceIdentity &owner,
+    NetValue(const std::string &resourceName, const NetDeviceIdentity &owner,
              AccessPolicy resourceAccess = AccessPolicy::READ)
         : NetValueResource(resourceName, owner.deviceName, resourceAccess, NetCodec<T>::Type,
                            ResourceRole::REMOTE) {}
@@ -480,7 +481,7 @@ protected:
 
     bool setManagedValue(const T &value, bool applyWritePolicy)
     {
-        const String encoded = NetCodec<T>::encode(value);
+        const std::string encoded = NetCodec<T>::encode(value);
         if (encoded.length() == 0 || encoded.length() > NetResourceMaxPayloadLength)
             return false;
         if (applyWritePolicy && !acceptManagedWrite(value))
@@ -507,10 +508,10 @@ protected:
     bool isStaleImpl() const { return NetValueResource::isStaleImpl(); }
 
 private:
-    String encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
-    String encodedCurrentValue() const override { return NetCodec<T>::encode(getValueImpl()); }
+    std::string encodedValue() const override { return NetCodec<T>::encode(authoritativeValue_); }
+    std::string encodedCurrentValue() const override { return NetCodec<T>::encode(getValueImpl()); }
 
-    bool requestEncodedValue(const String &encoded) override
+    bool requestEncodedValue(const std::string &encoded) override
     {
         T requested = T();
         if (!NetCodec<T>::decode(encoded, requested))
@@ -518,7 +519,7 @@ private:
         return setRemoteValue(requested);
     }
 
-    bool applyEncodedOwnerValue(const String &encoded) override
+    bool applyEncodedOwnerValue(const std::string &encoded) override
     {
         T decoded = T();
         if (!NetCodec<T>::decode(encoded, decoded))
@@ -529,7 +530,7 @@ private:
         return true;
     }
 
-    bool applyEncodedWrite(const String &encoded) override
+    bool applyEncodedWrite(const std::string &encoded) override
     {
         T requested = T();
         if (!NetCodec<T>::decode(encoded, requested))
@@ -588,7 +589,7 @@ template <typename T>
 class ManagedSensor : public NetValue<T>
 {
 public:
-    ManagedSensor(const String &resourceName)
+    ManagedSensor(const std::string &resourceName)
         : NetValue<T>(resourceName, AccessPolicy::READ) {}
 
     const T &getValue() const { return this->getValueImpl(); }
@@ -628,10 +629,10 @@ class RemoteSensor : public NetValue<T>
 {
 public:
     /// @brief Stable local identity; point it at a source with setSource().
-    explicit RemoteSensor(const String &localName)
-        : NetValue<T>(localName, NetDeviceIdentity(String()), AccessPolicy::READ) {}
+    explicit RemoteSensor(const std::string &localName)
+        : NetValue<T>(localName, NetDeviceIdentity(std::string()), AccessPolicy::READ) {}
 
-    RemoteSensor(const String &resourceName, const NetDeviceIdentity &owner)
+    RemoteSensor(const std::string &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ)
     {}
 
@@ -641,7 +642,7 @@ public:
 
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source.
-    bool setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const std::string &deviceName, const std::string &resourceName)
     {
         return this->setRemoteSource(deviceName, resourceName);
     }
@@ -649,7 +650,7 @@ public:
 };
 
 /// @brief Owned by this device and writable by others. The handler receives the
-/// already-decoded value: String conversion stops at the resource boundary.
+/// already-decoded value: std::string conversion stops at the resource boundary.
 template <typename T>
 class ManagedState : public NetValue<T>
 {
@@ -658,7 +659,7 @@ public:
     /// authoritative value, or false to reject it and leave state untouched.
     using WriteRequestHandler = bool (*)(ManagedState<T> &state, const T &requested);
 
-    ManagedState(const String &resourceName)
+    ManagedState(const std::string &resourceName)
         : NetValue<T>(resourceName, AccessPolicy::READ_WRITE) {}
 
     WriteRequestHandler onWrite = nullptr;
@@ -699,13 +700,13 @@ class RemoteState : public NetValue<T>
 {
 public:
     /// @brief Stable local identity; point it at a source with setSource().
-    explicit RemoteState(const String &localName)
-        : NetValue<T>(localName, NetDeviceIdentity(String()), AccessPolicy::READ_WRITE)
+    explicit RemoteState(const std::string &localName)
+        : NetValue<T>(localName, NetDeviceIdentity(std::string()), AccessPolicy::READ_WRITE)
     {
         this->useOptimisticSync();
     }
 
-    RemoteState(const String &resourceName, const NetDeviceIdentity &owner)
+    RemoteState(const std::string &resourceName, const NetDeviceIdentity &owner)
         : NetValue<T>(resourceName, owner, AccessPolicy::READ_WRITE)
     {
         this->useOptimisticSync();
@@ -719,7 +720,7 @@ public:
     /// @brief Points this at a different remote resource. Stays REMOTE whatever
     /// device is named, and drops everything learned from the old source,
     /// including any optimistic window still open against it.
-    bool setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const std::string &deviceName, const std::string &resourceName)
     {
         return this->setRemoteSource(deviceName, resourceName);
     }
@@ -750,13 +751,13 @@ struct ActionArgMetadata
 struct ActionResult
 {
     bool success;
-    String result;
+    std::string result;
 };
 
 /// @brief Manager-facing action. Holds the argument schema and nothing else: no
 /// payload syntax, no freshness, no value semantics. Turning MQTT JSON or
 /// positional console input into arguments is the Manager's job, so the
-/// execution boundary here stays a plain encoded String.
+/// execution boundary here stays a plain encoded std::string.
 ///
 /// The schema is self-description first: it goes into the manifest for
 /// discovery, documentation and tooling. Checking payloads against it is an
@@ -774,7 +775,7 @@ public:
 protected:
     /// @param args Not copied. The schema has to outlive the action, so a static
     /// or global array is the expected source.
-    NetActionResource(const String &resourceName, const String &resourceOwner,
+    NetActionResource(const std::string &resourceName, const std::string &resourceOwner,
                       const ActionArgMetadata *args, size_t argCount,
                       ResourceRole resourceRole)
         : NetResource(resourceName, resourceOwner, NetResourceType::ACTION, resourceRole),
@@ -785,16 +786,16 @@ private:
     /// @brief Manager -> an action this device implements. The result survives
     /// this non-template boundary, so a correlated caller can return it while an
     /// ordinary MQTT /invoke simply drops it. A normalized payload can replace
-    /// the String later without touching metadata or ownership.
-    virtual ActionResult execute(const String &payload)
+    /// the std::string later without touching metadata or ownership.
+    virtual ActionResult execute(const std::string &payload)
     {
         (void)payload;
-        return {false, String()};
+        return {false, std::string()};
     }
 
 protected:
     // Application -> remote owner.
-    bool dispatchInvoke(const String &payload);
+    bool dispatchInvoke(const std::string &payload);
 
 private:
     const ActionArgMetadata *arguments_ = nullptr;
@@ -807,29 +808,29 @@ private:
 class ManagedAction : public NetActionResource
 {
 public:
-    using Handler = ActionResult (*)(ManagedAction &action, const String &payload);
+    using Handler = ActionResult (*)(ManagedAction &action, const std::string &payload);
 
-    ManagedAction(const String &resourceName)
-        : NetActionResource(resourceName, String(), nullptr, 0, ResourceRole::MANAGED) {}
+    ManagedAction(const std::string &resourceName)
+        : NetActionResource(resourceName, std::string(), nullptr, 0, ResourceRole::MANAGED) {}
 
     /// @brief The argument count comes from the array, so only the constructor
     /// is generated per size and the class itself stays non-template.
     template <size_t N>
-    ManagedAction(const String &resourceName, const ActionArgMetadata (&args)[N])
-        : NetActionResource(resourceName, String(), args, N, ResourceRole::MANAGED) {}
+    ManagedAction(const std::string &resourceName, const ActionArgMetadata (&args)[N])
+        : NetActionResource(resourceName, std::string(), args, N, ResourceRole::MANAGED) {}
 
-    ManagedAction(const String &resourceName, const ActionArgMetadata *args, size_t argCount)
-        : NetActionResource(resourceName, String(), args, argCount, ResourceRole::MANAGED) {}
+    ManagedAction(const std::string &resourceName, const ActionArgMetadata *args, size_t argCount)
+        : NetActionResource(resourceName, std::string(), args, argCount, ResourceRole::MANAGED) {}
 
     // This declaration is the authoritative contract the device publishes. The
-    // handler still gets the canonical payload String and parses it itself.
+    // handler still gets the canonical payload std::string and parses it itself.
     Handler onInvoke = nullptr;
 
 private:
-    ActionResult execute(const String &payload) override
+    ActionResult execute(const std::string &payload) override
     {
         if (onInvoke == nullptr)
-            return {false, String()};
+            return {false, std::string()};
         return onInvoke(*this, payload);
     }
 };
@@ -843,33 +844,33 @@ class RemoteAction : public NetActionResource
 {
 public:
     /// @brief Stable local identity; point it at a source with setSource().
-    explicit RemoteAction(const String &localName)
-        : NetActionResource(localName, String(), nullptr, 0, ResourceRole::REMOTE) {}
+    explicit RemoteAction(const std::string &localName)
+        : NetActionResource(localName, std::string(), nullptr, 0, ResourceRole::REMOTE) {}
 
     template <size_t N>
-    RemoteAction(const String &localName, const ActionArgMetadata (&args)[N])
-        : NetActionResource(localName, String(), args, N, ResourceRole::REMOTE) {}
+    RemoteAction(const std::string &localName, const ActionArgMetadata (&args)[N])
+        : NetActionResource(localName, std::string(), args, N, ResourceRole::REMOTE) {}
 
-    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner)
+    RemoteAction(const std::string &resourceName, const NetDeviceIdentity &owner)
         : NetActionResource(resourceName, owner.deviceName, nullptr, 0, ResourceRole::REMOTE) {}
 
     template <size_t N>
-    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
+    RemoteAction(const std::string &resourceName, const NetDeviceIdentity &owner,
                  const ActionArgMetadata (&args)[N])
         : NetActionResource(resourceName, owner.deviceName, args, N, ResourceRole::REMOTE) {}
 
-    RemoteAction(const String &resourceName, const NetDeviceIdentity &owner,
+    RemoteAction(const std::string &resourceName, const NetDeviceIdentity &owner,
                  const ActionArgMetadata *args, size_t argCount)
         : NetActionResource(resourceName, owner.deviceName, args, argCount, ResourceRole::REMOTE) {}
 
     /// @brief An expected schema with the source supplied later by setSource().
-    RemoteAction(const String &resourceName, const ActionArgMetadata *args, size_t argCount)
-        : NetActionResource(resourceName, String(), args, argCount, ResourceRole::REMOTE) {}
+    RemoteAction(const std::string &resourceName, const ActionArgMetadata *args, size_t argCount)
+        : NetActionResource(resourceName, std::string(), args, argCount, ResourceRole::REMOTE) {}
 
     /// @brief Points this at a different remote action. Stays REMOTE whatever
     /// device is named. The argument schema is a property of this declaration,
     /// so it is left alone.
-    bool setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const std::string &deviceName, const std::string &resourceName)
     {
         return this->setRemoteSource(deviceName, resourceName);
     }
@@ -879,7 +880,7 @@ public:
     /// connection, not that the remote action ran or succeeded; use the
     /// controlled console or MQTTP path when the result matters. Fails when
     /// unbound, because nothing was sent.
-    bool invoke(const String &payload = String()) { return dispatchInvoke(payload); }
+    bool invoke(const std::string &payload = std::string()) { return dispatchInvoke(payload); }
 };
 
 /// @brief Manager-facing event: a transient report that something happened.
@@ -896,7 +897,7 @@ public:
 class NetEventResource : public NetResource
 {
 public:
-    /// @brief millis() of the latest occurrence: the latest one fired here
+    /// @brief NightMare::Platform::monotonicMillis() of the latest occurrence: the latest one fired here
     /// (Managed, only when the transport accepted it) or the latest valid live
     /// one received (Remote). Zero until one happens, and zero again after a
     /// Remote source change, because the old source's occurrences no longer
@@ -904,14 +905,14 @@ public:
     uint32_t lastUpdateMs() const { return lastUpdateMs_; }
 
 protected:
-    NetEventResource(const String &resourceName, const String &resourceOwner,
+    NetEventResource(const std::string &resourceName, const std::string &resourceOwner,
                      NetValueType payloadType, ResourceRole resourceRole)
         : NetResource(resourceName, resourceOwner, NetResourceType::EVENT, resourceRole),
           payloadType_(payloadType) {}
 
     // Application -> transport, for a Managed event.
-    bool dispatchFire(const String &encoded);
-    void noteOccurrence() { lastUpdateMs_ = (uint32_t)millis(); }
+    bool dispatchFire(const std::string &encoded);
+    void noteOccurrence() { lastUpdateMs_ = (uint32_t)NightMare::Platform::monotonicMillis(); }
 
     /// @brief Nothing about an event survives a source change except the
     /// declaration, and the only thing learned is when it last happened.
@@ -921,7 +922,7 @@ private:
     /// @brief Ingress of one live occurrence of a Remote event, in its wire
     /// format. True when it decoded and was delivered; false leaves everything,
     /// including lastUpdateMs(), untouched.
-    virtual bool applyEncodedEvent(const String &encoded)
+    virtual bool applyEncodedEvent(const std::string &encoded)
     {
         (void)encoded;
         return false;
@@ -940,11 +941,11 @@ class NetEvent : public NetEventResource
 {
 protected:
     /// @brief An event implemented by this device.
-    explicit NetEvent(const String &resourceName)
-        : NetEventResource(resourceName, String(), NetCodec<T>::Type, ResourceRole::MANAGED) {}
+    explicit NetEvent(const std::string &resourceName)
+        : NetEventResource(resourceName, std::string(), NetCodec<T>::Type, ResourceRole::MANAGED) {}
 
     /// @brief An event implemented by another device.
-    NetEvent(const String &resourceName, const NetDeviceIdentity &owner)
+    NetEvent(const std::string &resourceName, const NetDeviceIdentity &owner)
         : NetEventResource(resourceName, owner.deviceName, NetCodec<T>::Type,
                            ResourceRole::REMOTE) {}
 
@@ -953,12 +954,12 @@ protected:
     /// bytes), independently of whether the transport took it.
     bool fireEvent(const T &payload, bool &occurred)
     {
-        const String encoded = NetCodec<T>::encode(payload);
+        const std::string encoded = NetCodec<T>::encode(payload);
         occurred = encoded.length() != 0 && encoded.length() <= NetResourceMaxPayloadLength;
         return dispatchFire(encoded);
     }
 
-    static bool decodeEvent(const String &encoded, T &out)
+    static bool decodeEvent(const std::string &encoded, T &out)
     {
         return NetCodec<T>::decode(encoded, out);
     }
@@ -972,7 +973,7 @@ class ManagedEvent : public NetEvent<T>
 public:
     using EventHandler = void (*)(ManagedEvent<T> &event, const T &payload);
 
-    explicit ManagedEvent(const String &resourceName) : NetEvent<T>(resourceName) {}
+    explicit ManagedEvent(const std::string &resourceName) : NetEvent<T>(resourceName) {}
 
     /// @brief Local listener: called by fire() for every valid occurrence, with
     /// the payload that was fired. It is the same-device counterpart of a
@@ -1006,10 +1007,10 @@ public:
     using EventHandler = void (*)(RemoteEvent<T> &event, const T &payload);
 
     /// @brief Stable local identity; point it at a source with setSource().
-    explicit RemoteEvent(const String &localName)
-        : NetEvent<T>(localName, NetDeviceIdentity(String())) {}
+    explicit RemoteEvent(const std::string &localName)
+        : NetEvent<T>(localName, NetDeviceIdentity(std::string())) {}
 
-    RemoteEvent(const String &resourceName, const NetDeviceIdentity &owner)
+    RemoteEvent(const std::string &resourceName, const NetDeviceIdentity &owner)
         : NetEvent<T>(resourceName, owner) {}
 
     /// @brief Called for every valid live occurrence, with the decoded payload.
@@ -1017,14 +1018,14 @@ public:
 
     /// @brief Points this at a different remote event. Stays REMOTE whatever
     /// device is named, and resets lastUpdateMs().
-    bool setSource(const String &deviceName, const String &resourceName)
+    bool setSource(const std::string &deviceName, const std::string &resourceName)
     {
         return this->setRemoteSource(deviceName, resourceName);
     }
     bool clearSource() { return this->clearRemoteSource(); }
 
 private:
-    bool applyEncodedEvent(const String &encoded) override
+    bool applyEncodedEvent(const std::string &encoded) override
     {
         T payload = T();
         if (!this->decodeEvent(encoded, payload))

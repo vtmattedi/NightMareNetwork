@@ -1,5 +1,6 @@
 #pragma once
-#include <Arduino.h>//Only while not moving over to espidf
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>//Only while not moving over to espidf
 
 struct MacAddress {
     static constexpr size_t Length = 6;
@@ -9,5 +10,5 @@ struct MacAddress {
     explicit MacAddress(const uint8_t *raw);
     bool operator==(const MacAddress &other) const;
     MacAddress operator=(const uint8_t *other);
-    String toString() const;
+    std::string toString() const;
 }__attribute__((packed));

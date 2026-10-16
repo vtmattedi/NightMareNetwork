@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_TIME_SYNC
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 /// Starts the ESP32 SNTP client. Completion is dispatched by
 /// processTimeSyncEvents() from tickNightMareESP().

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 namespace NMHardware
 {
@@ -235,8 +236,8 @@ enum class DiagnosticCode : uint8_t
 struct Diagnostic
 {
     DiagnosticCode code;
-    String path;
-    String message;
+    std::string path;
+    std::string message;
 };
 
 struct ValidationResult
@@ -256,7 +257,7 @@ struct GraphNode
     CanonicalNet canonicalNet;
 };
 
-struct GraphAssembly { String path; };
+struct GraphAssembly { std::string path; };
 
 struct GraphEdge { uint16_t a; uint16_t b; };
 

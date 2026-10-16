@@ -3,7 +3,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <Network/NmConnection.h>
 
 namespace NightMare
@@ -31,9 +32,9 @@ bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,
 // Publishes now if it can, otherwise holds the message (a few slots) until the
 // next OnConnectedIngress of any connection -- e.g. a reply to a command that
 // is about to drop the link. False only when the holding slots are full.
-bool PublishTextWhenConnected(const String &topic, const String &payload, bool retained = false);
-String ConnectionDeviceStatusJson(bool online);
-String ConnectionDeviceStatusJson(const String &deviceName, bool online);
+bool PublishTextWhenConnected(const std::string &topic, const std::string &payload, bool retained = false);
+std::string ConnectionDeviceStatusJson(bool online);
+std::string ConnectionDeviceStatusJson(const std::string &deviceName, bool online);
 }
 
 #endif // NM_ENABLE_NETWORK

@@ -3,7 +3,8 @@
 #include <NightMare/Features.h>
 #if NM_ENABLE_NETWORK
 
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <Core/Config.h>
 
 namespace NightMare
@@ -43,9 +44,9 @@ using ConnectHandler = void (*)();
 
 bool Publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
-// Text convenience over Publish(): sends the String's bytes as the payload.
+// Text convenience over Publish(): sends the std::string's bytes as the payload.
 // Returns false when the active connection cannot publish right now.
-bool PublishText(const String &topic, const String &payload, bool retained = false);
+bool PublishText(const std::string &topic, const std::string &payload, bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
 // Replaces the firmware connection handler. Register before ConnectionBegin();

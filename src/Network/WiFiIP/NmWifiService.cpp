@@ -36,11 +36,11 @@ WiFiConnectedCallback connectedCallback = nullptr;
 
 bool saveProfile(const NightMare::WiFiProfile &profile)
 {
-    const String keys[] = {NightMare::PersistentKey::WifiSsid,
+    const std::string keys[] = {NightMare::PersistentKey::WifiSsid,
                            NightMare::PersistentKey::WifiPassword,
                            NightMare::PersistentKey::WifiTxPower};
-    const String values[] = {profile.ssid.c_str(), profile.password.c_str(),
-                             String(profile.txPower)};
+    const std::string values[] = {profile.ssid.c_str(), profile.password.c_str(),
+                             std::to_string(profile.txPower)};
     return PersistentSettings.setMany(keys, values, 3);
 }
 
@@ -95,8 +95,8 @@ WiFiProfile WiFiStoredProfile()
     profile.ssid = PersistentSettings.getOrSave(PersistentKey::WifiSsid, DEFAULT_SSID).c_str();
     profile.password = PersistentSettings.getOrSave(PersistentKey::WifiPassword,
                                                      DEFAULT_PASSWORD).c_str();
-    profile.txPower = PersistentSettings.getOrSave(PersistentKey::WifiTxPower,
-                                                    String(NM_TX_POWER_AUTO)).toInt();
+    profile.txPower = NightMare::Text::toLong(PersistentSettings.getOrSave(
+        PersistentKey::WifiTxPower, std::to_string(NM_TX_POWER_AUTO)));
     return profile;
 }
 

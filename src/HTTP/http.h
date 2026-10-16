@@ -4,7 +4,8 @@
 #if NM_ENABLE_WEBSOCKET
 #include "websockets.h"
 #endif
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <esp_http_server.h>
 #include <Core/NightMareTypes.h>
 

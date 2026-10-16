@@ -15,10 +15,10 @@ uint32_t pack(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
            (static_cast<uint32_t>(b) << 8) | static_cast<uint32_t>(a);
 }
 
-bool parseDecimal(const String &text, uint32_t maximum, uint32_t &out)
+bool parseDecimal(const std::string &text, uint32_t maximum, uint32_t &out)
 {
-    String component = text;
-    component.trim();
+    std::string component = text;
+    NightMare::Text::trim(component);
     if (component.length() == 0)
         return false;
     for (size_t i = 0; i < component.length(); ++i)
@@ -34,25 +34,25 @@ bool parseDecimal(const String &text, uint32_t maximum, uint32_t &out)
     return true;
 }
 
-bool parseComponents(const String &text, const char *functionName, size_t expected,
+bool parseComponents(const std::string &text, const char *functionName, size_t expected,
                      uint8_t *values)
 {
-    String lower = text;
-    lower.toLowerCase();
-    const String prefix = String(functionName) + "(";
-    if (!lower.startsWith(prefix) || !lower.endsWith(")"))
+    std::string lower = text;
+    NightMare::Text::toLower(lower);
+    const std::string prefix = std::string(functionName) + "(";
+    if (!NightMare::Text::startsWith(lower, prefix) || !NightMare::Text::endsWith(lower, ")"))
         return false;
 
-    const String body = text.substring(prefix.length(), text.length() - 1);
+    const std::string body = NightMare::Text::slice(text, prefix.length(), text.length() - 1);
     size_t start = 0;
     for (size_t i = 0; i < expected; ++i)
     {
-        const int comma = body.indexOf(',', start);
+        const int comma = NightMare::Text::indexOf(body, ',', start);
         if ((i + 1 < expected && comma < 0) || (i + 1 == expected && comma >= 0))
             return false;
         const size_t end = comma < 0 ? body.length() : static_cast<size_t>(comma);
         uint32_t value = 0;
-        if (!parseDecimal(body.substring(start, end), 255, value))
+        if (!parseDecimal(NightMare::Text::slice(body, start, end), 255, value))
             return false;
         values[i] = static_cast<uint8_t>(value);
         start = end + 1;
@@ -71,12 +71,12 @@ int hexDigit(char value)
     return -1;
 }
 
-bool parseHexColour(const String &text, ColourType &out)
+bool parseHexColour(const std::string &text, ColourType &out)
 {
     size_t offset = 0;
-    if (text.startsWith("#"))
+    if (NightMare::Text::startsWith(text, "#"))
         offset = 1;
-    else if (text.startsWith("0x") || text.startsWith("0X"))
+    else if (NightMare::Text::startsWith(text, "0x") || NightMare::Text::startsWith(text, "0X"))
         offset = 2;
     else
         return false;
@@ -119,8 +119,8 @@ NightMare::RGBA ColourType::toRGBA() const
 NightMare::HSV ColourType::toHSV() const
 {
     const NightMare::RGB rgb = toRGB();
-    const uint8_t maximum = max(rgb.r, max(rgb.g, rgb.b));
-    const uint8_t minimum = min(rgb.r, min(rgb.g, rgb.b));
+    const uint8_t maximum = std::max(rgb.r, std::max(rgb.g, rgb.b));
+    const uint8_t minimum = std::min(rgb.r, std::min(rgb.g, rgb.b));
     const uint8_t delta = maximum - minimum;
 
     NightMare::HSV hsv{};
@@ -191,7 +191,7 @@ ColourType ColourType::fromHSV(const NightMare::HSV &hsv)
                       static_cast<uint8_t>(lroundf((b + match) * 255.0f)));
 }
 
-String encodeColour(const ColourType &colour)
+std::string encodeColour(const ColourType &colour)
 {
     const uint32_t raw = colour.rawValue();
     char encoded[11];
@@ -199,13 +199,13 @@ String encodeColour(const ColourType &colour)
         snprintf(encoded, sizeof(encoded), "%lu", static_cast<unsigned long>(raw >> 8));
     else
         snprintf(encoded, sizeof(encoded), "#%08lX", static_cast<unsigned long>(raw));
-    return String(encoded);
+    return std::string(encoded);
 }
 
-bool decodeColour(const String &encoded, ColourType &colour)
+bool decodeColour(const std::string &encoded, ColourType &colour)
 {
-    String text = encoded;
-    text.trim();
+    std::string text = encoded;
+    NightMare::Text::trim(text);
     if (text.length() == 0)
         return false;
 

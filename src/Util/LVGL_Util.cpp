@@ -57,10 +57,10 @@ void set_lv_label_color(lv_obj_t *obj, int color, lv_style_selector_t style)
 
 /// @brief Gats the hexcode of a color in 6 digits.
 /// @param hexcode The hexcode of the color.
-/// @return A String with the hexcode of the color in 6 digits.
-String get_color_fixed_6_str(int hexcode)
+/// @return A std::string with the hexcode of the color in 6 digits.
+std::string get_color_fixed_6_str(int hexcode)
 {
-  String auxStr = String(hexcode, HEX);
+  std::string auxStr = NightMare::Text::hex(hexcode);
   while (auxStr.length() < 6)
   {
     auxStr = "0" + auxStr;
@@ -69,13 +69,13 @@ String get_color_fixed_6_str(int hexcode)
   return auxStr;
 }
 
-/// @brief Inserts a color in a String in the format #[hexcode] [text]# for lvgl labels.
+/// @brief Inserts a color in a std::string in the format #[hexcode] [text]# for lvgl labels.
 /// @param text The text to be colored.
 /// @param color the hexcpde of the color.
-/// @return A String with the color and text.
-String insert_color(String text, int color)
+/// @return A std::string with the color and text.
+std::string insert_color(std::string text, int color)
 {
-  String res = "#" + get_color_fixed_6_str(color) +" "+ text + "#";
+  std::string res = "#" + get_color_fixed_6_str(color) +" "+ text + "#";
   return res;
 }
 #endif // NM_ENABLE_LVGL

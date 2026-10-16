@@ -19,18 +19,18 @@ public:
     bool load();
     bool save();
 
-    bool set(const String &key, const String &value) override;
-    String get(const String &key, const String &defaultValue = "") const override;
+    bool set(const std::string &key, const std::string &value) override;
+    std::string get(const std::string &key, const std::string &defaultValue = "") const override;
     /// Sets several keys and writes the file once, so the group lands together.
-    bool setMany(const String *keys, const String *values, size_t count);
+    bool setMany(const std::string *keys, const std::string *values, size_t count);
     // Returns the value for the key if it exists, or (saves the default value) then return the default value if it does not exist.
-    String getOrSave(const String &key, const String &defaultValue) const;
-    bool exists(const String &key) const override;
-    bool remove(const String &key) override;
+    std::string getOrSave(const std::string &key, const std::string &defaultValue) const;
+    bool exists(const std::string &key) const override;
+    bool remove(const std::string &key) override;
     void clear() override;
     void clear(bool saveChanges);
     size_t size() const override;
-    String toJson() const override;
+    std::string toJson() const override;
 
 private:
     bool persistent_;

@@ -26,8 +26,8 @@ struct Event
 {
     bool isMessage = false;
     NightMare::EspNowClient::State state = NightMare::EspNowClient::State::STOPPED;
-    String topic;
-    String payload;
+    std::string topic;
+    std::string payload;
     bool retained = false;
 };
 
@@ -74,14 +74,14 @@ void onMessage(const char *topic, const uint8_t *payload, size_t length, bool re
 // role the MQTT last will plays.
 // Only resent when it changed: the client already re-sends the current one on
 // every reconnect.
-String currentWill;
+std::string currentWill;
 
 void refreshLastWill()
 {
-    const String offline = NightMare::ConnectionDeviceStatusJson(false);
+    const std::string offline = NightMare::ConnectionDeviceStatusJson(false);
     if (offline == currentWill)
         return;
-    const String willTopic = gDeviceIdentity.topic("status");
+    const std::string willTopic = gDeviceIdentity.topic("status");
     if (!NightMare::EspNowClient::setLastWill(willTopic.c_str(),
                                               reinterpret_cast<const uint8_t *>(offline.c_str()),
                                               offline.length(), true))

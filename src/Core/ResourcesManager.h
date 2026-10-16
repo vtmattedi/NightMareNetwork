@@ -10,15 +10,15 @@ class ResourcePublisher
 {
 public:
     virtual ~ResourcePublisher() = default;
-    virtual bool publish(const String &topic, const String &payload, bool retained) = 0;
+    virtual bool publish(const std::string &topic, const std::string &payload, bool retained) = 0;
 };
 
 class ResourceSubscriber
 {
 public:
     virtual ~ResourceSubscriber() = default;
-    virtual bool subscribe(const String &topicFilter) = 0;
-    virtual bool unsubscribe(const String &topicFilter) = 0;
+    virtual bool subscribe(const std::string &topicFilter) = 0;
+    virtual bool unsubscribe(const std::string &topicFilter) = 0;
 };
 enum class InternalCommands
 {
@@ -29,24 +29,24 @@ enum class InternalCommands
     RAW,
 };
 
-InternalCommands parseInternalCommand(const String &command);
+InternalCommands parseInternalCommand(const std::string &command);
 
 struct ParsedCommand
 {
     bool internalSyntax = false;
-    String internalAction;
-    String target;
-    String verb;
-    String payload;
+    std::string internalAction;
+    std::string target;
+    std::string verb;
+    std::string payload;
     InternalCommands internalCommand = InternalCommands::NONE;
 };
 
-ParsedCommand parseCommand(const String &expression);
+ParsedCommand parseCommand(const std::string &expression);
 
 /// @brief Registration, routing, manifests, subscriptions and reconnect
 /// behaviour for declared resources. Deliberately non-template: it only ever
 /// sees NetResource, NetValueResource, NetActionResource, NetEventResource and
-/// String. Everything type-specific lives in NetValue<T>, NetEvent<T>,
+/// std::string. Everything type-specific lives in NetValue<T>, NetEvent<T>,
 /// NetCodec<T> and ManagedState<T>.
 ///
 /// It owns participation and routing, not identity: every topic comes from the
@@ -90,7 +90,7 @@ public:
     bool publishResourceStates();
     // Rebuild exact subscriptions after a connection reconnects.
     void subscribeAll();
-    bool needsSubscription(const String &topicFilter) const;
+    bool needsSubscription(const std::string &topicFilter) const;
 
     /// @brief True when the message was resource traffic this Manager consumed,
     /// whether or not the operation succeeded. A rejected write, a failed
@@ -102,12 +102,12 @@ public:
     /// care: an `/event` is a live occurrence, so a retained one is a broker
     /// replay from a publisher that broke the protocol. It is consumed and
     /// ignored, never delivered.
-    bool handleIngressMessage(const String &topic, const String &message,
+    bool handleIngressMessage(const std::string &topic, const std::string &message,
                               bool retained = false);
 
     // Called for valid manifests from other devices, including retained deletion
     // (an empty payload).
-    using ManifestHandler = void (*)(const String &deviceName, const String &manifest);
+    using ManifestHandler = void (*)(const std::string &deviceName, const std::string &manifest);
 
     /// @brief Install a handler for every device's manifest, and subscribe to
     /// them. Setting one is the request: a handler wants the whole network, not
@@ -127,7 +127,7 @@ public:
     // these is installed. Separate from ManifestHandler on purpose: the two
     // topics carry the same document in different encodings, and a consumer
     // wants one of them, not both.
-    using EncodedManifestHandler = void (*)(const String &deviceName, const String &encoded);
+    using EncodedManifestHandler = void (*)(const std::string &deviceName, const std::string &encoded);
 
     /// @brief Install a handler for every device's compact manifest, and
     /// subscribe to them. This is the encoding the manager itself reads, so a
@@ -149,17 +149,17 @@ public:
     ///
     /// Optional: the handler receives the raw payload, and a consumer happy to
     /// read positions directly can skip this and keep the compact document.
-    static bool decodeManifest(const String &encoded, JsonDocument &into);
+    static bool decodeManifest(const std::string &encoded, JsonDocument &into);
 
     /// @brief Expand `[encodingVersion, consumeVersion, remotes[]]` MessagePack
     /// into the named JSON consume-manifest shape.
-    static bool decodeConsumeManifest(const String &encoded, JsonDocument &into);
+    static bool decodeConsumeManifest(const std::string &encoded, JsonDocument &into);
 
     /// @brief Runs a locally implemented action and hands back what it returned.
     /// Raw MQTT ingress uses this and drops the result; a correlated caller
     /// (controlled console / MQTTP) uses the same path and keeps it, so action
     /// execution is never implemented twice.
-    ActionResult executeAction(NetActionResource &action, const String &canonicalPayload);
+    ActionResult executeAction(NetActionResource &action, const std::string &canonicalPayload);
 
     /// @brief Executes the resource-command expression after a leading `>`.
     /// `list`, `manifest`, `drop <name|owner/name>` and `raw <topic> <payload>` are
@@ -167,7 +167,7 @@ public:
     /// resource by unique short name or exact owner/name; a bare address
     /// performs its default operation and an optional verb selects get, set,
     /// invoke, or the Remote-only source configuration operation explicitly.
-    ActionResult executeCommand(const String &expression);
+    ActionResult executeCommand(const std::string &expression);
 
     /// @brief Removes retained state for every currently declared managed value
     /// under a previous identity. Document-topic migration is deliberately
@@ -175,7 +175,7 @@ public:
     /// Only values declared now can be found, so one declared under the old name
     /// and since removed from the firmware is not reached. True only when every
     /// deletion was accepted for publishing, so a failure can be retried.
-    bool withdrawIdentity(const String &oldDeviceName);
+    bool withdrawIdentity(const std::string &oldDeviceName);
 
 private:
     friend class NetResource;
@@ -185,55 +185,55 @@ private:
 
     // Resource methods delegate here. A managed write keeps local truth even if
     // publication fails; a remote request succeeds only when it was transported.
-    bool setValue(NetValueResource &resource, const String &encoded);
+    bool setValue(NetValueResource &resource, const std::string &encoded);
     bool setAvailability(NetValueResource &resource, bool available);
     bool setAdvertisementPolicy(NetValueResource &resource, int32_t milliseconds);
     bool setHardwarePolicy(NetValueResource &resource, const HardwarePolicy &policy);
     bool setHardwareConnected(NetValueResource &resource, bool connected);
     bool setPollOverride(NetValueResource &resource, int32_t milliseconds);
     bool resetPollOverride(NetValueResource &resource);
-    bool invoke(NetActionResource &resource, const String &payload);
+    bool invoke(NetActionResource &resource, const std::string &payload);
     /// @brief Publishes one occurrence of a Managed event, transient. True only
     /// when the connection accepted it.
-    bool fire(NetEventResource &resource, const String &encoded);
-    bool configureRemoteSource(NetResource &resource, const String &deviceName,
-                               const String &resourceName, bool persist = true);
+    bool fire(NetEventResource &resource, const std::string &encoded);
+    bool configureRemoteSource(NetResource &resource, const std::string &deviceName,
+                               const std::string &resourceName, bool persist = true);
 
     /// @brief A bound Remote resource was pointed at a different source. The old
     /// owner and name arrive explicitly because the resource has already been
     /// retargeted and its previous topics can no longer be reconstructed.
     void notifySourceChanged(NetResource &resource, const NetDeviceIdentity &oldOwner,
-                             const String &oldName);
+                             const std::string &oldName);
 
     bool persistRemoteSource(const NetResource &resource) const;
-    bool removePersistedRemoteSource(const String &localName) const;
+    bool removePersistedRemoteSource(const std::string &localName) const;
     bool saveRemoteSources() const;
-    static bool parseSourceAddress(const String &encoded, String &owner, String &resourceName);
+    static bool parseSourceAddress(const std::string &encoded, std::string &owner, std::string &resourceName);
     bool restoreResourceSettings(NetValueResource &resource);
     bool persistAdvertisementPolicy(const NetValueResource &resource,
                                     int32_t periodMs) const;
     bool persistPollOverride(const NetValueResource &resource, int32_t pollMs) const;
     bool removePollOverride(const NetValueResource &resource) const;
 
-    static bool validSegment(const String &segment);
+    static bool validSegment(const std::string &segment);
     static bool validActionSchema(const NetActionResource &action);
     // Every part of a Remote source is set; it may still be invalid.
     static bool sourceConfigured(const NetResource &resource);
     static bool hasResolvedSource(const NetResource &resource);
-    NetResource *findResource(const String &deviceName, const String &name) const;
-    NetResource *findResourceByName(const String &name, bool &ambiguous) const;
-    NetResource *findCommandResource(const String &address, bool &ambiguous) const;
-    bool addressTakenByOther(const String &deviceName, const String &name,
+    NetResource *findResource(const std::string &deviceName, const std::string &name) const;
+    NetResource *findResourceByName(const std::string &name, bool &ambiguous) const;
+    NetResource *findCommandResource(const std::string &address, bool &ambiguous) const;
+    bool addressTakenByOther(const std::string &deviceName, const std::string &name,
                              const NetResource *self) const;
 
     // The one ingress topic a resource needs, or empty when it needs none
     // (ManagedSensor, ManagedEvent, RemoteAction, or a Remote resource with no
     // source yet).
-    String ingressTopicFor(const NetResource &resource) const;
-    String ingressTopicFor(const NetResource &resource, const String &deviceName,
-                           const String &resourceName) const;
+    std::string ingressTopicFor(const NetResource &resource) const;
+    std::string ingressTopicFor(const NetResource &resource, const std::string &deviceName,
+                           const std::string &resourceName) const;
     // Manifests are subscribed once per remote device, not once per resource.
-    bool remoteOwnerInUse(const String &deviceName, const NetResource *exclude) const;
+    bool remoteOwnerInUse(const std::string &deviceName, const NetResource *exclude) const;
 
     bool publishManifest(DocumentFormat format);
     bool publishConsumeManifest(DocumentFormat format);
@@ -244,15 +244,15 @@ private:
     void buildPositionalManifest(JsonDocument &doc) const;
     void buildNamedConsumeManifest(JsonDocument &doc) const;
     void buildPositionalConsumeManifest(JsonDocument &doc) const;
-    void applyEncodedManifest(const String &deviceName, const String &message);
+    void applyEncodedManifest(const std::string &deviceName, const std::string &message);
     /// @brief Build this device's manifest in one encoding. The document is the
     /// same either way; MSGPACK writes kind, access and type as their numeric
     /// values rather than their names, which is most of what it saves.
-    bool serializeManifest(String &payload, DocumentFormat format) const;
-    bool serializeConsumeManifest(String &payload, DocumentFormat format) const;
+    bool serializeManifest(std::string &payload, DocumentFormat format) const;
+    bool serializeConsumeManifest(std::string &payload, DocumentFormat format) const;
     bool publishState(NetValueResource &resource);
     bool withdrawState(NetValueResource &resource);
-    void applyAdvertisementMetadata(const String &deviceName, JsonArrayConst items);
+    void applyAdvertisementMetadata(const std::string &deviceName, JsonArrayConst items);
     /// @brief Copies an authoritative value into every Managed value that
     /// declared it with dependsOn(), and publishes each one. One level only;
     /// see the definition.
@@ -261,7 +261,7 @@ private:
     /// unavailable and its retained state is tombstoned.
     void withdrawFromDependents(const NetValueResource &source);
     ActionResult listResources() const;
-    void applyOtherDeviceManifest(const String &deviceName, const String &message);
+    void applyOtherDeviceManifest(const std::string &deviceName, const std::string &message);
 #if NM_ENABLE_REMOTE_RESOURCE_VERIFICATION
     /// @brief Compare every Remote resource bound from one device against what
     /// that device declares, reading the compact manifest in place.
@@ -269,20 +269,20 @@ private:
     /// Positions and enum values are read directly rather than expanded back
     /// into named keys first. Expanding would cost about what parsing the JSON
     /// manifest cost, which is the expense this moved off the connect burst;
-    /// comparing integers also removes the String built per field per resource
+    /// comparing integers also removes the std::string built per field per resource
     /// that the named comparison needed.
-    void verifyAgainstManifest(const String &deviceName, JsonArrayConst items);
+    void verifyAgainstManifest(const std::string &deviceName, JsonArrayConst items);
 #endif
     void subscribeResource(const NetResource &resource, bool includeManifest);
     void unsubscribeResource(const NetResource &resource, bool removeManifest);
 
     // Consumers for recognised traffic. MQTT ingress consumes the message
     // either way; correlated command callers also use the returned outcome.
-    bool applyRemoteState(NetValueResource &value, const String &message);
-    bool applyManagedWrite(NetValueResource &value, const String &message);
+    bool applyRemoteState(NetValueResource &value, const std::string &message);
+    bool applyManagedWrite(NetValueResource &value, const std::string &message);
     /// @brief One live occurrence of a Remote event. Not retained state, so it is
     /// decoded and delivered or dropped; nothing is stored or republished.
-    bool applyRemoteEvent(NetEventResource &event, const String &message);
+    bool applyRemoteEvent(NetEventResource &event, const std::string &message);
 
     NetResource *resources_[MaxResources] = {};
     int resourceCount_ = 0;

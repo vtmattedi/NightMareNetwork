@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_NETWORK_ESPNOW
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <Network/Connectivity.h>
 #include <Network/NmConnection.h>
 

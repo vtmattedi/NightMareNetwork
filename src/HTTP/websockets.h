@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_WEBSOCKET
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <esp_http_server.h>
 #include <Core/NightMareTypes.h>
 void ws_broadcast(const char *msg);

@@ -26,7 +26,7 @@ esp_err_t root_handler(httpd_req_t *req)
 esp_err_t error_handler(httpd_req_t *req, httpd_err_code_t error)
 {
 
-    String logMsg = String("404 Not Found: ") + String(req->uri);
+    std::string logMsg = std::string("404 Not Found: ") + std::string(req->uri);
 
     httpd_resp_send(req, logMsg.c_str(), HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -41,8 +41,8 @@ esp_err_t nm_server(httpd_req_t *req)
         httpd_resp_send(req, "Command too long", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
-    String command;
-    if (req->content_len > 0 && !command.reserve(req->content_len))
+    std::string command;
+    if (req->content_len > 0 && !NightMare::Text::tryReserve(command, req->content_len))
     {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_send(req, "Out of memory", HTTPD_RESP_USE_STRLEN);

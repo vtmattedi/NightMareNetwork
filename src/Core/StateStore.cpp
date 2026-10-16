@@ -3,12 +3,12 @@
 
 #include "StateStore.h"
 #include "SystemState.h"
+#include "Storage.h"
 #include <ArduinoJson.h>
-#include <LittleFS.h>
 
 namespace
 {
-constexpr char SettingsTempFile[] = "/configs.tmp";
+constexpr size_t MaxSettingsBytes = 32768;
 }
 
 StateStore PersistentSettings(true);
@@ -22,7 +22,7 @@ bool StateStore::begin()
         initialized_ = true;
         return true;
     }
-    if (!LittleFS.begin(true))
+    if (!NightMare::Storage::mount())
     {
         SystemState.clear(SystemFlag::PersistentStorageReady);
         return false;
@@ -38,25 +38,24 @@ bool StateStore::load()
 {
     if (!persistent_)
         return false;
-    if (!LittleFS.exists(SETTINGS_FILE))
+    if (!NightMare::Storage::exists(SETTINGS_FILE))
     {
         RuntimeState::clear();
         return save();
     }
 
-    File file = LittleFS.open(SETTINGS_FILE, "r");
-    if (!file)
+    std::string file;
+    if (!NightMare::Storage::read(SETTINGS_FILE, file, MaxSettingsBytes))
         return false;
     JsonDocument doc;
     const DeserializationError error = deserializeJson(doc, file);
-    file.close();
     if (error || !doc.is<JsonObject>())
         return false;
 
     RuntimeState::clear();
     for (JsonPair item : doc.as<JsonObject>())
     {
-        if (!RuntimeState::set(item.key().c_str(), item.value().as<String>()))
+        if (!RuntimeState::set(item.key().c_str(), item.value().as<std::string>()))
             return false;
     }
     return true;
@@ -66,44 +65,19 @@ bool StateStore::save()
 {
     if (!persistent_)
         return false;
-    const String json = RuntimeState::toJson();
+    const std::string json = RuntimeState::toJson();
 
-    // Write a complete replacement before atomically moving it over the live
-    // file. A failed or partial write therefore leaves the previous durable
-    // settings document untouched.
-    if (LittleFS.exists(SettingsTempFile) && !LittleFS.remove(SettingsTempFile))
-        return false;
-    File file = LittleFS.open(SettingsTempFile, "w");
-    if (!file)
-        return false;
-    const size_t written = file.print(json);
-    file.flush();
-    file.close();
-    if (written != json.length())
-    {
-        LittleFS.remove(SettingsTempFile);
-        return false;
-    }
-
-    File verification = LittleFS.open(SettingsTempFile, "r");
-    const bool complete = verification && verification.size() == json.length();
-    if (verification)
-        verification.close();
-    if (!complete || !LittleFS.rename(SettingsTempFile, SETTINGS_FILE))
-    {
-        LittleFS.remove(SettingsTempFile);
-        return false;
-    }
-    return true;
+    return json.size() <= MaxSettingsBytes &&
+           NightMare::Storage::write(SETTINGS_FILE, json, true);
 }
 
-bool StateStore::set(const String &key, const String &value)
+bool StateStore::set(const std::string &key, const std::string &value)
 {
     if (!begin())
         return false;
 
     const bool existed = RuntimeState::exists(key);
-    const String previous = existed ? RuntimeState::get(key) : String();
+    const std::string previous = existed ? RuntimeState::get(key) : std::string();
     if (!RuntimeState::set(key, value))
         return false;
     if (!persistent_ || save())
@@ -116,7 +90,7 @@ bool StateStore::set(const String &key, const String &value)
     return false;
 }
 
-bool StateStore::setMany(const String *keys, const String *values, size_t count)
+bool StateStore::setMany(const std::string *keys, const std::string *values, size_t count)
 {
     if (!begin())
         return false;
@@ -126,13 +100,13 @@ bool StateStore::setMany(const String *keys, const String *values, size_t count)
     return !persistent_ || save();
 }
 
-String StateStore::get(const String &key, const String &defaultValue) const
+std::string StateStore::get(const std::string &key, const std::string &defaultValue) const
 {
     return const_cast<StateStore *>(this)->begin()
                ? RuntimeState::get(key, defaultValue) : defaultValue;
 }
 
-String StateStore::getOrSave(const String &key, const String &defaultValue) const
+std::string StateStore::getOrSave(const std::string &key, const std::string &defaultValue) const
 {
     if (!const_cast<StateStore *>(this)->begin())
         return defaultValue;
@@ -142,12 +116,12 @@ String StateStore::getOrSave(const String &key, const String &defaultValue) cons
     return defaultValue;
 }
 
-bool StateStore::exists(const String &key) const
+bool StateStore::exists(const std::string &key) const
 {
     return const_cast<StateStore *>(this)->begin() && RuntimeState::exists(key);
 }
 
-bool StateStore::remove(const String &key)
+bool StateStore::remove(const std::string &key)
 {
     if (!begin() || !RuntimeState::remove(key))
         return false;
@@ -179,10 +153,10 @@ size_t StateStore::size() const
     return const_cast<StateStore *>(this)->begin() ? RuntimeState::size() : 0;
 }
 
-String StateStore::toJson() const
+std::string StateStore::toJson() const
 {
     return const_cast<StateStore *>(this)->begin()
-               ? RuntimeState::toJson() : String("{}");
+               ? RuntimeState::toJson() : std::string("{}");
 }
 
 #endif // NM_ENABLE_SETTINGS

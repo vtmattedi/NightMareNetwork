@@ -28,12 +28,12 @@ bool ensureLock()
     return lock != nullptr;
 }
 
-bool topicGatewayId(const String &topic, String &id)
+bool topicGatewayId(const std::string &topic, std::string &id)
 {
-    if (!topic.endsWith(NetworkSuffix) || topic.length() <= strlen(NetworkSuffix))
+    if (!NightMare::Text::endsWith(topic, NetworkSuffix) || topic.length() <= strlen(NetworkSuffix))
         return false;
-    id = topic.substring(0, topic.length() - strlen(NetworkSuffix));
-    return id.indexOf('/') < 0 && id.length() <= 64;
+    id = NightMare::Text::slice(topic, 0, topic.length() - strlen(NetworkSuffix));
+    return NightMare::Text::indexOf(id, '/') < 0 && id.length() <= 64;
 }
 }
 
@@ -41,7 +41,7 @@ bool GatewayCandidateProbable(const GatewayCandidateStatus &candidate,
                               MqttProfile requiredUplink,
                               const GatewayRadioContext &radio)
 {
-    if (!candidate.known || candidate.id.isEmpty() || !candidate.espNowReady)
+    if (!candidate.known || candidate.id.empty() || !candidate.espNowReady)
         return false;
     if (requiredUplink == MqttProfile::REMOTE && !candidate.remoteMqttReady)
         return false;
@@ -49,35 +49,35 @@ bool GatewayCandidateProbable(const GatewayCandidateStatus &candidate,
         return false;
     if (candidate.channel == 0 || radio.channel == 0 || candidate.channel != radio.channel)
         return false;
-    if (!candidate.bssid.isEmpty() && !radio.bssid.isEmpty())
-        return candidate.bssid.equalsIgnoreCase(radio.bssid);
-    return !candidate.ssid.isEmpty() && candidate.ssid == radio.ssid;
+    if (!candidate.bssid.empty() && !radio.bssid.empty())
+        return NightMare::Text::equalsIgnoreCase(candidate.bssid, radio.bssid);
+    return !candidate.ssid.empty() && candidate.ssid == radio.ssid;
 }
 
-bool GatewayCandidateHandleMessage(const String &topic, const String &payload, bool retained)
+bool GatewayCandidateHandleMessage(const std::string &topic, const std::string &payload, bool retained)
 {
-    String topicId;
+    std::string topicId;
     if (!retained)
         return false;
     const bool network = topicGatewayId(topic, topicId);
     if (!network)
     {
-        if (!topic.endsWith(StatusSuffix) || topic.length() <= strlen(StatusSuffix))
+        if (!NightMare::Text::endsWith(topic, StatusSuffix) || topic.length() <= strlen(StatusSuffix))
             return false;
-        topicId = topic.substring(0, topic.length() - strlen(StatusSuffix));
-        if (topicId.indexOf('/') >= 0)
+        topicId = NightMare::Text::slice(topic, 0, topic.length() - strlen(StatusSuffix));
+        if (NightMare::Text::indexOf(topicId, '/') >= 0)
             return false;
     }
     JsonDocument doc;
     if (deserializeJson(doc, payload) || doc["schema"].as<int>() != 1)
         return false;
-    const String id = doc["id"].as<String>();
-    const String generation = doc["generation"].as<String>();
-    if (id != topicId || id.isEmpty() || generation.isEmpty())
+    const std::string id = doc["id"].as<std::string>();
+    const std::string generation = doc["generation"].as<std::string>();
+    if (id != topicId || id.empty() || generation.empty())
         return false;
     if (!network)
     {
-        if (doc["kind"].as<String>() != "gateway")
+        if (doc["kind"].as<std::string>() != "gateway")
             return false;
         if (!ensureLock())
             return false;
@@ -96,8 +96,8 @@ bool GatewayCandidateHandleMessage(const String &topic, const String &payload, b
     next.espNowReady = doc["capabilities"]["esp_now"] | false;
     next.remoteMqttReady = doc["uplinks"]["remote_mqtt"]["ready"] | false;
     next.localMqttReady = doc["uplinks"]["local_mqtt"]["ready"] | false;
-    next.ssid = doc["radio"]["ssid"].as<String>();
-    next.bssid = doc["radio"]["bssid"].as<String>();
+    next.ssid = doc["radio"]["ssid"].as<std::string>();
+    next.bssid = doc["radio"]["bssid"].as<std::string>();
     next.channel = doc["radio"]["channel"] | 0;
     if (!ensureLock())
         return false;

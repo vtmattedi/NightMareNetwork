@@ -5,7 +5,7 @@
 
 namespace
 {
-bool parsePart(const String &text, uint8_t maximum, uint8_t &out)
+bool parsePart(const std::string &text, uint8_t maximum, uint8_t &out)
 {
     if (text.length() == 0 || text.length() > 2)
         return false;
@@ -33,13 +33,13 @@ TimeType::TimeType(uint8_t hour, uint8_t minute, uint8_t second)
     }
 }
 
-String TimeType::toString() const
+std::string TimeType::toString() const
 {
     char encoded[9];
     snprintf(encoded, sizeof(encoded), "%02u:%02u:%02u",
              static_cast<unsigned>(hours_), static_cast<unsigned>(minutes_),
              static_cast<unsigned>(seconds_));
-    return String(encoded);
+    return std::string(encoded);
 }
 
 bool TimeType::operator==(const TimeType &other) const
@@ -48,38 +48,38 @@ bool TimeType::operator==(const TimeType &other) const
            seconds_ == other.seconds_;
 }
 
-String encodeTime(const TimeType &time)
+std::string encodeTime(const TimeType &time)
 {
     return time.toString();
 }
 
-bool decodeTime(const String &encoded, TimeType &time)
+bool decodeTime(const std::string &encoded, TimeType &time)
 {
-    String text = encoded;
-    text.trim();
+    std::string text = encoded;
+    NightMare::Text::trim(text);
     if (text.length() == 0)
         return false;
 
     uint8_t hour = 0;
     uint8_t minute = 0;
     uint8_t second = 0;
-    const int firstColon = text.indexOf(':');
+    const int firstColon = NightMare::Text::indexOf(text, ':');
     if (firstColon >= 0)
     {
-        const int secondColon = text.indexOf(':', firstColon + 1);
-        if (text.indexOf(':', secondColon >= 0 ? secondColon + 1 : firstColon + 1) >= 0)
+        const int secondColon = NightMare::Text::indexOf(text, ':', firstColon + 1);
+        if (NightMare::Text::indexOf(text, ':', secondColon >= 0 ? secondColon + 1 : firstColon + 1) >= 0)
             return false;
-        if (!parsePart(text.substring(0, firstColon), 23, hour))
+        if (!parsePart(NightMare::Text::slice(text, 0, firstColon), 23, hour))
             return false;
         if (secondColon < 0)
         {
-            if (!parsePart(text.substring(firstColon + 1), 59, minute))
+            if (!parsePart(NightMare::Text::slice(text, firstColon + 1), 59, minute))
                 return false;
         }
         else
         {
-            if (!parsePart(text.substring(firstColon + 1, secondColon), 59, minute) ||
-                !parsePart(text.substring(secondColon + 1), 59, second))
+            if (!parsePart(NightMare::Text::slice(text, firstColon + 1, secondColon), 59, minute) ||
+                !parsePart(NightMare::Text::slice(text, secondColon + 1), 59, second))
                 return false;
         }
     }
@@ -87,9 +87,9 @@ bool decodeTime(const String &encoded, TimeType &time)
     {
         if (text.length() != 4 && text.length() != 6)
             return false;
-        if (!parsePart(text.substring(0, 2), 23, hour) ||
-            !parsePart(text.substring(2, 4), 59, minute) ||
-            (text.length() == 6 && !parsePart(text.substring(4, 6), 59, second)))
+        if (!parsePart(NightMare::Text::slice(text, 0, 2), 23, hour) ||
+            !parsePart(NightMare::Text::slice(text, 2, 4), 59, minute) ||
+            (text.length() == 6 && !parsePart(NightMare::Text::slice(text, 4, 6), 59, second)))
             return false;
     }
 

@@ -141,17 +141,17 @@ namespace
         return true;
     }
 
-    String debugSystemRequest(int start = 0)
+    std::string debugSystemRequest(int start = 0)
     {
         
-        String result = "";
+        std::string result = "";
         for (size_t i = 0; i < SystemRequestCount; ++i)
         {
             int index = (start + i) % SystemRequestCount;
             if (SystemState.pending(static_cast<SystemRequest>(index)) ||
                 requestRetries[index].scheduled)
             {
-                if (!result.isEmpty())
+                if (!result.empty())
                     result += ", ";
                 result += SystemRequestNames[index];
             }
@@ -168,7 +168,7 @@ namespace
         if (NightMare::GetConnectionState() != NightMare::ConnectionState::CONNECTED)
             return;
 #endif
-        const uint32_t now = millis();
+        const uint32_t now = NightMare::Platform::monotonicMillis();
         for (size_t checked = 0; checked < SystemRequestCount; ++checked)
         {
             const uint16_t index = (next + checked) % SystemRequestCount;
@@ -227,20 +227,18 @@ namespace
 
 void introNightMareESP()
 {
-    Serial.begin(115200);
     gDeviceIdentity.begin();
     if (!configManager().restore())
         LOG_ERROR("NM", "Could not restore persistent Config values");
-    Serial.print(MattediWorksPresents);
-    Serial.print(NightMareNetworkFiglet);
-    Serial.println(gDeviceIdentity.getDeviceName());
+    std::printf("%s%s%s\n", MattediWorksPresents, NightMareNetworkFiglet,
+                gDeviceIdentity.getDeviceName().c_str());
 #ifdef VERSION
     // Device projects normally generate VERSION and BUILD_TIMESTAMP from their
     // version pre-script. Guards keep standalone library builds usable too.
-    Serial.printf("\tFirmware Version: %s\n", VERSION);
+    std::printf("\tFirmware Version: %s\n", VERSION);
 #endif
 #ifdef BUILD_TIMESTAMP
-    Serial.printf("\tBuild Date: %s\n", BUILD_TIMESTAMP);
+    std::printf("\tBuild Date: %s\n", BUILD_TIMESTAMP);
 #endif
 }
 
@@ -330,6 +328,6 @@ void tickNightMareESP()
         gScheduler.tick();
 #endif
 #if NM_ENABLE_CONSOLE && NM_CONSOLE_SERIAL
-    NightMareCommand_SerialResolver(&Serial, '\n');
+    NightMareCommand_SerialResolver();
 #endif
 }

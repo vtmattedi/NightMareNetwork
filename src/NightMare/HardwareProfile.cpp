@@ -31,22 +31,22 @@ bool validId(const char *id)
 bool validPath(const char *path, bool emptyAllowed)
 {
     if (!present(path)) return emptyAllowed;
-    String remaining(path);
+    std::string remaining(path);
     while (remaining.length() != 0)
     {
-        const int slash = remaining.indexOf('/');
-        const String part = slash < 0 ? remaining : remaining.substring(0, slash);
+        const int slash = NightMare::Text::indexOf(remaining, '/');
+        const std::string part = slash < 0 ? remaining : NightMare::Text::slice(remaining, 0, slash);
         if (!validId(part.c_str())) return false;
         if (slash < 0) return true;
-        remaining.remove(0, slash + 1);
+        remaining.erase(0, slash + 1);
     }
     return false;
 }
 
-String joinedPath(const String &base, const char *relative)
+std::string joinedPath(const std::string &base, const char *relative)
 {
     if (!present(relative)) return base;
-    if (base.length() == 0) return String(relative);
+    if (base.length() == 0) return std::string(relative);
     return base + "/" + relative;
 }
 
@@ -93,9 +93,9 @@ AssemblyView findAssembly(const Profile &config, const char *path)
 {
     AssemblyView current;
     if (!present(path) || config.roots == nullptr) return current;
-    String remaining(path);
-    int slash = remaining.indexOf('/');
-    const String rootId = slash < 0 ? remaining : remaining.substring(0, slash);
+    std::string remaining(path);
+    int slash = NightMare::Text::indexOf(remaining, '/');
+    const std::string rootId = slash < 0 ? remaining : NightMare::Text::slice(remaining, 0, slash);
     for (size_t i = 0; i < config.rootCount; ++i)
         if (rootId == config.roots[i].id)
         {
@@ -105,9 +105,9 @@ AssemblyView findAssembly(const Profile &config, const char *path)
     if (current.instance == nullptr) return current;
     while (slash >= 0)
     {
-        remaining.remove(0, slash + 1);
-        slash = remaining.indexOf('/');
-        const String id = slash < 0 ? remaining : remaining.substring(0, slash);
+        remaining.erase(0, slash + 1);
+        slash = NightMare::Text::indexOf(remaining, '/');
+        const std::string id = slash < 0 ? remaining : NightMare::Text::slice(remaining, 0, slash);
         AssemblyView next;
         for (size_t i = 0; i < childCount(current); ++i)
         {
@@ -153,7 +153,7 @@ const Connector *findConnector(const AssemblyView &view, const char *id)
 }
 
 void addDiagnostic(ValidationResult &result, DiagnosticCode code,
-                   const String &path, const String &message)
+                   const std::string &path, const std::string &message)
 {
     for (size_t i = 0; i < result.diagnosticCount; ++i)
         if (result.diagnostics[i].code == code &&
@@ -165,7 +165,7 @@ void addDiagnostic(ValidationResult &result, DiagnosticCode code,
 }
 
 template <typename T>
-void validateIds(const T *items, size_t count, const String &path, ValidationResult &result)
+void validateIds(const T *items, size_t count, const std::string &path, ValidationResult &result)
 {
     if (count != 0 && items == nullptr)
     {
@@ -176,18 +176,18 @@ void validateIds(const T *items, size_t count, const String &path, ValidationRes
     {
         if (!validId(items[i].id))
             addDiagnostic(result, DiagnosticCode::InvalidId,
-                          path + "[" + String(i) + "].id",
+                          path + "[" + std::to_string(i) + "].id",
                           "ID is empty or contains a reserved character.");
         for (size_t previous = 0; previous < i; ++previous)
             if (present(items[i].id) && present(items[previous].id) &&
                 !strcmp(items[i].id, items[previous].id))
                 addDiagnostic(result, DiagnosticCode::DuplicateId,
-                              path + "[" + String(i) + "].id",
+                              path + "[" + std::to_string(i) + "].id",
                               "ID is duplicated in this scope.");
     }
 }
 
-void validateMemberShape(const AssemblyMembers &members, const String &path,
+void validateMemberShape(const AssemblyMembers &members, const std::string &path,
                          ValidationResult &result, size_t depth = 0)
 {
     if (depth > MaxGraphEndpoints)
@@ -205,26 +205,26 @@ void validateMemberShape(const AssemblyMembers &members, const String &path,
     for (size_t i = 0; i < members.deviceCount && members.devices != nullptr; ++i)
     {
         validateIds(members.devices[i].terminals, members.devices[i].terminalCount,
-                    path + ".devices[" + String(i) + "].terminals", result);
+                    path + ".devices[" + std::to_string(i) + "].terminals", result);
         for (size_t terminal = 0; terminal < members.devices[i].terminalCount; ++terminal)
             if (members.devices[i].terminals[terminal].canonicalNet > CanonicalNet::ProtectiveEarth)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
-                              path + ".devices[" + String(i) + "].terminals[" +
+                              path + ".devices[" + std::to_string(i) + "].terminals[" +
                                   terminal + "].canonical_net",
                               "Canonical net enum is invalid.");
     }
     for (size_t i = 0; i < members.connectorCount && members.connectors != nullptr; ++i)
     {
         validateIds(members.connectors[i].contacts, members.connectors[i].contactCount,
-                    path + ".connectors[" + String(i) + "].contacts", result);
+                    path + ".connectors[" + std::to_string(i) + "].contacts", result);
         if (members.connectors[i].kind > ConnectorKind::Generic)
             addDiagnostic(result, DiagnosticCode::InvalidValue,
-                          path + ".connectors[" + String(i) + "].kind",
+                          path + ".connectors[" + std::to_string(i) + "].kind",
                           "Connector kind enum is invalid.");
         for (size_t contact = 0; contact < members.connectors[i].contactCount; ++contact)
             if (members.connectors[i].contacts[contact].canonicalNet > CanonicalNet::ProtectiveEarth)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
-                              path + ".connectors[" + String(i) + "].contacts[" +
+                              path + ".connectors[" + std::to_string(i) + "].contacts[" +
                                   contact + "].canonical_net",
                               "Canonical net enum is invalid.");
     }
@@ -236,17 +236,17 @@ void validateMemberShape(const AssemblyMembers &members, const String &path,
                 !validId(endpoints[side].owner) || !validId(endpoints[side].endpoint) ||
                 endpoints[side].kind > EndpointKind::ConnectorContact)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
-                              path + ".connections[" + String(i) + "]",
+                              path + ".connections[" + std::to_string(i) + "]",
                               "Connection endpoint is malformed.");
     }
     for (size_t i = 0; i < members.assemblyCount && members.assemblies != nullptr; ++i)
     {
         if (members.assemblies[i].kind > AssemblyKind::Generic)
             addDiagnostic(result, DiagnosticCode::InvalidValue,
-                          path + ".assemblies[" + String(i) + "].kind",
+                          path + ".assemblies[" + std::to_string(i) + "].kind",
                           "Assembly kind enum is invalid.");
         validateMemberShape(members.assemblies[i].members,
-                            path + ".assemblies[" + String(i) + "]", result,
+                            path + ".assemblies[" + std::to_string(i) + "]", result,
                             depth + 1);
     }
 }
@@ -275,7 +275,7 @@ bool definitionCycleFrom(const Profile &config, const HardwareDefinition &start,
 }
 
 void validateInstanceDefinitions(const Profile &config, const Assembly &assembly,
-                                 const String &path, size_t depth,
+                                 const std::string &path, size_t depth,
                                  ValidationResult &result)
 {
     if (depth > MaxGraphEndpoints)
@@ -287,7 +287,7 @@ void validateInstanceDefinitions(const Profile &config, const Assembly &assembly
     const HardwareDefinition *definition = findDefinition(config, assembly.definition);
     if (present(assembly.definition) && definition == nullptr)
         addDiagnostic(result, DiagnosticCode::UnknownDefinition, path,
-                      String("Unknown definition '") + assembly.definition + "'.");
+                      std::string("Unknown definition '") + assembly.definition + "'.");
     const AssemblyMembers *sets[2] = {
         definition != nullptr ? &definition->members : nullptr, &assembly.members};
     if (definition != nullptr)
@@ -319,14 +319,14 @@ void validateInstanceDefinitions(const Profile &config, const Assembly &assembly
                                             depth + 1, result);
 }
 
-int findAssemblyIndex(const TopologyGraph &graph, const String &path)
+int findAssemblyIndex(const TopologyGraph &graph, const std::string &path)
 {
     for (size_t i = 0; i < graph.assemblyCount; ++i)
         if (graph.assemblies[i].path == path) return static_cast<int>(i);
     return -1;
 }
 
-int addAssembly(TopologyGraph &graph, const String &path, ValidationResult *result)
+int addAssembly(TopologyGraph &graph, const std::string &path, ValidationResult *result)
 {
     const int existing = findAssemblyIndex(graph, path);
     if (existing >= 0) return existing;
@@ -352,7 +352,7 @@ int findNode(const TopologyGraph &graph, uint16_t assembly, EndpointKind kind,
     return -1;
 }
 
-bool addNode(TopologyGraph &graph, uint16_t assembly, const String &assemblyPath,
+bool addNode(TopologyGraph &graph, uint16_t assembly, const std::string &assemblyPath,
              EndpointKind kind,
              const char *owner, const char *endpoint, CanonicalNet canonical,
              ValidationResult *result)
@@ -374,7 +374,7 @@ bool addNode(TopologyGraph &graph, uint16_t assembly, const String &assemblyPath
 }
 
 bool collectNodes(const Profile &config, const AssemblyView &view,
-                  const String &path, TopologyGraph &graph, ValidationResult *result,
+                  const std::string &path, TopologyGraph &graph, ValidationResult *result,
                   size_t depth = 0)
 {
     if (depth > MaxGraphEndpoints)
@@ -439,15 +439,15 @@ DiagnosticCode missingEndpointCode(const Profile &config, const EndpointRef &end
 }
 
 bool addConnections(const Profile &config, const Connection *connections, size_t count,
-                    const String &base, TopologyGraph &graph,
-                    ValidationResult *result, const String &sourcePath)
+                    const std::string &base, TopologyGraph &graph,
+                    ValidationResult *result, const std::string &sourcePath)
 {
     if (count != 0 && connections == nullptr) return false;
     bool ok = true;
     for (size_t i = 0; i < count; ++i)
     {
-        const String aPath = joinedPath(base, connections[i].a.assembly);
-        const String bPath = joinedPath(base, connections[i].b.assembly);
+        const std::string aPath = joinedPath(base, connections[i].a.assembly);
+        const std::string bPath = joinedPath(base, connections[i].b.assembly);
         const int aAssembly = findAssemblyIndex(graph, aPath);
         const int bAssembly = findAssemblyIndex(graph, bPath);
         const int aIndex = aAssembly < 0 ? -1 :
@@ -456,13 +456,13 @@ bool addConnections(const Profile &config, const Connection *connections, size_t
         const int bIndex = bAssembly < 0 ? -1 :
             findNode(graph, static_cast<uint16_t>(bAssembly), connections[i].b.kind,
                      connections[i].b.owner, connections[i].b.endpoint);
-        const String path = sourcePath + "[" + String(i) + "]";
+        const std::string path = sourcePath + "[" + std::to_string(i) + "]";
         if (aIndex < 0 || bIndex < 0)
         {
             if (result)
             {
                 EndpointRef missing = aIndex < 0 ? connections[i].a : connections[i].b;
-                const String absolute = aIndex < 0 ? aPath : bPath;
+                const std::string absolute = aIndex < 0 ? aPath : bPath;
                 missing.assembly = absolute.c_str();
                 addDiagnostic(*result, missingEndpointCode(config, missing), path,
                               "Connection endpoint does not resolve.");
@@ -511,7 +511,7 @@ bool addConnections(const Profile &config, const Connection *connections, size_t
 }
 
 bool collectConnections(const Profile &config, const AssemblyView &view,
-                        const String &path, TopologyGraph &graph,
+                        const std::string &path, TopologyGraph &graph,
                         ValidationResult *result, size_t depth = 0)
 {
     if (depth > MaxGraphEndpoints)
@@ -531,7 +531,7 @@ bool collectConnections(const Profile &config, const AssemblyView &view,
     if (view.definition != nullptr)
         ok = addConnections(config, view.definition->members.connections,
                             view.definition->members.connectionCount, path, graph, result,
-                            String("definition:") + view.definition->id + ".connections") && ok;
+                            std::string("definition:") + view.definition->id + ".connections") && ok;
     ok = addConnections(config, view.instance->members.connections,
                         view.instance->members.connectionCount, path, graph, result,
                         path + ".connections") && ok;
@@ -591,13 +591,13 @@ bool buildTopologyGraph(const Profile &config, TopologyGraph &graph,
     for (size_t i = 0; i < config.rootCount; ++i)
     {
         const AssemblyView root{&config.roots[i], findDefinition(config, config.roots[i].definition)};
-        ok = collectNodes(config, root, String(config.roots[i].id), graph, diagnostics) && ok;
+        ok = collectNodes(config, root, std::string(config.roots[i].id), graph, diagnostics) && ok;
     }
     if (!ok) return false;
     for (size_t i = 0; i < config.rootCount; ++i)
     {
         const AssemblyView root{&config.roots[i], findDefinition(config, config.roots[i].definition)};
-        ok = collectConnections(config, root, String(config.roots[i].id), graph, diagnostics) && ok;
+        ok = collectConnections(config, root, std::string(config.roots[i].id), graph, diagnostics) && ok;
     }
     if (!ok) return false;
     ok = addConnections(config, config.connections, config.connectionCount, "",
@@ -651,19 +651,19 @@ ValidationResult validateHwConfig(const Profile &config)
     {
         if (config.definitions[i].kind > AssemblyKind::Generic)
             addDiagnostic(result, DiagnosticCode::InvalidValue,
-                          String("definitions[") + i + "].kind",
+                          std::string("definitions[") + std::to_string(i) + "].kind",
                           "Assembly kind enum is invalid.");
         validateMemberShape(config.definitions[i].members,
-                            String("definitions[") + i + "]", result);
+                            std::string("definitions[") + std::to_string(i) + "]", result);
     }
     for (size_t i = 0; i < config.rootCount && config.roots != nullptr; ++i)
     {
         if (config.roots[i].kind > AssemblyKind::Generic)
             addDiagnostic(result, DiagnosticCode::InvalidValue,
-                          String("roots[") + i + "].kind",
+                          std::string("roots[") + std::to_string(i) + "].kind",
                           "Assembly kind enum is invalid.");
         validateMemberShape(config.roots[i].members,
-                            String("roots[") + i + "]", result);
+                            std::string("roots[") + std::to_string(i) + "]", result);
     }
     if (!validPath(config.hostAssembly, false))
         addDiagnostic(result, DiagnosticCode::InvalidValue, "host_assembly",
@@ -676,7 +676,7 @@ ValidationResult validateHwConfig(const Profile &config)
                 !validId(endpoints[side].owner) || !validId(endpoints[side].endpoint) ||
                 endpoints[side].kind > EndpointKind::ConnectorContact)
                 addDiagnostic(result, DiagnosticCode::InvalidValue,
-                              String("connections[") + i + "]",
+                              std::string("connections[") + std::to_string(i) + "]",
                               "Connection endpoint is malformed.");
     }
 
@@ -686,19 +686,19 @@ ValidationResult validateHwConfig(const Profile &config)
         if (definitionCycleFrom(config, config.definitions[i],
                                 config.definitions[i].members, 0))
             addDiagnostic(result, DiagnosticCode::DefinitionCycle,
-                          String("definitions[") + i + "]",
+                          std::string("definitions[") + std::to_string(i) + "]",
                           "Definition references form a cycle.");
 
     if (!result.valid()) return result;
 
     for (size_t i = 0; i < config.rootCount && config.roots != nullptr; ++i)
-        validateInstanceDefinitions(config, config.roots[i], String(config.roots[i].id),
+        validateInstanceDefinitions(config, config.roots[i], std::string(config.roots[i].id),
                                     0, result);
     for (size_t i = 0; i < config.definitionCount; ++i)
     {
         const Assembly definitionRoot("definition_root", config.definitions[i].id);
         validateInstanceDefinitions(config, definitionRoot,
-                                    String("definition:") + config.definitions[i].id,
+                                    std::string("definition:") + config.definitions[i].id,
                                     0, result);
     }
 
@@ -728,8 +728,8 @@ ValidationResult validateHwConfig(const Profile &config)
         for (size_t net = 0; net < nets->netCount; ++net)
             if (nets->conflictByNet[net])
                 addDiagnostic(result, DiagnosticCode::CanonicalNetConflict,
-                              String("definition:") + config.definitions[i].id +
-                                  ".inferred_nets[" + net + "]",
+                              std::string("definition:") + config.definitions[i].id +
+                                  ".inferred_nets[" + std::to_string(net) + "]",
                               "Connected endpoints declare different canonical net identities.");
     }
     buildTopologyGraph(config, *graph, &result);
@@ -737,7 +737,7 @@ ValidationResult validateHwConfig(const Profile &config)
     for (size_t i = 0; i < nets->netCount; ++i)
         if (nets->conflictByNet[i])
             addDiagnostic(result, DiagnosticCode::CanonicalNetConflict,
-                          String("inferred_nets[") + i + "]",
+                          std::string("inferred_nets[") + std::to_string(i) + "]",
                           "Connected endpoints declare different canonical net identities.");
     delete graph;
     delete nets;

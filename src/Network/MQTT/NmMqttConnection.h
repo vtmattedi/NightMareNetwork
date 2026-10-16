@@ -1,7 +1,8 @@
 #pragma once
 #include <NightMare/Features.h>
 #if NM_ENABLE_MQTT
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 #include <Network/Connectivity.h>
 #include <Network/NmConnection.h>
 
@@ -26,7 +27,7 @@ void onWiFiState(bool connected);
 
 // MQTT-specific delivery queue used when a command response must survive a
 // Wi-Fi/MQTT reconnect. This is intentionally not a generic connection API.
-bool queueAsyncMessage(const String &topic, const String &message,
+bool queueAsyncMessage(const std::string &topic, const std::string &message,
                        bool insertOwner = false, bool retained = false);
 }
 

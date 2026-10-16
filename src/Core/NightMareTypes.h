@@ -1,5 +1,6 @@
 #pragma once
-#include <Arduino.h>
+#include <Core/Text.h>
+#include <Core/PlatformClock.h>
 
 enum CommandSource
 {
@@ -20,11 +21,11 @@ enum CommandSource
 struct NightmareContext
 {
     CommandSource msgSource; // 0 = unknown, 1 = MQTT, 2 = Serial, 3 = HTTP, 4 = Websocket, 5 = Job, 6 = ESP-NOW, 0xFF = Do not respond
-    String sourceIdentifier; // e.g. MQTT topic, Serial port, HTTP endpoint, Websocket ID
+    std::string sourceIdentifier; // e.g. MQTT topic, Serial port, HTTP endpoint, Websocket ID
     void *userContext;       // Optional pointer for user-defined context (e.g. client object)
 
     NightmareContext(CommandSource source = NM_CMD_SRC_UNKNOWN,
-                     const String &identifier = "",
+                     const std::string &identifier = "",
                      void *ctx = nullptr)
         : msgSource(source), sourceIdentifier(identifier), userContext(ctx) {}
 };
@@ -32,7 +33,7 @@ struct NightmareContext
 struct NightMareResults
 {
     bool result;
-    String response;
+    std::string response;
     NightmareContext context; // Optional pointer for user-defined context (e.g. client object)
 };
 
@@ -45,9 +46,9 @@ struct NightMareResults
 
 struct NightMareMessage
 {
-    String command;
-    String subcommand;
-    String args[NM_MAX_ARGS];
+    std::string command;
+    std::string subcommand;
+    std::string args[NM_MAX_ARGS];
     /// Number of arguments actually supplied, which is what separates "absent" from "empty string".
     /// Only set by parseNightMareMessage2(); the original parser leaves it at 0.
     uint8_t argc = 0;
@@ -55,6 +56,6 @@ struct NightMareMessage
     /// defaults to true: a message from the original parser is always "valid" as far as callers go.
     bool valid = true;
     /// Why parsing failed, when valid is false.
-    String error;
+    std::string error;
 };
 

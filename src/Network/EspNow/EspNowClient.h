@@ -61,7 +61,7 @@ uint32_t rttMs();
 uint16_t sessionId();
 // Stable id advertised by the authenticated gateway's beacon. Empty when the
 // gateway predates the identity extension or no gateway is selected.
-String gatewayId();
+std::string gatewayId();
 
 void onState(StateCallback callback);
 void onMessage(MessageCallback callback);

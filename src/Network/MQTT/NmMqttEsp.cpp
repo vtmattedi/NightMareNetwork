@@ -35,8 +35,8 @@ NmMqttEsp::DisconnectedHandler onDisconnected = nullptr;
 NmMqttEsp::ErrorHandler onError = nullptr;
 volatile int8_t connectionState = -1;
 bool lanBroker = false;
-String incomingTopic;
-String incomingPayload;
+std::string incomingTopic;
+std::string incomingPayload;
 bool incomingRetained = false;
 bool receiving = false;
 bool shuttingDown = false;
@@ -90,10 +90,10 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
                         static_cast<size_t>(event->total_data_len) <= MaxIncomingLength;
             if (!receiving)
                 break;
-            incomingTopic = String(event->topic, event->topic_len);
-            incomingPayload = String();
+            incomingTopic = std::string(event->topic, event->topic_len);
+            incomingPayload = std::string();
             incomingRetained = event->retain;
-            if (event->total_data_len > 0 && !incomingPayload.reserve(event->total_data_len))
+            if (event->total_data_len > 0 && !NightMare::Text::tryReserve(incomingPayload, event->total_data_len))
             {
                 receiving = false;
                 break;
@@ -105,11 +105,8 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
             receiving = false;
             break;
         }
-        if (event->data_len > 0 && !incomingPayload.concat(event->data, event->data_len))
-        {
-            receiving = false;
-            break;
-        }
+        if (event->data_len > 0)
+            incomingPayload.append(event->data, static_cast<size_t>(event->data_len));
         if (incomingPayload.length() == static_cast<size_t>(event->total_data_len))
         {
             receiving = false;
@@ -143,7 +140,7 @@ bool startClient(bool useLan)
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
     snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
-    const String offlineStatus = NightMare::ConnectionDeviceStatusJson(false);
+    const std::string offlineStatus = NightMare::ConnectionDeviceStatusJson(false);
     if (offlineStatus.length() >= sizeof(willMessage))
     {
         // Cannot happen with a valid name, but a cut-off JSON last will would be

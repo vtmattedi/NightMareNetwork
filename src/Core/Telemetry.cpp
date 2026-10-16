@@ -11,6 +11,9 @@
 #include <Network/GatewayCandidate.h>
 #include <Network/NmConnectionInternal.h>
 #include <esp_system.h>
+#include <esp_chip_info.h>
+#include <esp_flash.h>
+#include <esp_private/esp_clk.h>
 #if NM_ENABLE_WIFI
 #include <Network/WiFiIP/NmWifiService.h>
 #endif
@@ -27,6 +30,19 @@
 
 namespace
 {
+    const char *chipModel(esp_chip_model_t model)
+    {
+        switch (model)
+        {
+        case CHIP_ESP32: return "ESP32";
+        case CHIP_ESP32S2: return "ESP32-S2";
+        case CHIP_ESP32S3: return "ESP32-S3";
+        case CHIP_ESP32C3: return "ESP32-C3";
+        case CHIP_ESP32C6: return "ESP32-C6";
+        case CHIP_ESP32H2: return "ESP32-H2";
+        default: return "ESP32-family";
+        }
+    }
     constexpr char SystemJob[] = "nm.telemetry.system";
     constexpr char NetworkJob[] = "nm.telemetry.network";
     constexpr char HeartbeatJob[] = "nm.telemetry.heartbeat";
@@ -463,7 +479,7 @@ struct HeartbeatConfigHandlerInstaller
 HeartbeatConfigHandlerInstaller heartbeatConfigHandlerInstaller;
 }
 
-InfoType getInfoType(const String &type)
+InfoType getInfoType(const std::string &type)
 {
     if (type.length() == 0)
         return InfoType::INFO;
@@ -483,7 +499,7 @@ InfoType getInfoType(const String &type)
         {"NETWORK", InfoType::NETWORK},
     };
     for (const Entry &entry : entries)
-        if (type.equalsIgnoreCase(entry.name))
+        if (NightMare::Text::equalsIgnoreCase(type, entry.name))
             return entry.type;
     return InfoType::INVALID;
 }
@@ -525,12 +541,16 @@ void TelemetryService::appendHardware(JsonObject dst) const
 {
     const NMHardware::Profile profile = NMHardware::getProfile();
     dst["board"] = NMHardware::assemblyModel(profile, profile.hostAssembly);
-    dst["chip"] = ESP.getChipModel();
-    dst["cores"] = ESP.getChipCores();
-    dst["revision"] = ESP.getChipRevision();
-    dst["flash_bytes"] = ESP.getFlashChipSize();
-    dst["heap_bytes"] = ESP.getHeapSize();
-    dst["psram_bytes"] = ESP.getPsramSize();
+    esp_chip_info_t chip{};
+    esp_chip_info(&chip);
+    uint32_t flashBytes = 0;
+    esp_flash_get_size(nullptr, &flashBytes);
+    dst["chip"] = chipModel(chip.model);
+    dst["cores"] = chip.cores;
+    dst["revision"] = chip.revision;
+    dst["flash_bytes"] = flashBytes;
+    dst["heap_bytes"] = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+    dst["psram_bytes"] = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
 }
 
 void TelemetryService::buildNamedHardware(JsonDocument &doc) const
@@ -591,8 +611,7 @@ void TelemetryService::appendBuild(JsonObject dst) const
     dst["date"] = __DATE__;
     dst["time"] = __TIME__;
     dst["compiler"] = __VERSION__;
-    dst["arduino_version"] = ARDUINO;
-    dst["esp_idf_version"] = ESP.getSdkVersion();
+    dst["esp_idf_version"] = esp_get_idf_version();
     JsonObject features = dst["features"].to<JsonObject>();
     features["settings"] = NM_ENABLE_SETTINGS != 0;
     features["network"] = NM_ENABLE_NETWORK != 0;
@@ -620,11 +639,11 @@ void TelemetryService::appendBoot(JsonObject dst) const
 
 void TelemetryService::appendSystem(JsonObject dst) const
 {
-    dst["uptime_ms"] = millis();
-    dst["cpu_mhz"] = ESP.getCpuFreqMHz();
-    dst["free_heap_bytes"] = ESP.getFreeHeap();
-    dst["min_free_heap_bytes"] = ESP.getMinFreeHeap();
-    dst["free_psram_bytes"] = ESP.getFreePsram();
+    dst["uptime_ms"] = NightMare::Platform::monotonicMillis();
+    dst["cpu_mhz"] = esp_clk_cpu_freq() / 1000000;
+    dst["free_heap_bytes"] = esp_get_free_heap_size();
+    dst["min_free_heap_bytes"] = esp_get_minimum_free_heap_size();
+    dst["free_psram_bytes"] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 }
 
 // Last-known bookkeeping once the device is gone; /status owns presence.
@@ -749,7 +768,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
         appendNetwork(doc.to<JsonObject>());
         break;
     case InfoType::HEARTBEAT:
-        doc["uptime_ms"] = millis();
+        doc["uptime_ms"] = NightMare::Platform::monotonicMillis();
         doc["heartbeat"] = heartbeatCounter_ + 1;
         break;
     case InfoType::INVALID:
@@ -768,7 +787,7 @@ TelemetryResult TelemetryService::getInfo(InfoType type) const
     return result;
 }
 
-TelemetryResult TelemetryService::getInfo(const String &type) const
+TelemetryResult TelemetryService::getInfo(const std::string &type) const
 {
     return getInfo(getInfoType(type));
 }
@@ -788,7 +807,7 @@ bool TelemetryService::publishInfo(InfoType type)
     return published;
 }
 
-bool TelemetryService::publishInfo(const String &type)
+bool TelemetryService::publishInfo(const std::string &type)
 {
     return publishInfo(getInfoType(type));
 }
@@ -836,7 +855,7 @@ TelemetryResult TelemetryService::getHardwareMessagePack() const
     return result;
 }
 
-bool TelemetryService::decodeHardware(const String &encoded, JsonDocument &into)
+bool TelemetryService::decodeHardware(const std::string &encoded, JsonDocument &into)
 {
     JsonDocument packed;
     if (deserializeMsgPack(packed, encoded.c_str(), encoded.length()) || !packed.is<JsonArray>())

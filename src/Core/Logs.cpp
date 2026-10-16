@@ -69,9 +69,9 @@ namespace NMLog
         va_start(args, format);
         std::vsnprintf(message, sizeof(message), format, args);
         va_end(args);
-        // The stamp is text so both clocks share one format: millis() before the first time sync.
+        // The stamp is text so both clocks share one format: NightMare::Platform::monotonicMillis() before the first time sync.
         char stamp[16];
-        std::snprintf(stamp, sizeof(stamp), "%lu", static_cast<unsigned long>(millis()));
+        std::snprintf(stamp, sizeof(stamp), "%lu", static_cast<unsigned long>(NightMare::Platform::monotonicMillis()));
 #if NM_LOG_USE_TIME_OF_DAY
         if (NightMare::Time::valid())
         {
@@ -86,8 +86,8 @@ namespace NMLog
 #else
 #define NM_LOG_TIME_FORMAT "[%s] [%s] [%s] %s\n"
 #endif
-        Serial.printf(NM_LOG_TIME_FORMAT, stamp,
-                      levelName, module != nullptr ? module : "Core", message);
+        std::printf(NM_LOG_TIME_FORMAT, stamp,
+                    levelName, module != nullptr ? module : "Core", message);
 #else
         (void)level;
         (void)module;
