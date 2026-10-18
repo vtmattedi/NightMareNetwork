@@ -1772,6 +1772,14 @@ NM_CONSOLE_BUILTINS                 1
 NM_CONSOLE_SERIAL                   0
 
 NM_PLATFORM_ESP32                   1
+
+NM_ENABLE_GATEWAY                   0
+NM_GATEWAY_ESPNOW                   NM_ENABLE_GATEWAY
+NM_GATEWAY_MQTT                     NM_ENABLE_GATEWAY
+NM_GATEWAY_OWN_TASK                 1
+NM_GATEWAY_TASK_STACK               12288
+NM_GATEWAY_TASK_PRIORITY            5
+NM_GATEWAY_TICK_MS                  50
 ```
 
 Other defaults:
@@ -1819,6 +1827,14 @@ HTTP -> CONSOLE
 WEBSOCKET -> HTTP
 
 CONSOLE_SERIAL -> CONSOLE
+
+GATEWAY -> GATEWAY_ESPNOW or GATEWAY_MQTT
+GATEWAY_ESPNOW, GATEWAY_MQTT -> GATEWAY
+GATEWAY -> RESOURCES
+GATEWAY -> CONSOLE
+GATEWAY -> not NETWORK
+GATEWAY -> not SCHEDULER
+GATEWAY_ESPNOW -> not NETWORK_ESPNOW
 ```
 
 See [Known gaps](../architecture/known-gaps.md) for current couplings that may later be separated.

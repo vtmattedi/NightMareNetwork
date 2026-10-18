@@ -175,12 +175,53 @@
 #ifndef NM_CONSOLE_SERIAL
 #define NM_CONSOLE_SERIAL 0
 #endif
+// RX buffer of the console UART driver the serial console installs on ESP-IDF
+// when the application has not: input waiting between console polls. Must be
+// above the UART's 128-byte hardware FIFO.
+#ifndef NM_SERIAL_RX_BUFFER
+#define NM_SERIAL_RX_BUFFER 512
+#endif
 
 // Whether NightMare::WiFiBegin() (the IP station) is called from startNightMareESP(). If not,
 // the application must call it itself. The radio starts regardless whenever
 // NM_ENABLE_WIFI_RADIO is on, so an ESP-NOW device can leave this off and never join an AP.
 #ifndef NM_WIFI_AUTO
 #define NM_WIFI_AUTO NM_ENABLE_WIFI
+#endif
+
+// NightMare Gateway (Gateway/NightMareGateway.h): an ESP-NOW broker for
+// NightMare devices bridged to an MQTT broker, which is itself a NightMare
+// device. NightMareGateway_init() / NightMareGateway_tick() take the place of
+// startNightMareESP() / tickNightMareESP().
+#ifndef NM_ENABLE_GATEWAY
+#define NM_ENABLE_GATEWAY 0
+#endif
+// The local side: the ESP-NOW broker.
+#ifndef NM_GATEWAY_ESPNOW
+#define NM_GATEWAY_ESPNOW NM_ENABLE_GATEWAY
+#endif
+// The uplink: an MQTT client bridging the local side to a broker.
+#ifndef NM_GATEWAY_MQTT
+#define NM_GATEWAY_MQTT NM_ENABLE_GATEWAY
+#endif
+// 1: NightMareGateway_init() gives the gateway its own FreeRTOS task, woken as
+//    soon as an ESP-NOW frame or an MQTT message arrives.
+// 0: nothing runs the gateway except NightMareGateway_tick(), called from
+//    loop(). The default for NightMareGatewayConfig::tickMode, which is chosen
+//    at init, like the Scheduler's run mode.
+#ifndef NM_GATEWAY_OWN_TASK
+#define NM_GATEWAY_OWN_TASK 1
+#endif
+#ifndef NM_GATEWAY_TASK_STACK
+#define NM_GATEWAY_TASK_STACK 12288
+#endif
+#ifndef NM_GATEWAY_TASK_PRIORITY
+#define NM_GATEWAY_TASK_PRIORITY 5
+#endif
+// Longest the own task sleeps with nothing arriving: the beacon, session
+// pruning and link status are timed off this.
+#ifndef NM_GATEWAY_TICK_MS
+#define NM_GATEWAY_TICK_MS 50
 #endif
 
 #if NM_ENABLE_MQTT && !NM_ENABLE_NETWORK
@@ -246,6 +287,9 @@
 #if NM_CONSOLE_SERIAL && !NM_ENABLE_CONSOLE
 #error "NM_CONSOLE_SERIAL requires NM_ENABLE_CONSOLE"
 #endif
+#if NM_SERIAL_RX_BUFFER <= 128
+#error "NM_SERIAL_RX_BUFFER must be above the UART's 128-byte hardware FIFO"
+#endif
 #if NM_WIFI_AUTO && !NM_ENABLE_WIFI
 #error "NM_WIFI_AUTO requires NM_ENABLE_WIFI"
 #endif
@@ -254,4 +298,34 @@
 #endif
 #if NM_NETWORK_ESPNOW && !NM_ENABLE_WIFI_RADIO
 #error "NM_NETWORK_ESPNOW requires NM_ENABLE_WIFI_RADIO: ESP-NOW runs on the Wi-Fi radio"
+#endif
+#if NM_ENABLE_GATEWAY && !NM_GATEWAY_ESPNOW && !NM_GATEWAY_MQTT
+#error "NM_ENABLE_GATEWAY needs NM_GATEWAY_ESPNOW or NM_GATEWAY_MQTT: a gateway with neither side does nothing"
+#endif
+#if (NM_GATEWAY_ESPNOW || NM_GATEWAY_MQTT) && !NM_ENABLE_GATEWAY
+#error "NM_GATEWAY_ESPNOW and NM_GATEWAY_MQTT require NM_ENABLE_GATEWAY"
+#endif
+// The gateway is a NightMare device: its identity, Configs, Resources and
+// console come from NightMare (Gateway/GatewayNode).
+#if NM_ENABLE_GATEWAY && !NM_ENABLE_RESOURCES
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_RESOURCES: the gateway publishes its own Resources"
+#endif
+#if NM_ENABLE_GATEWAY && !NM_ENABLE_CONSOLE
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_CONSOLE: the gateway answers <device>/console/in"
+#endif
+// The gateway carries its own traffic. NmConnection would inject a second
+// publisher into the ResourcesManager and select a transport of its own.
+#if NM_ENABLE_GATEWAY && NM_ENABLE_NETWORK
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_NETWORK 0: the gateway carries its own traffic"
+#endif
+#if NM_GATEWAY_ESPNOW && NM_NETWORK_ESPNOW
+#error "NM_GATEWAY_ESPNOW and NM_NETWORK_ESPNOW both own ESP-NOW: a gateway is not also a client"
+#endif
+// Jobs would run on the Scheduler task, while the gateway's Resources and
+// device table belong to whoever ticks the gateway.
+#if NM_ENABLE_GATEWAY && NM_ENABLE_SCHEDULER
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_SCHEDULER 0: jobs would run outside the gateway tick"
+#endif
+#if NM_GATEWAY_TICK_MS < 1
+#error "NM_GATEWAY_TICK_MS must be at least 1"
 #endif

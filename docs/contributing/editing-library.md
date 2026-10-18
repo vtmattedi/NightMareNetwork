@@ -215,6 +215,11 @@ Time
 
 Platform lifecycle
     docs/modules/platform.md
+
+Gateway
+    docs/modules/gateway.md
+    docs/modules/espnow-protocol.md
+    docs/modules/network.md
 ```
 
 ## Feature and dependency rules

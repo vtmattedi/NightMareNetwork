@@ -60,6 +60,9 @@
 #if NM_ENABLE_LVGL
 #include <Util/LVGL_Util.h>
 #endif
+#if NM_ENABLE_GATEWAY
+#include <Gateway/NightMareGateway.h>
+#endif
 
 static const char MattediWorksPresents[] = "\r\n\r\n\033[1;97mMattedi\033[0m\033[38;5;208mWorks\033[0m \033[3mpresents:\033[0m";
 

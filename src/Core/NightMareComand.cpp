@@ -30,6 +30,9 @@
 #include <Network/EspNow/NmEspNowConnection.h>
 #include <Network/EspNow/EspNowClient.h>
 #endif
+#if NM_ENABLE_GATEWAY
+#include <Gateway/GatewayCommands.h>
+#endif
 #if NM_CONSOLE_BUILTINS
 #include "Storage.h"
 #endif
@@ -632,6 +635,10 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 #if NM_ENABLE_JOBS
     if (parsedMsg.command == "JOB")
         return executeJobCommand(parsedMsg, context);
+#endif
+#if NM_ENABLE_GATEWAY
+    if (parsedMsg.command == "GATEWAY")
+        return executeGatewayCommand(parsedMsg, context);
 #endif
 #if NM_ENABLE_TELEMETRY
     // HW returns the readable configuration; HW PUBLISH republishes it.
@@ -1364,8 +1371,18 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 #if NM_CONSOLE_SERIAL
 #include <fcntl.h>
 #include <unistd.h>
+#if !defined(ARDUINO)
+#include <sdkconfig.h>
+#if CONFIG_ESP_CONSOLE_UART
+#include <driver/uart.h>
+#include <driver/uart_vfs.h>
+#endif
+#endif
 
 /// @brief Polls ESP-IDF standard input and resolves each complete command line.
+/// On a UART console it first installs that UART's driver (unless the
+/// application already did) and routes stdin through it, so input is buffered
+/// between calls rather than left to the hardware FIFO.
 void NightMareCommand_SerialResolver()
 {
     static std::string command;
@@ -1373,6 +1390,18 @@ void NightMareCommand_SerialResolver()
     static bool enabled = false;
     if (!configured)
     {
+#if !defined(ARDUINO) && CONFIG_ESP_CONSOLE_UART
+        // Without a driver, stdin polls the UART's 128-byte hardware FIFO, which
+        // a pasted line overruns between ticks. The driver's ISR buffers input
+        // instead, and the VFS has to read through it: an installed driver that
+        // the VFS does not use drains the FIFO before stdin can see a byte.
+        const uart_port_t console = static_cast<uart_port_t>(CONFIG_ESP_CONSOLE_UART_NUM);
+        if (!uart_is_driver_installed(console) &&
+            uart_driver_install(console, NM_SERIAL_RX_BUFFER, 0, 0, nullptr, 0) != ESP_OK)
+            LOG_WARNING("Console", "UART driver unavailable; serial input polls the hardware FIFO");
+        if (uart_is_driver_installed(console))
+            uart_vfs_dev_use_driver(console);
+#endif
         const int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
         enabled = flags >= 0 &&
                   fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == 0;

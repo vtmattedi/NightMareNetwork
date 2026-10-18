@@ -276,7 +276,16 @@ When:
 NM_CONSOLE_SERIAL
 ```
 
-is enabled, `tickNightMareESP()` services the serial resolver.
+is enabled, `tickNightMareESP()` services the serial resolver. It reads
+standard input without blocking and resolves each line ending in CR or LF,
+printing the answer to standard output.
+
+On ESP-IDF with a UART console, the first call installs that UART's driver,
+with an `NM_SERIAL_RX_BUFFER`-byte receive buffer (default 512), unless the
+application already installed one. It then routes standard input through the
+driver, so input waits in the driver's buffer between ticks instead of
+overrunning the 128-byte hardware FIFO. An application that installs the
+console UART driver itself keeps it. Arduino builds leave the port to `Serial`.
 
 ### MQTT console
 
@@ -359,6 +368,9 @@ HTTPSERVER
 
 WS
     requires NM_ENABLE_WEBSOCKET
+
+GATEWAY
+    requires NM_ENABLE_GATEWAY
 
 general built-ins
     require NM_CONSOLE_BUILTINS
@@ -705,6 +717,55 @@ transport preference.
 The ambiguous pre-decoupling forms `NETWORK SET`, `NETWORK STATE`, `NETWORK IP`,
 `NETWORK SCAN`, `NETWORK CHANGE`, `NETWORK TXPOWER`, and `NETWORK RECONNECT` are
 not aliases and return `unknown_network_command`.
+
+## GATEWAY
+
+Operator control of the [NightMare Gateway](../modules/gateway.md). Answers
+are JSON; a refused or unknown request is `{"ok":false,"reason":...}`, with a
+`usage` field when the form was wrong.
+
+```text
+GATEWAY GET
+GATEWAY ENABLE
+GATEWAY DISABLE
+GATEWAY CLIENTS
+
+GATEWAY ESPNOW GET
+GATEWAY ESPNOW PAUSE
+GATEWAY ESPNOW RESUME
+
+GATEWAY TRACE GET
+GATEWAY TRACE ENABLE
+GATEWAY TRACE DISABLE
+
+GATEWAY MQTT GET
+GATEWAY MQTT TEST [bytes [count]]
+GATEWAY MQTT LINKDEBUG GET
+GATEWAY MQTT LINKDEBUG ENABLE
+GATEWAY MQTT LINKDEBUG DISABLE
+```
+
+`GATEWAY` alone is `GATEWAY GET`: `enabled`, `state`, `link`
+(`NONE`/`LOCAL`/`REMOTE`/`BRIDGED`), `id`, `generation`, and `espnow`, `mqtt`,
+`vault` and `trace` sections. A side that is not compiled in reports
+`{"supported":false}`, and its commands return `unsupported`.
+
+`ENABLE`/`DISABLE` stop or restart the whole gateway (ESP-NOW sessions are
+dropped; devices reconnect). `ESPNOW PAUSE`/`RESUME` tear the ESP-NOW side down
+and bring it back while MQTT keeps running, to separate a radio problem from an
+uplink one; `DISABLE` clears a pause. These requests are applied by the next
+gateway tick, so the answer is `{"ok":true}` for the request and `GATEWAY GET`
+shows when it took effect.
+
+`CLIENTS` lists ESP-NOW sessions: `mac`, `name` (learned from the device's
+`/status`), `cid`, `state`, `suspended`, `subscriptions`, `rssi`, `rtt_ms`,
+`last_seen_s`, `last_will` and `disconnect_candidate`.
+
+`TRACE` switches the per-hop log of `<device>/hardware` documents at runtime.
+`MQTT TEST` publishes `count` QoS 1 messages of `bytes` (defaults 1024 x 10,
+at most 32768 x 200) to `<gateway-id>/diag` one at a time and logs each PUBACK
+latency on the `mqtttest` log module; the answer only confirms the start.
+`MQTT LINKDEBUG` dumps the Wi-Fi driver statistics at every MQTT disconnect.
 
 ## CONFIG
 

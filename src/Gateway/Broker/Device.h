@@ -1,0 +1,111 @@
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+#include <string>
+#include <vector>
+#include <Gateway/Broker/Topic.h>
+#include <Network/EspNow/NightMareEspNow/macAddress.h>
+#include <Gateway/Broker/Message.h>
+
+namespace NightMare
+{
+    // Where an ESP-NOW session stands. A peer still in CONNECT/CHALLENGE is not
+    // a Device yet: it lives in espDeviceManager's pending-handshake table.
+    enum class ConnectionState : uint8_t
+    {
+        HANDSHAKE,     // not used by a Device; named for completeness of the lifecycle
+        AUTHENTICATED, // AUTH verified and a cid assigned; CONNACK going out
+        SECURING,      // LMK installed, waiting for the first encrypted PING
+        CONNECTED,     // encrypted PING/PONG done: broker traffic allowed
+    };
+
+    const char *connectionStateName(ConnectionState state);
+
+    // One ESP-NOW session: the peer MAC, the gateway-assigned cid, and what the
+    // broker keeps for it. Session and broker state go away together.
+    class Device
+    {
+        static constexpr size_t MaxSubscriptions = 32;
+
+        MacAddress mac;
+        uint16_t cid_ = 0;
+        ConnectionState state_ = ConnectionState::AUTHENTICATED;
+        // The session's ESP-NOW key. Kept because a handshake from this MAC
+        // turns the peer back to plaintext, and an unproven one has to leave
+        // the session exactly as it was -- encryption included.
+        uint8_t sessionKey_[16] = {};
+        bool hasSessionKey_ = false;
+        // A handshake is running for this MAC. The peer is plaintext meanwhile,
+        // so nothing is delivered to the session and nothing is accepted from
+        // it, until the handshake either proves itself or is abandoned.
+        bool suspended_ = false;
+        int8_t rssi = 0;                             // dBm of the last accepted frame
+        float avgRssi_ = 0;                          // exponential moving average of rssi
+        bool hasRssi_ = false;
+        uint32_t rxFrames_ = 0;                      // accepted session frames
+        float rttMs_ = 0;                            // smoothed link round trip, see noteRtt()
+        bool hasRtt_ = false;
+        uint64_t sessionStartMs_ = 0;
+        uint64_t lastSeenMs = 0;                     // last accepted frame (or session start)
+        std::string subscriptions[MaxSubscriptions]; // list of topics this device is subscribed to
+        Message lastWill;                            // the last will message for this device
+        std::string assumedName_ = "";               // a name for the device, if known (e.g. from its status)
+    public:
+        Device() = default;
+        Device(const MacAddress &address, uint16_t cid, uint64_t nowMs);
+
+        bool isSubscribedTo(const std::string &topic) const;
+        bool subscribeTo(const std::string &topic);
+        bool unsubscribeFrom(const std::string &topic);
+
+        const MacAddress &address() const { return mac; }
+        uint16_t cid() const { return cid_; }
+        ConnectionState state() const { return state_; }
+        void setState(ConnectionState state) { state_ = state; }
+        // Usable right now: secured, and not paused by a handshake.
+        bool isConnected() const { return state_ == ConnectionState::CONNECTED && !suspended_; }
+
+        static constexpr size_t SessionKeySize = sizeof(sessionKey_);
+        void setSessionKey(const uint8_t *key);
+        const uint8_t *sessionKey() const { return sessionKey_; }
+        bool hasSessionKey() const { return hasSessionKey_; }
+        void forgetSessionKey();
+
+        bool isSuspended() const { return suspended_; }
+        void suspend() { suspended_ = true; }
+        void resume() { suspended_ = false; }
+
+        uint64_t lastSeenAtMs() const { return lastSeenMs; }
+        void markSeen(int8_t signal, uint64_t nowMs);
+        int8_t lastRssi() const { return rssi; }
+        // Smoothed over the last ~8 frames; only meaningful once hasRssi().
+        float averageRssi() const { return avgRssi_; }
+        bool hasRssi() const { return hasRssi_; }
+        uint32_t rxFrames() const { return rxFrames_; }
+        // Time from handing a unicast frame to the radio until the peer's
+        // link-layer ACK came back: the real round trip of the radio link, no
+        // cooperation from the device needed. Smoothed over the last few samples.
+        void noteRtt(float ms);
+        float rttMs() const { return rttMs_; }
+        bool hasRtt() const { return hasRtt_; }
+        uint64_t sessionStartMs() const { return sessionStartMs_; }
+        // The filters in use, for telemetry.
+        std::vector<std::string> subscriptionList() const;
+        size_t subscriptionCount() const;
+        size_t subscriptionCapacity() const { return MaxSubscriptions; }
+        bool hasLastWill() const { return !lastWill.topic.empty(); }
+        const Message &lastWillMessage() const { return lastWill; }
+        // Rejects wildcard/empty/oversized topics, the same rule an ordinary
+        // publish follows. Returns false (and leaves any existing will alone)
+        // if the message doesn't qualify.
+        bool setLastWill(const Message &message);
+        void clearLastWill();
+        const std::string &assumedName() const { return assumedName_; }
+        // "name (mac)" when the name is known, else just the mac, for log lines.
+        std::string label() const
+        {
+            return assumedName_.empty() ? mac.toString() : assumedName_ + " (" + mac.toString() + ")";
+        }
+        void setAssumedName(const std::string &name);
+    };
+}
