@@ -15,31 +15,45 @@ import plaintext from "highlight.js/lib/languages/plaintext";
 
 const languages = { cpp, c: cpp, ini, json, bash, sh: bash, shell: bash, yaml, yml: yaml, text: plaintext, plaintext };
 
+// Markdown sources use paths relative to docs/, including links ending in .md.
+// Translate those source paths to the site's canonical routes.
+export function docHref(href: string, slug: string): string {
+  if (!/\.md(?:#.*)?$/i.test(href) || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return href;
+  const [sourcePath, fragment = ""] = href.split("#", 2);
+  const parts = sourcePath.startsWith("/") ? [] : slug.split("/").slice(0, -1);
+  for (const part of sourcePath.replace(/^\/docs\//, "").replace(/^\//, "").replace(/\.md$/i, "").split("/")) {
+    if (part === "..") parts.pop();
+    else if (part && part !== ".") parts.push(part);
+  }
+  return `/docs/${parts.join("/")}${fragment ? `#${fragment}` : ""}`;
+}
+
 // Internal links become router links so navigation stays client-side; external
 // ones open in a new tab. Anchors (#...) stay plain.
-function A({ href = "", children, ...rest }: ComponentPropsWithoutRef<"a">) {
-  if (href.startsWith("/")) {
+function A({ href = "", children, slug, ...rest }: ComponentPropsWithoutRef<"a"> & { slug: string }) {
+  const target = docHref(href, slug);
+  if (target.startsWith("/")) {
     return (
-      <Link to={href} {...rest}>
+      <Link to={target} {...rest}>
         {children}
       </Link>
     );
   }
-  const external = /^https?:\/\//.test(href);
+  const external = /^https?:\/\//.test(target);
   return (
-    <a href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})} {...rest}>
+    <a href={target} {...(external ? { target: "_blank", rel: "noreferrer" } : {})} {...rest}>
       {children}
     </a>
   );
 }
 
-export function Markdown({ source }: { source: string }) {
+export function Markdown({ source, slug }: { source: string; slug: string }) {
   return (
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSlug, [rehypeHighlight, { languages, detect: false }]]}
-        components={{ a: A }}
+        components={{ a: (props) => <A {...props} slug={slug} /> }}
       >
         {source}
       </ReactMarkdown>

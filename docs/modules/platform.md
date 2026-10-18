@@ -303,7 +303,7 @@ starts the asynchronous WiFi path.
 
 ## Resource registration comes first
 
-Application Resources should be bound before:
+Application Resources should be declared before:
 
 ```cpp
 startNightMareESP();
@@ -316,16 +316,13 @@ void setup()
 {
     power.onWrite = onPowerWrite;
 
-    gResourcesManager.bindResource(&power);
-    gResourcesManager.bindResource(&temperature);
-
     startNightMareESP();
 
     startApplicationHardware();
 }
 ```
 
-This ensures Resource declarations exist before MQTT participation and before old-identity cleanup may run.
+`startNightMareESP()` binds those declarations before MQTT participation and before old-identity cleanup may run.
 
 ## `tickNightMareESP()`
 

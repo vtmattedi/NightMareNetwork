@@ -47,7 +47,7 @@ Inside one device:
 ```text
 Application
     │
-    ├── declares/binds Resources
+    ├── declares Resources
     ├── implements handlers
     └── owns hardware/business logic
     │
@@ -410,7 +410,7 @@ Normal application startup is:
 ```cpp
 void setup()
 {
-    // Declare/bind application Configs, Resources, and handlers first.
+    // Declare application Configs and Resources; register handlers first.
 
     startNightMareESP();
 
@@ -418,7 +418,9 @@ void setup()
 }
 ```
 
-Binding Resources before framework startup matters because pending old-identity cleanup can only withdraw retained state for Resources that exist in the current firmware.
+`startNightMareESP()` automatically binds declared Resources before networking
+starts. Pending old-identity cleanup can only withdraw retained state for
+Resources that exist in the current firmware.
 
 `startNightMareESP()` then coordinates enabled common infrastructure:
 

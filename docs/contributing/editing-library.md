@@ -167,7 +167,8 @@ A practical test is:
 
 `ResourcesManager` is the runtime boundary between declared Resources and NightMare connection/routing.
 
-Applications create Resource objects and bind them to the manager.
+Applications create Resource objects; `startNightMareESP()` binds those
+declared before startup. Explicit binding remains available for later Resources.
 
 The manager coordinates framework behavior around those Resources, including registration, manifests, subscriptions, routing, reconnect behavior, and remote-source changes.
 

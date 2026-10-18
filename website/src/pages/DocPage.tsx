@@ -1,5 +1,6 @@
 import { Link, NavLink, useParams } from "react-router-dom";
 import { Head } from "vite-react-ssg";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Markdown } from "../components/Markdown";
 import { docBySlug, neighbours, sections } from "../lib/docs";
 import { NotFound } from "./NotFound";
@@ -10,6 +11,7 @@ export function DocPage() {
   const doc = docBySlug(slug);
   if (!doc) return <NotFound />;
   const { prev, next } = neighbours(doc.slug);
+  const pageHeadings = doc.headings.filter((h) => h.depth === 2);
 
   return (
     <div className="wrap docs">
@@ -22,14 +24,19 @@ export function DocPage() {
 
       <aside className="sidebar" aria-label="Documentation">
         {sections.map((s) => (
-          <div key={s.id} className="side-group">
-            <div className="side-head">{s.label}</div>
-            {s.docs.map((d) => (
-              <NavLink key={d.slug} to={`/docs/${d.slug}`} className="side-link" end>
-                {d.title}
-              </NavLink>
-            ))}
-          </div>
+          <details key={`${doc.slug}-${s.id}`} className="side-group" open={s.id === doc.section}>
+            <summary className="side-head">
+              <ChevronRight size={14} aria-hidden="true" />
+              {s.label}
+            </summary>
+            <div className="side-items">
+              {s.docs.map((d) => (
+                <NavLink key={d.slug} to={`/docs/${d.slug}`} className="side-link" end>
+                  {d.title}
+                </NavLink>
+              ))}
+            </div>
+          </details>
         ))}
       </aside>
 
@@ -37,12 +44,12 @@ export function DocPage() {
         <p className="crumb">
           <Link to="/docs">Docs</Link> / {s(doc.section)} / <span>{doc.title}</span>
         </p>
-        <Markdown source={doc.body} />
+        <Markdown source={doc.body} slug={doc.slug} />
         <nav className="pager" aria-label="Previous and next">
           {prev ? (
             <Link to={`/docs/${prev.slug}`} className="pager-prev">
               <small>Previous</small>
-              {prev.title}
+              <span><ChevronLeft size={16} aria-hidden="true" />{prev.title}</span>
             </Link>
           ) : (
             <span />
@@ -50,7 +57,7 @@ export function DocPage() {
           {next ? (
             <Link to={`/docs/${next.slug}`} className="pager-next">
               <small>Next</small>
-              {next.title}
+              <span>{next.title}<ChevronRight size={16} aria-hidden="true" /></span>
             </Link>
           ) : (
             <span />
@@ -58,10 +65,10 @@ export function DocPage() {
         </nav>
       </article>
 
-      {doc.headings.length > 2 && (
+      {pageHeadings.length > 1 && (
         <aside className="toc" aria-label="On this page">
           <div className="side-head">On this page</div>
-          {doc.headings.map((h) => (
+          {pageHeadings.map((h) => (
             <a key={h.id + h.text} href={`#${h.id}`} className={"toc-" + h.depth}>
               {h.text}
             </a>

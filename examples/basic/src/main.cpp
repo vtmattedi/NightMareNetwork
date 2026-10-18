@@ -44,10 +44,6 @@ void setup()
     brightness.onWrite = onBrightnessWrite;
     identify.onInvoke = onIdentify;
 
-    gResourcesManager.bindResource(&uptimeSeconds);
-    gResourcesManager.bindResource(&brightness);
-    gResourcesManager.bindResource(&identify);
-
     uptimeSeconds.setValue(0);
     brightness.setValue(0);
 

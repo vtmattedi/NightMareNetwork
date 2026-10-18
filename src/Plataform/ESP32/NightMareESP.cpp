@@ -241,9 +241,8 @@ void introNightMareESP()
 #endif
 }
 
-// The application binds its resources before calling this, which is why the
-// cleanup retry is installed here: withdrawal can only reach resources that are
-// already declared.
+// Bind enlisted application Resources before installing the cleanup retry:
+// withdrawal can only reach Resources declared by the current firmware.
 void startNightMareESP()
 {
     gDeviceIdentity.begin();

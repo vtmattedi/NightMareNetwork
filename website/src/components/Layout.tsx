@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { Head } from "vite-react-ssg";
+import { Menu, Moon, Sun, X } from "lucide-react";
 import { Logo } from "./Logo";
+import { MwLogo } from "./MwLogo";
 
 const GITHUB = "https://github.com/vtmattedi/NightMareNetwork";
 
@@ -50,8 +52,8 @@ export function Layout() {
               NightMare<span className="brand-dim"> Network</span>
             </span>
           </Link>
-          <button className="menu-btn" aria-expanded={open} aria-controls="nav" onClick={() => setOpen((o) => !o)}>
-            Menu
+          <button className="menu-btn" aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="nav" onClick={() => setOpen((o) => !o)}>
+            {open ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
           </button>
           <nav id="nav" className={"nav" + (open ? " open" : "")}>
             <NavLink to="/docs/getting-started">Get started</NavLink>
@@ -60,8 +62,9 @@ export function Layout() {
             <NavLink to="/docs/modules/resources">Modules</NavLink>
             <NavLink to="/docs/mcp" className="nav-mcp">MCP</NavLink>
             <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-            <button className="theme-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
-              {theme === "dark" ? "Light" : "Dark"}
+            <button className="theme-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
+              <Sun className="theme-icon theme-sun" size={19} aria-hidden="true" />
+              <Moon className="theme-icon theme-moon" size={19} aria-hidden="true" />
             </button>
           </nav>
         </div>
@@ -72,7 +75,7 @@ export function Layout() {
       <footer className="foot">
         <div className="wrap foot-inner">
           <span>
-            <Logo size={18} className="foot-logo" /> a <a href="https://mattediworks.com">Mattedi Works</a> project
+            <MwLogo size={18} className="foot-logo" /> a <a href="https://mattediworks.com">Mattedi Works</a> project
           </span>
           <span>
             <a href={GITHUB}>Source on GitHub</a> · <Link to="/docs/mcp">MCP endpoint</Link> · MIT
