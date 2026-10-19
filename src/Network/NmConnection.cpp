@@ -13,6 +13,12 @@
 #include <Network/NmMessageRouter.h>
 #include <Network/Connectivity.h>
 #include <Network/GatewayCandidate.h>
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadioService.h>
+#endif
+#if NM_ENABLE_WIFI
+#include <Network/WiFiIP/NmWifiService.h>
+#endif
 #if NM_ENABLE_MQTT
 #include <Network/MQTT/NmMqttConnection.h>
 #endif
@@ -57,6 +63,64 @@ namespace NightMare
         bool resourceConnectionAttached = false;
         bool coordinatorBegun = false;
         std::atomic<ConnectHandler> applicationConnectHandler{nullptr};
+        std::atomic<NetworkStatusHandler> applicationNetworkStatusHandler{nullptr};
+        constexpr size_t NetworkLayerCount = 4;
+        // Last state reported per layer. STOPPED is 0, the state every layer starts in.
+        std::atomic<uint8_t> lastLayerState[NetworkLayerCount] = {};
+
+        ConnectivityState currentLayerState(NetworkLayer layer)
+        {
+            switch (layer)
+            {
+            case NetworkLayer::WIFI_RADIO:
+#if NM_ENABLE_WIFI_RADIO
+                return WiFiRadio_state();
+#else
+                break;
+#endif
+            case NetworkLayer::WIFI_IP:
+#if NM_ENABLE_WIFI
+                return WiFiIP_state();
+#else
+                break;
+#endif
+            case NetworkLayer::MQTT:
+#if NM_ENABLE_MQTT
+                return Mqtt_state();
+#else
+                break;
+#endif
+            case NetworkLayer::ESP_NOW:
+#if NM_NETWORK_ESPNOW
+                return EspNow_state();
+#else
+                break;
+#endif
+            }
+            return ConnectivityState::STOPPED;
+        }
+
+        // Compares every layer with what was last reported and calls the handler for each
+        // that moved. The exchange makes each transition reported exactly once even when
+        // two tasks get here at the same time.
+        void reportNetworkStatus()
+        {
+            const NetworkStatusHandler handler = applicationNetworkStatusHandler.load();
+            for (size_t i = 0; i < NetworkLayerCount; ++i)
+            {
+                const NetworkLayer layer = static_cast<NetworkLayer>(i);
+                const ConnectivityState state = currentLayerState(layer);
+                const ConnectivityState previous = static_cast<ConnectivityState>(
+                    lastLayerState[i].exchange(static_cast<uint8_t>(state)));
+                if (handler == nullptr || state == previous)
+                    continue;
+                const NetworkStatusEvent event = {
+                    layer, state, previous,
+                    state == (layer == NetworkLayer::WIFI_RADIO ? ConnectivityState::READY
+                                                                : ConnectivityState::CONNECTED)};
+                handler(event);
+            }
+        }
         std::atomic<MessageHandler> applicationMessageHandler{nullptr};
 
         // PublishTextWhenConnected() backlog, flushed on every connect whatever the
@@ -384,6 +448,26 @@ namespace NightMare
         applicationMessageHandler.store(handler);
     }
 
+    void OnNetworkStatus(NetworkStatusHandler handler)
+    {
+        // Layers already running report their next change, not the state they are in.
+        for (size_t i = 0; i < NetworkLayerCount; ++i)
+            lastLayerState[i].store(static_cast<uint8_t>(currentLayerState(static_cast<NetworkLayer>(i))));
+        applicationNetworkStatusHandler.store(handler);
+    }
+
+    const char *NetworkLayerName(NetworkLayer layer)
+    {
+        switch (layer)
+        {
+        case NetworkLayer::WIFI_RADIO: return "WIFI_RADIO";
+        case NetworkLayer::WIFI_IP: return "WIFI_IP";
+        case NetworkLayer::MQTT: return "MQTT";
+        case NetworkLayer::ESP_NOW: return "ESP_NOW";
+        }
+        return "UNKNOWN";
+    }
+
     bool SelectConnection(ConnectionType connection)
     {
         if (connection != ConnectionType::AUTO && !connectionEnabled(connection))
@@ -496,6 +580,7 @@ namespace NightMare
     {
         reevaluateRouting();
         requestNetworkTelemetry();
+        reportNetworkStatus();
     }
 
     bool DispatchApplicationMessage(const char *topic, const uint8_t *payload,

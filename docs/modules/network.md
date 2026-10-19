@@ -134,6 +134,35 @@ view: `transport`, `wifi_radio`, `wifi_ip`, `esp_now`, `mqtt`, and
 failure does not change connectivity state. Duplicate refresh requests are
 coalesced by `SystemState`.
 
+### Application status handler
+
+```cpp
+void onNetwork(const NightMare::NetworkStatusEvent &event)
+{
+    LOG("App", "%s %s -> %s", NightMare::NetworkLayerName(event.layer),
+        NightMare::ConnectivityStateName(event.previous),
+        NightMare::ConnectivityStateName(event.state));
+}
+
+NightMare::OnNetworkStatus(onNetwork);
+```
+
+`OnNetworkStatus()` installs one handler (a later call replaces it, `nullptr`
+removes it) for the four layers `WIFI_RADIO`, `WIFI_IP`, `MQTT` and `ESP_NOW`.
+It is called once per state change of a layer with the layer, the new and
+previous `ConnectivityState`, and `up`: the radio is `READY`, or the IP link,
+MQTT or ESP-NOW is `CONNECTED`. A layer that is not compiled in never reports.
+The handler costs one pointer and no heap; the event lives on the caller's
+stack.
+
+It runs directly on the task that caused the change (the Wi-Fi monitor, MQTT
+or ESP-NOW task, or the application loop), from the same hook that refreshes
+telemetry. Keep it short, never block, guard state shared with the
+application, and do not start or stop network services from it. Layers already
+running when it is installed report only their next change. The handler sees
+the states the services publish, so a transition a service never publishes
+(for example a radio start failure) is not reported.
+
 ## Gateway candidate and sticky fallback
 
 NMNW subscribes to retained `+/gateway/network` announcements. A candidate is
