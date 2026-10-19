@@ -278,7 +278,7 @@ void setup()
                                           configCallbackValue == 0;
     JsonDocument configList;
     const bool configListDecoded =
-        !deserializeJson(configList, configManager().handle("list"));
+        !deserializeJson(configList, configManager().handle("list json"));
     bool currentStateListed = false;
     for (JsonObjectConst item : configList.as<JsonArrayConst>())
         if (item["name"].as<std::string>() == "callback_config")

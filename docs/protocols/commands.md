@@ -50,7 +50,8 @@ No space after `>` selects an internal ResourceManager operation:
 >raw <topic> [payload]
 ```
 
-`>list` returns the manager's currently bound Resources as JSON.
+`>list` returns the manager's currently bound Resources as a text table
+(`KIND`, `NAME`, `TYPE`, `OWNER`, `VALUE`).
 
 `>manifest json` returns the readable manifest. `>manifest msgpack` republishes
 the retained compact manifest and returns `Republished.` because raw
@@ -386,6 +387,20 @@ Response:
 
 ```text
 PONG
+```
+
+## STATUS
+
+```text
+STATUS
+```
+
+One-line summary of the device: name, active/state and preferred connection (when
+`NM_ENABLE_NETWORK`), Wi-Fi IP (when `NM_ENABLE_WIFI`, `-` if not connected), uptime and
+firmware version.
+
+```text
+name=adler connection=ESP_NOW/CONNECTED preferred=ESP_NOW ip=192.168.1.40 uptime=0h12m05s fw=1.4.2
 ```
 
 ## REBOOT
@@ -776,9 +791,11 @@ longer exposes the generic `PersistentSettings` store.
 
 ```text
 CONFIG LIST
+CONFIG LIST JSON
 ```
 
-Returns compact JSON containing each Config's name, wire type,
+`CONFIG LIST` returns a text table (`TYPE`, `NAME`, `REBOOT`, `VALUE`), one
+Config per row. `CONFIG LIST JSON` returns compact JSON containing each Config's name, wire type,
 `require_reboot` metadata, and current canonical std::string value:
 
 ```json

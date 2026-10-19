@@ -756,6 +756,32 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
     {
         result.response = "PONG";
     }
+    else if (parsedMsg.command == "STATUS")
+    {
+        // One line, for a glance at the console: who, how it is connected, where, since when.
+        const uint32_t uptimeS = NightMare::Platform::monotonicMillis() / 1000;
+        char uptime[24];
+        std::snprintf(uptime, sizeof(uptime), "%luh%02lum%02lus",
+                      static_cast<unsigned long>(uptimeS / 3600),
+                      static_cast<unsigned long>(uptimeS / 60 % 60),
+                      static_cast<unsigned long>(uptimeS % 60));
+        result.response = "name=" + gDeviceIdentity.getDeviceName();
+#if NM_ENABLE_NETWORK
+        result.response += std::string(" connection=") +
+                           NightMare::ConnectionTypeName(NightMare::GetActiveConnection()) + "/" +
+                           NightMare::ConnectionStateName(NightMare::GetConnectionState()) +
+                           " preferred=" +
+                           NightMare::ConnectionTypeName(NightMare::GetPreferredConnection());
+#endif
+#if NM_ENABLE_WIFI
+        const NightMare::WiFiInfo wifi = WiFi_info();
+        result.response += " ip=" + (wifi.state == NightMare::WiFiState::CONNECTED && !wifi.ip.empty()
+                                         ? wifi.ip
+                                         : std::string("-"));
+#endif
+        result.response += std::string(" uptime=") + uptime + " fw=" + NM_FIRMWARE_VERSION;
+        result.result = true;
+    }
     else if (parsedMsg.command == "REBOOT")
     {
         esp_restart();
@@ -1369,9 +1395,11 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 }
 
 #if NM_CONSOLE_SERIAL
+#if defined(ARDUINO)
+#include <Arduino.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
-#if !defined(ARDUINO)
 #include <sdkconfig.h>
 #if CONFIG_ESP_CONSOLE_UART
 #include <driver/uart.h>
@@ -1379,18 +1407,21 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 #endif
 #endif
 
-/// @brief Polls ESP-IDF standard input and resolves each complete command line.
-/// On a UART console it first installs that UART's driver (unless the
-/// application already did) and routes stdin through it, so input is buffered
-/// between calls rather than left to the hardware FIFO.
+/// @brief Polls the console and resolves each complete command line.
+/// Arduino frameworks read the Arduino `Serial` object, which is whatever the
+/// core routes it to (UART, HWCDC or USB CDC). Otherwise this polls ESP-IDF
+/// standard input, and on a UART console first installs that UART's driver
+/// (unless the application already did) and routes stdin through it, so input
+/// is buffered between calls rather than left to the hardware FIFO.
 void NightMareCommand_SerialResolver()
 {
     static std::string command;
+#if !defined(ARDUINO)
     static bool configured = false;
     static bool enabled = false;
     if (!configured)
     {
-#if !defined(ARDUINO) && CONFIG_ESP_CONSOLE_UART
+#if CONFIG_ESP_CONSOLE_UART
         // Without a driver, stdin polls the UART's 128-byte hardware FIFO, which
         // a pasted line overruns between ticks. The driver's ISR buffers input
         // instead, and the VFS has to read through it: an installed driver that
@@ -1411,7 +1442,22 @@ void NightMareCommand_SerialResolver()
         return;
     char next;
     while (read(STDIN_FILENO, &next, 1) == 1)
+#else
+    // The Arduino core allocates the RX buffer in begin(): until then available() is -1 and
+    // nothing is ever read. Start Serial if the application has not.
+    static bool started = false;
+    if (!started)
     {
+        if (!Serial)
+            Serial.begin(115200);
+        started = true;
+    }
+    while (Serial.available() > 0)
+#endif
+    {
+#if defined(ARDUINO)
+        const char next = static_cast<char>(Serial.read());
+#endif
         if (next == '\n' || next == '\r')
         {
             NightMare::Text::trim(command);
@@ -1420,7 +1466,11 @@ void NightMareCommand_SerialResolver()
                 NightMareResults result = handleNightMareCommand(
                     command, NightmareContext(NM_CMD_SRC_SERIAL, "Serial"));
                 if (result.context.msgSource != NM_CMD_ANS_DO_NOT_RESPOND)
+#if defined(ARDUINO)
+                    Serial.println(result.response.c_str());
+#else
                     std::printf("%s\n", result.response.c_str());
+#endif
             }
             command.clear();
             continue;

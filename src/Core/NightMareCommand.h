@@ -67,7 +67,8 @@ NightMareMessage parseNightMareMessage2(const std::string &message);
 NightMareResults handleNightMareCommand(const std::string &message, NightmareContext context = NightmareContext());
 
 #if NM_CONSOLE_SERIAL
-/// @brief Reads pending console bytes from ESP-IDF standard input and resolves complete lines.
+/// @brief Reads pending console bytes and resolves complete lines: from Arduino `Serial` on
+/// Arduino frameworks, from ESP-IDF standard input otherwise.
 void NightMareCommand_SerialResolver();
 #endif
 #endif // NM_ENABLE_CONSOLE

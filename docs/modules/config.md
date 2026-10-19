@@ -125,6 +125,7 @@ The common command path accepts:
 
 ```text
 CONFIG LIST
+CONFIG LIST JSON
 CONFIG GET max_door_open_time
 CONFIG SET max_door_open_time 300000
 CONFIG MANIFEST
@@ -135,12 +136,15 @@ whose direct API accepts the same command without the prefix:
 
 ```text
 list
+list json
 get max_door_open_time
 set max_door_open_time 300000
 manifest
 ```
 
-`list` returns compact JSON containing declaration metadata and each Config's
+`list` returns a text table with the columns `TYPE`, `NAME`, `REBOOT` and
+`VALUE`, one Config per row, like `>list` does for Resources. `list json`
+returns compact JSON containing declaration metadata and each Config's
 current value in its canonical `NetCodec<T>` std::string form. `get` returns that
 same encoded value for one Config. `set` treats everything after the name
 separator as the payload. `manifest` returns Base64 of the declaration-only

@@ -1756,21 +1756,26 @@ ActionResult ResourcesManager::listResources() const
     {
         return resource.name_.length() == 0 ? std::string("<unnamed>") : resource.name_;
     };
-    auto shortNameIsAmbiguous = [this](const NetResource &candidate) -> bool
+    auto displayOwner = [](const NetResource &resource) -> std::string
     {
-        if (candidate.name_.length() == 0)
-            return false;
-        int matches = 0;
-        for (int i = 0; i < resourceCount_; ++i)
-            if (resources_[i]->name_ == candidate.name_ && ++matches > 1)
-                return true;
-        return false;
+        if (resource.isOwned())
+            return std::string("self");
+        const std::string &owner = resolveResourceOwner(resource);
+        return owner.length() == 0 ? std::string("-") : owner;
     };
-    auto displayValue = [&shortNameIsAmbiguous](const NetResource &resource) -> std::string
+    // The value type of a Value, the payload type of an Event; an Action has neither.
+    auto displayPayloadType = [](const NetResource &resource) -> std::string
+    {
+        if (resource.kind_ == NetResourceType::VALUE)
+            return valueTypeName(static_cast<const NetValueResource &>(resource).valueType_);
+        if (resource.kind_ == NetResourceType::EVENT)
+            return valueTypeName(static_cast<const NetEventResource &>(resource).payloadType_);
+        return "-";
+    };
+    auto displayValue = [](const NetResource &resource) -> std::string
     {
         // An event has no value to show, only its role, where a Remote one
-        // listens, and when it last happened. The source stands in for the
-        // "@owner" disambiguation below.
+        // listens, and when it last happened.
         if (resource.kind_ == NetResourceType::EVENT)
         {
             std::string description = resource.isOwned() ? "managed" : "remote";
@@ -1803,17 +1808,13 @@ ActionResult ResourcesManager::listResources() const
             NightMare::Text::replaceAll(value, "\n", "\\n");
             NightMare::Text::replaceAll(value, "\t", "\\t");
         }
-        if (!resource.isOwned() && shortNameIsAmbiguous(resource) &&
-            resource.ownerDevice_.deviceName.length() != 0)
-        {
-            value += " @";
-            value += resource.ownerDevice_.deviceName;
-        }
         return value;
     };
 
     size_t typeWidth = 4;
     size_t nameWidth = 4;
+    size_t payloadWidth = 4;
+    size_t ownerWidth = 5;
     for (int i = 0; i < resourceCount_; ++i)
     {
         const NetResource &resource = *resources_[i];
@@ -1823,6 +1824,12 @@ ActionResult ResourcesManager::listResources() const
             typeWidth = typeLength;
         if (nameLength > nameWidth)
             nameWidth = nameLength;
+        const size_t payloadLength = displayPayloadType(resource).length();
+        if (payloadLength > payloadWidth)
+            payloadWidth = payloadLength;
+        const size_t ownerLength = displayOwner(resource).length();
+        if (ownerLength > ownerWidth)
+            ownerWidth = ownerLength;
     }
 
     std::string response;
@@ -1832,9 +1839,13 @@ ActionResult ResourcesManager::listResources() const
         for (size_t i = text.length(); i < width; ++i)
             response += ' ';
     };
-    appendColumn("TYPE", typeWidth);
+    appendColumn("KIND", typeWidth);
     response += "  ";
     appendColumn("NAME", nameWidth);
+    response += "  ";
+    appendColumn("TYPE", payloadWidth);
+    response += "  ";
+    appendColumn("OWNER", ownerWidth);
     response += "  VALUE";
     for (int i = 0; i < resourceCount_; ++i)
     {
@@ -1843,6 +1854,10 @@ ActionResult ResourcesManager::listResources() const
         appendColumn(kindName(resource.kind_), typeWidth);
         response += "  ";
         appendColumn(displayName(resource), nameWidth);
+        response += "  ";
+        appendColumn(displayPayloadType(resource), payloadWidth);
+        response += "  ";
+        appendColumn(displayOwner(resource), ownerWidth);
         response += "  ";
         response += displayValue(resource);
         if (response.length() > MaxManifestLength)

@@ -47,7 +47,10 @@ private:
     bool restoreOne(ConfigBase &config);
     bool persist(ConfigBase *config, const std::string &encodedValue);
     bool serializeManifest(std::string &payload) const;
+    /// Text table, one Config per row: TYPE NAME REBOOT VALUE.
     std::string list() const;
+    /// Compact JSON array with the same information, for machine consumers.
+    std::string listJson() const;
 
     ConfigBase *configs_[ConfigManagerMaxConfigs] = {};
     size_t configCount_ = 0;

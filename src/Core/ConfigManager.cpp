@@ -217,6 +217,53 @@ bool ConfigManager::restore()
 
 std::string ConfigManager::list() const
 {
+    auto displayValue = [](const ConfigBase &config) -> std::string
+    {
+        std::string value = config.encodedValue();
+        NightMare::Text::replaceAll(value, "\r", "\r");
+        NightMare::Text::replaceAll(value, "\n", "\n");
+        NightMare::Text::replaceAll(value, "\t", "\t");
+        return value;
+    };
+
+    size_t typeWidth = 4;
+    size_t nameWidth = 4;
+    for (size_t i = 0; i < configCount_; ++i)
+    {
+        const ConfigBase &config = *configs_[i];
+        const size_t typeLength = strlen(valueTypeName(config.valueType_));
+        if (typeLength > typeWidth)
+            typeWidth = typeLength;
+        if (config.name_.length() > nameWidth)
+            nameWidth = config.name_.length();
+    }
+
+    std::string output;
+    auto appendColumn = [&output](const std::string &text, size_t width)
+    {
+        output += text;
+        for (size_t i = text.length(); i < width; ++i)
+            output += ' ';
+    };
+    appendColumn("TYPE", typeWidth);
+    output += "  ";
+    appendColumn("NAME", nameWidth);
+    output += "  REBOOT  VALUE";
+    for (size_t i = 0; i < configCount_; ++i)
+    {
+        const ConfigBase &config = *configs_[i];
+        output += '\n';
+        appendColumn(valueTypeName(config.valueType_), typeWidth);
+        output += "  ";
+        appendColumn(config.name_, nameWidth);
+        output += config.requireReboot_ ? "  yes     " : "  -       ";
+        output += displayValue(config);
+    }
+    return output;
+}
+
+std::string ConfigManager::listJson() const
+{
     JsonDocument doc;
     JsonArray items = doc.to<JsonArray>();
     for (size_t i = 0; i < configCount_; ++i)
@@ -241,11 +288,23 @@ std::string ConfigManager::handle(const std::string &command)
     std::string action = commandToken(command, position);
     NightMare::Text::toLower(action);
 
+    // Same trace as the Resource manager's. A set payload can be a credential, so only
+    // the target is logged, never the value.
+    if (action == "set" || action == "get")
+    {
+        size_t preview = position;
+        LOG("CM", "Executing command: '%s %s'", action.c_str(), commandToken(command, preview).c_str());
+    }
+    else
+        LOG("CM", "Executing command: '%s'", command.c_str());
+
     if (action == "list")
     {
-        if (!onlyCommandSpace(command, position))
-            return "ERROR: usage: list";
-        return list();
+        std::string format = commandToken(command, position);
+        NightMare::Text::toLower(format);
+        if (!onlyCommandSpace(command, position) || (format.length() != 0 && format != "json"))
+            return "ERROR: usage: list [json]";
+        return format.length() == 0 ? list() : listJson();
     }
 
     if (action == "manifest")

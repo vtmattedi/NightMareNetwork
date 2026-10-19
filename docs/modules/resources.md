@@ -1017,14 +1017,17 @@ No space after `>` selects an operation owned by the manager itself:
 ```
 
 `>list` returns a text table of the currently bound Resources with the columns
-`TYPE` (the kind), `NAME` and `VALUE`:
+`KIND` (value, event or action), `NAME`, `TYPE` (the value type of a Value or
+the payload type of an Event, `-` for an Action), `OWNER` (`self` for a Resource
+this device owns, otherwise the owning device, `-` when a Remote Resource has no
+owner configured) and `VALUE`:
 
 ```text
-TYPE    NAME           VALUE
-value   temperature    21.5
-action  reboot_ctrl    -
-event   acoustic:beep  managed last_update_ms=182345
-event   beep           remote source=Watson/acoustic:beep last_update_ms=0
+KIND    NAME           TYPE    OWNER   VALUE
+value   temperature    float   self    21.5
+action  reboot_ctrl    -       self    -
+event   acoustic:beep  string  self    managed last_update_ms=182345
+event   beep           string  Watson  remote source=Watson/acoustic:beep last_update_ms=0
 ```
 
 A Value shows its effective current value (or `<unavailable>`), an Action `-`.
