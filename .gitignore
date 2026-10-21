@@ -15,4 +15,6 @@ mcp/dist/
 .env
 .env.*
 !.env.example
-a.py
+*/.pio
+new/
+.claude/
