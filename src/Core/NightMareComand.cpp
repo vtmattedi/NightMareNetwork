@@ -758,28 +758,57 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
     }
     else if (parsedMsg.command == "STATUS")
     {
-        // One line, for a glance at the console: who, how it is connected, where, since when.
+        // A list a person reads on a console or over any text channel: one fact per
+        // row, as the response of a single command.
+        std::string text;
+        auto row = [&text](const char *label, const std::string &value)
+        {
+            if (!text.empty())
+                text += '\n';
+            text += label;
+            for (size_t i = std::strlen(label); i < 12; ++i)
+                text += ' ';
+            text += value;
+        };
+        text = "STATUS";
+        text.append(6, ' ');
+        text += "VALUE";
+
         const uint32_t uptimeS = NightMare::Platform::monotonicMillis() / 1000;
         char uptime[24];
         std::snprintf(uptime, sizeof(uptime), "%luh%02lum%02lus",
                       static_cast<unsigned long>(uptimeS / 3600),
                       static_cast<unsigned long>(uptimeS / 60 % 60),
                       static_cast<unsigned long>(uptimeS % 60));
-        result.response = "name=" + gDeviceIdentity.getDeviceName();
-#if NM_ENABLE_NETWORK
-        result.response += std::string(" connection=") +
-                           NightMare::ConnectionTypeName(NightMare::GetActiveConnection()) + "/" +
-                           NightMare::ConnectionStateName(NightMare::GetConnectionState()) +
-                           " preferred=" +
-                           NightMare::ConnectionTypeName(NightMare::GetPreferredConnection());
+        row("name", gDeviceIdentity.getDeviceName());
+        row("firmware", NM_FIRMWARE_VERSION);
+        row("uptime", uptime);
+        row("free heap", std::to_string(esp_get_free_heap_size()) + " bytes");
+#if NM_ENABLE_WIFI_RADIO
+        row("wifi radio", NightMare::ConnectivityStateName(NightMare::WiFiRadio_state()));
 #endif
 #if NM_ENABLE_WIFI
-        const NightMare::WiFiInfo wifi = WiFi_info();
-        result.response += " ip=" + (wifi.state == NightMare::WiFiState::CONNECTED && !wifi.ip.empty()
-                                         ? wifi.ip
-                                         : std::string("-"));
+        {
+            const NightMare::WiFiInfo wifi = WiFi_info();
+            std::string value = NightMare::ConnectivityStateName(NightMare::WiFiIP_state());
+            if (wifi.state == NightMare::WiFiState::CONNECTED)
+                value += " " + wifi.ip + " (" + wifi.ssid + ", " + std::to_string(wifi.rssi) + " dBm)";
+            row("wifi ip", value);
+        }
 #endif
-        result.response += std::string(" uptime=") + uptime + " fw=" + NM_FIRMWARE_VERSION;
+#if NM_ENABLE_MQTT
+        row("mqtt", std::string(NightMare::ConnectivityStateName(NightMare::Mqtt_state())) + " (" +
+                        NightMare::MqttProfileName(NightMare::Mqtt_profile()) + ")");
+#endif
+#if NM_NETWORK_ESPNOW
+        row("esp-now", NightMare::ConnectivityStateName(NightMare::EspNow_state()));
+#endif
+#if NM_ENABLE_NETWORK
+        row("active", std::string(NightMare::ConnectionTypeName(NightMare::GetActiveConnection())) + " (" +
+                          NightMare::ConnectionStateName(NightMare::GetConnectionState()) + ")");
+        row("preferred", NightMare::ConnectionTypeName(NightMare::GetPreferredConnection()));
+#endif
+        result.response = text;
         result.result = true;
     }
     else if (parsedMsg.command == "REBOOT")
