@@ -395,13 +395,26 @@ PONG
 STATUS
 ```
 
-One-line summary of the device: name, active/state and preferred connection (when
-`NM_ENABLE_NETWORK`), Wi-Fi IP (when `NM_ENABLE_WIFI`, `-` if not connected), uptime and
-firmware version.
+A human-readable list, one fact per row, returned as the single text response of the
+command (so it reads the same on the serial console and over any text channel). Rows for
+a layer that is not compiled in are omitted.
 
 ```text
-name=adler connection=ESP_NOW/CONNECTED preferred=ESP_NOW ip=192.168.1.40 uptime=0h12m05s fw=1.4.2
+STATUS      VALUE
+name        adler
+firmware    1.4.2
+uptime      0h12m05s
+free heap   182340 bytes
+wifi radio  READY
+wifi ip     CONNECTED 192.168.1.40 (Home, -52 dBm)
+mqtt        CONNECTED (REMOTE)
+esp-now     CONNECTED
+active      ESP_NOW (CONNECTED)
+preferred   ESP_NOW
 ```
+
+The layer rows show the same `ConnectivityState` names that `OnNetworkStatus()` reports.
+For the JSON forms use `INFO` and `NETWORK GET`.
 
 ## REBOOT
 
