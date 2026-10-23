@@ -313,7 +313,9 @@ void setup()
 store no reconnect state. Firmware therefore owns its filter list and installs
 it again from `OnConnect()`. Framework owners follow the same event-driven
 pattern internally. Messages not consumed by a framework route are delivered
-to the handler registered with `NightMare::OnMessage()`.
+to the handler registered with `NightMare::OnMessage()`. Another device's
+manifest, `/state` and `/event` are delivered there too, also when the
+Resource Manager read them for a Remote Resource.
 
 The connection boundary validates:
 

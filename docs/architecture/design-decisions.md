@@ -159,17 +159,27 @@ radio channel.
 ## Generic application ingress runs after framework routing
 
 **Decision:** applications register one binary-safe message handler through
-`NightMare::OnMessage`. `NmMessageRouter` invokes it only when Resource, time,
-console, and other enabled framework routes decline the message.
+`NightMare::OnMessage`. `NmMessageRouter` invokes it when Resource, time,
+console, and other enabled framework routes decline the message, and also
+after the Resource Manager has read another device's manifest, `/state` or
+`/event`.
 
 **Reason:** applications need custom subscribed topics without depending on an
-MQTT driver or on the internal router, while framework protocol messages must
-have one owner and must not leak into unrelated application handling.
+MQTT driver or on the internal router. A request addressed to this device
+(`/set`, `/invoke`, console) must have one owner, so it never reaches the
+application. Another device's documents are observations, not requests: the
+Resource Manager reading them for a bound Remote Resource must not hide them
+from an application watching the network. A dashboard binding Remotes to a
+device otherwise lost that device's manifest and the states of exactly the
+Resources it showed.
 
-**Consequence:** recognized framework traffic is consumed even when its
-operation is malformed or rejected. The application handler sees only
-unconsumed traffic, receives the active connection's retained flag, and
-replaces any previously registered handler.
+**Consequence:** recognized traffic addressed to this device is consumed even
+when its operation is malformed or rejected. Another device's manifests,
+states and events reach the application whether or not the Resource Manager
+also read them, including ones arriving only because the manager subscribed
+for a Remote Resource; the handler filters what it does not want. The handler
+receives the active connection's retained flag and replaces any previously
+registered handler.
 
 ## A manifest describes; `/state` tells the truth
 

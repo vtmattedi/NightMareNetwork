@@ -951,9 +951,9 @@ A Remote Event subscribes to its owner's exact `/event` topic. For each message:
 
 Every valid message calls `onEvent`, including consecutive identical payloads.
 A payload that is empty, oversized or fails to decode is dropped: `onEvent` is
-not called and `lastUpdateMs()` does not change. The message is still consumed
-by the Resource Manager, so it does not reach the application's generic MQTT
-callback.
+not called and `lastUpdateMs()` does not change. Like every message about
+another device, it is still passed to the application's generic
+`NightMare::OnMessage` handler afterwards, unchanged.
 
 The transport's retain flag is part of ingress, and the protocol enforces the
 no-replay rule itself rather than trusting publishers:
@@ -966,8 +966,9 @@ no-replay rule itself rather than trusting publishers:
 A retained `/event` message (from a buggy client, old firmware or a manual
 publish) would be replayed by the broker to every new subscription, so
 delivering it would turn a reconnect into a phantom occurrence. The Resource
-Manager consumes it, logs a warning, and neither calls `onEvent` nor changes
-`lastUpdateMs()`. It does not reach the application's generic MQTT callback.
+Manager logs a warning and neither calls `onEvent` nor changes
+`lastUpdateMs()`. The application's generic `NightMare::OnMessage` handler
+still receives it with its retained flag set, so it can tell the difference.
 
 A Managed Event never receives `/event` traffic, so its own publications are
 not routed back to it.

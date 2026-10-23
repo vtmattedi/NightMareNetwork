@@ -1356,9 +1356,12 @@ firmware-owned topic filters from that callback. `Subscribe()` and
 filters for reconnect.
 
 `OnMessage()` replaces the single application message handler, or unregisters
-it when passed `nullptr`. The handler receives only messages left unconsumed by
-enabled framework routes. Its topic and payload pointers remain valid for the
-duration of the callback.
+it when passed `nullptr`. The handler receives messages left unconsumed by
+enabled framework routes, plus every other device's manifest, `/state` and
+`/event` the Resource Manager reads, which includes topics the manager
+subscribed itself for a Remote Resource. Requests addressed to this device
+(`/set`, `/invoke`, console) are never delivered. Its topic and payload
+pointers remain valid for the duration of the callback.
 
 ## MQTT service and implementation limits
 

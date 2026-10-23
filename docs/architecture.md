@@ -220,8 +220,11 @@ It works with full MQTT topics and does not perform Resource semantics.
 Resource traffic is offered to `ResourcesManager` first. Other framework-owned traffic such as time synchronization and console commands is handled there as enabled.
 
 Traffic not consumed internally is offered to the generic application
-`NightMare::OnMessage` handler. The callback belongs to the connection boundary,
-so applications do not depend on the router or an MQTT-specific ingress API.
+`NightMare::OnMessage` handler, and so is another device's manifest, `/state`
+or `/event` after `ResourcesManager` has read it: only requests addressed to
+this device are consumed exclusively. The callback belongs to the connection
+boundary, so applications do not depend on the router or an MQTT-specific
+ingress API.
 
 ## Retained state model
 

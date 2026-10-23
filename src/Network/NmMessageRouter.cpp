@@ -131,9 +131,14 @@ bool handleMessage(const std::string &fullTopic, const std::string &payload, boo
 {
     if (NightMare::GatewayCandidateHandleMessage(fullTopic, payload, retained))
         return true;
+    std::string relative;
+    const bool addressedHere = gDeviceIdentity.relativeTopic(fullTopic, relative);
     // The resource manager accepts owned /set and /invoke requests, as well as
-    // manifests and states from other devices. It sees full topics in both cases.
-    if (gResourcesManager.handleIngressMessage(fullTopic, payload, retained))
+    // manifests, states and events from other devices. It sees full topics in
+    // both cases. Only a request addressed to this device ends here: another
+    // device's traffic is an observation, and an application watching the
+    // network (a dashboard, an explorer) must still see it.
+    if (gResourcesManager.handleIngressMessage(fullTopic, payload, retained) && addressedHere)
         return true;
 
 #if NM_ENABLE_TIME_SYNC
@@ -142,8 +147,6 @@ bool handleMessage(const std::string &fullTopic, const std::string &payload, boo
 #endif
 
 #if NM_ENABLE_CONSOLE
-    std::string relative;
-    const bool addressedHere = gDeviceIdentity.relativeTopic(fullTopic, relative);
     if (fullTopic == "all/console/in" || (addressedHere && relative == "console/in"))
     {
         runCommand(payload, gDeviceIdentity.topic("console/out"));
