@@ -43,6 +43,9 @@ static NightMare::MessageVault s_vault;
 static bool s_mqttStarted = false;
 static std::string s_lastPublishedClients;
 static std::string s_lastPublishedNetwork;
+// Set when something cleared our own retained status or network topic on the
+// broker; publishGatewayProjection() then reasserts both.
+static std::atomic<bool> s_projectionStale{false};
 static GatewayRecovery s_gatewayRecovery;
 static std::atomic<NightMareGatewayState> s_gatewayState{NightMareGatewayState::Stopped};
 static std::atomic<bool> s_enabled{true}; // cleared by "gateway off", see NightMareGateway_enable()
@@ -387,6 +390,16 @@ void onMessage(const NightMare::Device *device, NightMare::Message message)
         }
     }
 
+    // Our own retained presence was tombstoned (manual clear, "erase all
+    // retained", a broker that lost its store). Reassert it instead of waiting
+    // for the next reconnect.
+    if (device == nullptr && message.persistent && message.payload.empty() &&
+        (message.topic == GatewayState::statusTopic() || message.topic == GatewayState::networkTopic()))
+    {
+        s_projectionStale.store(true, std::memory_order_release);
+        return;
+    }
+
     // A retained broker status is older than a live authenticated ESP-NOW
     // session. Never let an offline replay overwrite the gateway-owned truth.
     if (device == nullptr && message.persistent && topicMatchesPattern(message.topic, "+/status"))
@@ -533,6 +546,9 @@ static void reportLink(void)
 }
 
 #if NM_GATEWAY_MQTT
+#ifndef GATEWAY_REASSERT_INTERVAL_MS
+#define GATEWAY_REASSERT_INTERVAL_MS 60000u
+#endif
 static void publishGatewayProjection()
 {
     if (!mqtt_is_connected())
@@ -542,6 +558,21 @@ static void publishGatewayProjection()
     const std::string clients = GatewayState::clientsJson(devices);
     if (clients != s_lastPublishedClients && mqtt_publish(retainedMessage(GatewayState::clientsTopic(), clients)))
         s_lastPublishedClients = clients;
+    // The broker copy of status/network can vanish without us noticing, so
+    // also reassert both periodically.
+    static uint32_t s_lastReassertMs = 0;
+    const uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000);
+    const bool stale = s_projectionStale.load(std::memory_order_acquire);
+    const bool due = nowMs - s_lastReassertMs >= GATEWAY_REASSERT_INTERVAL_MS;
+    if (stale || due)
+    {
+        if (mqtt_publish(retainedMessage(GatewayState::statusTopic(), GatewayState::statusJson(true))))
+        {
+            s_lastReassertMs = nowMs;
+            s_projectionStale.store(false, std::memory_order_release);
+            s_lastPublishedNetwork.clear(); // force the network republish below
+        }
+    }
     const std::string network = GatewayState::networkJson(true);
     if (network != s_lastPublishedNetwork && mqtt_publish(retainedMessage(GatewayState::networkTopic(), network)))
         s_lastPublishedNetwork = network;

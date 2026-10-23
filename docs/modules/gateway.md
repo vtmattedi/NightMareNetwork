@@ -166,6 +166,13 @@ subscribes to `#`. Consequently retained broker replay cannot precede the
 gateway-owned truth. A retained device status from MQTT is ignored while the
 same named device has a live authenticated ESP-NOW session.
 
+The gateway keeps its own `status` and `gateway/network` present for as long as
+it is connected. It sees an empty retained publish on either topic (a manual
+clear, the backend's "Erase all retained", a broker that lost its store) and
+republishes both on its next tick. It also reasserts both every
+`GATEWAY_REASSERT_INTERVAL_MS` (default 60000), so a clear it could not observe
+is repaired within a minute.
+
 Every bridge also implements the backend recovery projection. It caches
 retained client snapshots from other gateways. A matching-generation gateway
 LWT applies those LastWills once. Repeated LWT delivery is idempotent, and an
