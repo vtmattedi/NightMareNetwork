@@ -6,6 +6,7 @@
 #include "Time.h"
 #include <esp_system.h>
 #include <cmath>
+#include <cstring>
 #include <Network/Connectivity.h>
 #if NM_ENABLE_RESOURCES
 #include "ResourcesManager.h"
