@@ -1,10 +1,89 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Head } from "vite-react-ssg";
-import { ArrowRight, BookOpen, Boxes, CalendarDays, Fingerprint, Network, Terminal, type LucideIcon } from "lucide-react";
+import { ArrowRight, Bot, CalendarClock, Radio, Share2, Terminal, type LucideIcon } from "lucide-react";
 import { Logo } from "../components/Logo";
+import { siteInfo } from "virtual:site-info";
+import { absolute, GITHUB, LIB_DEPS, MCP_URL, SITE_NAME, VERSION } from "../site";
 
-const MCP_URL = "https://nightmare.mattediworks.com/mcp";
+// The homepage follows one device, desk-lamp, from the code to the wire.
+// The sketch is examples/basic trimmed to what the story needs; keep the two
+// in step.
+const SKETCH = `#include <Arduino.h>
+#include <NightMare.h>
+
+ManagedSensor<uint32_t> uptime("uptime_s");
+ManagedState<uint8_t>   brightness("brightness");
+ManagedAction           identify("identify");
+
+bool onBrightness(ManagedState<uint8_t> &, const uint8_t &level) {
+    return level <= 100;          // false rejects the write
+}
+
+ActionResult onIdentify(ManagedAction &, const std::string &) {
+    blinkLed();                   // your hardware, your code
+    return {true, "OK"};
+}
+
+void publishUptime() { uptime.setValue(millis() / 1000); }
+
+void setup() {
+    brightness.onWrite = onBrightness;
+    identify.onInvoke  = onIdentify;
+    gScheduler.everyMonotonic("app.uptime", publishUptime, 1000);
+    startNightMareESP();
+}
+
+void loop() { tickNightMareESP(); }`;
+
+const WIRE: { topic: string; payload: string; note: string; dir?: "in" }[] = [
+  { topic: "desk-lamp/status", payload: `{"name":"desk-lamp","online":true,…}`, note: "retained" },
+  { topic: "desk-lamp/manifest/msgpack", payload: "uptime_s · brightness · identify", note: "retained" },
+  { topic: "desk-lamp/resource/uptime_s/state", payload: "3612", note: "retained" },
+  { topic: "desk-lamp/resource/brightness/state", payload: "40", note: "retained" },
+  { topic: "desk-lamp/resource/brightness/set", payload: "80", note: "onWrite → accepted", dir: "in" },
+  { topic: "desk-lamp/resource/identify/invoke", payload: "", note: "onInvoke → blink", dir: "in" },
+];
+
+// Real firmware built on the library. Links only where the repository is public.
+const BUILT_WITH: { name: string; what: string; how: string; href?: string }[] = [
+  {
+    name: "Adler-IR",
+    what: "Infrared air-conditioner controller for ESP32, C3 and C6 boards.",
+    how: "Exposes ir:send and ir:recv, a temperature sensor and an RGB state, and consumes the AC's fan, compressor and beep from other devices as Remote Resources bound at runtime.",
+    href: "https://github.com/vtmattedi/Adler-IR",
+  },
+  {
+    name: "Sherlock",
+    what: "Room sensor and light on ESP32.",
+    how: "Temperature, humidity and board voltage as Managed Sensors; LED power and colour as writable State.",
+    href: "https://github.com/vtmattedi/Sherlock",
+  },
+  {
+    name: "NightMare Gateway",
+    what: "ESP32-S3 bridge between ESP-NOW devices and MQTT.",
+    how: "Itself a NightMare device, with an identity, Configs, Resources and a console, so it is managed like everything it carries.",
+    href: "https://github.com/vtmattedi/NightmareGateway",
+  },
+  {
+    name: "Watson",
+    what: "Acoustic detector.",
+    how: "Its detection logic is its own; the beeps it hears are NightMare Events that other devices, like Adler-IR, can bind to.",
+  },
+  {
+    name: "MwNightmareSystem",
+    what: "Home dashboard and history service.",
+    how: "A backend that reads manifests, sends writes and Actions, and stores sensor history: a consumer of the protocol, not a part of it.",
+  },
+];
+
+/** The latest library and documentation changes, without merges and site-only work. */
+const recentChanges = siteInfo.changes
+  .filter((c) => /^(feat|fix|perf|refactor)(\([^)]*\))?!?:/.test(c.subject) && !/^\w+\(website\)/.test(c.subject))
+  .slice(0, 5);
+
+const day = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 export function Home() {
   const pageRef = useRef<HTMLDivElement>(null);
@@ -31,217 +110,222 @@ export function Home() {
   return (
     <>
       <Head>
-        <title>NightMare Network · Build the device, share the language</title>
+        <title>{`${SITE_NAME} · Declare it once, your ESP32 joins the network`}</title>
         <meta
           name="description"
-          content="NightMare Network gives custom ESP32 devices a quick start with shared MQTT, commands, configuration and structured Resources, while you keep control of the device."
+          content="An ESP32 framework and MQTT protocol: declare a sensor, a setting or an action once and NightMare publishes, routes, retains and reconnects it. Your firmware keeps the hardware."
         />
-        <meta property="og:title" content="NightMare Network" />
+        <link rel="canonical" href={absolute("/")} />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={absolute("/")} />
+        <meta property="og:title" content={SITE_NAME} />
       </Head>
 
       <div className="home-page" ref={pageRef}>
-      <section className="hero">
-        <div className="wrap hero-inner">
-          <Logo size={128} className="hero-logo" />
-          <p className="hero-wordmark">NightMare <span>Network</span></p>
-          <h1>
-            Build the device. <span className="accent">Share the language.</span>
-          </h1>
-          <p className="lede">
-            NightMare Network grew from helpers reused across projects into a practical starting
-            point for custom ESP32 devices. Identity, MQTT, commands, configuration and Resources
-            already have a place; your firmware decides what the device does.
+        {/* 1. The problem and the promise. */}
+        <section className="hero">
+          <div className="wrap hero-inner">
+            <Logo size={96} className="hero-logo" />
+            <p className="hero-status">
+              ESP32 · MQTT · ESP-NOW · <a href={`${GITHUB}/blob/main/library.json`}>v{VERSION}</a>
+            </p>
+            <h1>
+              Declare it once. <span className="accent">Your device joins the network.</span>
+            </h1>
+            <p className="lede">
+              Every networked ESP32 project rebuilds the same plumbing: an identity, MQTT topics,
+              retained state, reconnects, remote commands, schedules. NightMare does that part.
+              You declare what the device offers; your firmware keeps the hardware.
+            </p>
+            <p className="thesis">Register once, participate automatically.</p>
+            <div className="cta">
+              <Link className="btn btn-primary" to="/docs/getting-started">
+                Build your first device
+              </Link>
+              <a className="btn" href="#aha">
+                See what it does
+              </a>
+            </div>
+            <pre className="hero-code">
+              <code>{LIB_DEPS}</code>
+            </pre>
+          </div>
+        </section>
+
+        {/* 2. The aha: code on one side, the wire it produces on the other. */}
+        <section id="aha" className="wrap aha" aria-labelledby="aha-title">
+          <div className="section-intro" data-reveal>
+            <p className="eyebrow">One device, start to finish</p>
+            <h2 id="aha-title">You write the code. The network sees the topics.</h2>
+            <p>
+              Three declarations and two handlers. No topic strings, no subscribe calls, no reconnect
+              logic. After <code>ADOPT desk-lamp</code> on its console, this is what any other device,
+              dashboard or script finds on the broker.
+            </p>
+          </div>
+          <div className="aha-grid" data-reveal>
+            <figure className="aha-pane">
+              <figcaption>src/main.cpp</figcaption>
+              <pre className="code">
+                <code>{SKETCH}</code>
+              </pre>
+            </figure>
+            <figure className="aha-pane">
+              <figcaption>MQTT</figcaption>
+              <ul className="wire-list">
+                {WIRE.map((w) => (
+                  <li key={w.topic} className={w.dir === "in" ? "wire-in" : undefined}>
+                    <code className="wire-topic">
+                      {w.dir === "in" ? "→ " : ""}
+                      {w.topic}
+                    </code>
+                    {w.payload && <code className="wire-payload">{w.payload}</code>}
+                    <span className="wire-note">{w.note}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="aha-foot">
+                A write of <code>180</code> is rejected by <code>onBrightness</code>, so the retained state stays
+                at the last accepted value. The device reboots, the broker drops, the Wi-Fi comes back: the
+                manifests and state are re-announced without a line of your code.
+              </p>
+            </figure>
+          </div>
+          <p className="aha-links">
+            <Link to="/docs/getting-started">Getting started</Link> ·{" "}
+            <Link to="/docs/protocols/topics">Every topic</Link> ·{" "}
+            <Link to="/docs/protocols/resources">Resource protocol</Link> ·{" "}
+            <a href={`${GITHUB}/tree/main/examples/basic`}>examples/basic</a>
           </p>
-          <p className="lede">
-            <strong>Declare it, then use it.</strong> Bind a Config or a sensor and its declaration
-            appears in the appropriate manifest. Keep full control of the hardware and behavior.
-          </p>
-          <div className="cta">
-            <Link className="btn btn-primary" to="/docs/getting-started">
-              Get started
-            </Link>
-            <a className="btn" href="#story">
-              How it grew
-            </a>
-            <Link className="btn" to="/docs/mcp">
+        </section>
+
+        {/* 3. The reassurance: where the line between framework and firmware sits. */}
+        <section className="wrap split" aria-labelledby="split-title" data-reveal>
+          <div className="section-intro">
+            <p className="eyebrow">Who owns what</p>
+            <h2 id="split-title">NightMare takes the plumbing. The device stays yours.</h2>
+          </div>
+          <div className="split-grid">
+            <div className="split-col">
+              <h3>NightMare handles</h3>
+              <ul>
+                <li>Device identity, naming and renaming, with cleanup of the old name's retained data</li>
+                <li>Topics, retained manifests and state, subscriptions, re-announcing after reconnect</li>
+                <li>Routing writes, Action calls and commands to your handlers</li>
+                <li>Local or remote MQTT, ESP-NOW through a gateway, and failover between them</li>
+                <li>Scheduling, persisted settings, telemetry and time sync</li>
+              </ul>
+            </div>
+            <div className="split-col split-yours">
+              <h3>Your firmware decides</h3>
+              <ul>
+                <li>The hardware: pins, drivers, sensors, timing</li>
+                <li>What each Value means and when it changes</li>
+                <li>Whether a write is accepted, and what an Action does</li>
+                <li>Which devices it listens to, and what it does with what it hears</li>
+                <li>Everything the device is actually for</li>
+              </ul>
+            </div>
+          </div>
+          <Link to="/docs/responsibilities" className="text-link">
+            The full split <ArrowRight size={17} aria-hidden="true" />
+          </Link>
+        </section>
+
+        {/* 4. What you get, in plain words. */}
+        <section className="wrap features" aria-label="What you get">
+          <Feature icon={Share2} title="Share state with every device" to="/docs/modules/resources">
+            A Value's latest reading is retained, so a device that boots later sees it immediately. Another
+            device consumes it by name with a <code>Remote</code> Resource and can switch the source at runtime.
+          </Feature>
+          <Feature icon={Radio} title="Call other devices and react to them" to="/docs/protocols/resources">
+            Actions are typed remote calls with a result; Events are things that happened. Both are routed for
+            you, in both directions.
+          </Feature>
+          <Feature icon={Terminal} title="One command language everywhere" to="/docs/protocols/commands">
+            The same commands work over serial, the MQTT console, correlated MQTTP requests and scheduled jobs.
+            Rename a device, change a setting or inspect it from any of them.
+          </Feature>
+          <Feature icon={CalendarClock} title="Schedules that survive reboots" to="/docs/modules/scheduler">
+            Wall-clock or monotonic, one-shot or recurring, callbacks or commands; command jobs can be
+            persisted and edited remotely.
+          </Feature>
+        </section>
+
+        {/* 5. Proof: real firmware built on it. */}
+        <section className="wrap built" aria-labelledby="built-title">
+          <div className="section-intro" data-reveal>
+            <p className="eyebrow">Built with NightMare</p>
+            <h2 id="built-title">Real devices, each its own project</h2>
+            <p>
+              NightMare grew out of these projects: the same helpers kept reappearing in each one until they
+              became a framework. <Link to="/docs/overview#how-it-grew">How it grew</Link>
+            </p>
+          </div>
+          <ul className="built-grid">
+            {BUILT_WITH.map((b) => (
+              <li key={b.name} className="built-card" data-reveal>
+                <h3>{b.href ? <a href={b.href}>{b.name}</a> : b.name}</h3>
+                <p className="built-what">{b.what}</p>
+                <p>{b.how}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* 6. The differentiator. */}
+        <section className="wrap mcp-cta">
+          <div className="mcp-card" data-reveal>
+            <Bot size={26} className="feature-icon" aria-hidden="true" />
+            <h2>Your AI assistant can read the exact source</h2>
+            <p>
+              A public, read-only MCP endpoint lets Claude or any MCP client search these docs, look up the exact
+              API, read the active C++ source and examples, and say which revision it answered from. Ask it to
+              write a device; it checks the real headers instead of guessing.
+            </p>
+            <pre className="code">
+              <code>{`claude mcp add --transport http nightmare ${MCP_URL}`}</code>
+            </pre>
+            <Link className="btn btn-primary" to="/docs/mcp">
               Connect the MCP
             </Link>
           </div>
-          <pre className="hero-code">
-            <code>{`lib_deps =
-    https://github.com/vtmattedi/NightMareNetwork.git`}</code>
-          </pre>
-        </div>
-      </section>
+        </section>
 
-      <section id="story" className="wrap story" aria-labelledby="story-title">
-        <div className="story-intro" data-reveal>
-          <p className="eyebrow">The project so far</p>
-          <h2 id="story-title">From repeated helpers to a common device language</h2>
-          <p>
-            Each stage came from building devices and finding the same work in the next project.
-            The result is a framework for the shared parts, with room for each device to be its own.
-          </p>
-        </div>
-        <ol className="story-steps">
-          <li data-reveal>
-            <span className="story-number">01</span>
+        {/* 7. Where it is. */}
+        <section className="wrap status" aria-labelledby="status-title" data-reveal>
+          <div className="status-grid">
             <div>
-              <h3>Helpers became a conversation</h3>
+              <p className="eyebrow">Where it is</p>
+              <h2 id="status-title">v{VERSION}</h2>
               <p>
-                Reused firmware helpers grew into MQTT addressing, a common command resolver and
-                failover. Projects could talk to their microcontrollers through one familiar path.
+                The Resource model, the topic layout and the command grammar are the 1.0 contract. Alpha means
+                the release process is new: pin the tag above, and read the{" "}
+                <Link to="/docs/architecture/known-gaps">known gaps</Link> for what is deliberately not done yet.
+              </p>
+              <p>
+                It is built and used continuously in the devices above, so it changes often. Every page here
+                says when it last changed.
               </p>
             </div>
-          </li>
-          <li data-reveal>
-            <span className="story-number">02</span>
-            <div>
-              <h3>MQTTP added replies</h3>
-              <p>
-                A request and response model over MQTT gave each caller a correlated reply topic.
-                It still uses the same command grammar and project resolver.
-              </p>
-            </div>
-          </li>
-          <li data-reveal>
-            <span className="story-number">03</span>
-            <div>
-              <h3>Capabilities became explicit</h3>
-              <p>
-                Today, typed Resources describe Values, Actions and Events. Config declarations
-                have their own manifest, and Remote Resources bind a stable local name to a source.
-              </p>
-            </div>
-          </li>
-        </ol>
-        <Link to="/docs/overview" className="text-link">Read the full overview <ArrowRight size={17} aria-hidden="true" /></Link>
-      </section>
-
-      <section className="wrap fit" aria-labelledby="fit-title" data-reveal>
-        <div>
-          <p className="eyebrow">The intended fit</p>
-          <h2 id="fit-title">A quick start for the device you actually want to build</h2>
-          <p>
-            NightMare handles the repeatable network work. You choose the sensors, the actions,
-            the event payloads, the hardware, and the rules that make this device useful.
-          </p>
-          <p>
-            Think of Watson, a custom acoustic detector: its detection logic belongs to that
-            project, while its configuration and network conversation can use common tools.
-          </p>
-        </div>
-        <div className="fit-note">
-          <h3>Practical scope</h3>
-          <p>
-            This is a toolkit for specific, tailored devices. It does not try to optimize every
-            subsystem, become a home automation platform, or prescribe a mass production product.
-          </p>
-          <p>
-            The library builds under ESP-IDF or Arduino. OTA alone remains an optional
-            Arduino-only module.
-          </p>
-        </div>
-      </section>
-
-      <section className="wrap features">
-        <Feature icon={Boxes} title="Resources are the application contract" to="/docs/modules/resources">
-          Expose typed Values, Actions and Events as <code>Managed</code> Resources, or bind{" "}
-          <code>Remote</code> Resources implemented by another device. The framework handles
-          manifests, retained state, subscriptions and reconnect.
-        </Feature>
-
-        <Feature icon={Fingerprint} title="Identity and presence stay separate" to="/docs/protocols/status-info">
-          Retained <code>status</code> carries logical name, physical hardware signature and
-          online state. Resource freshness comes from each Value&apos;s retained{" "}
-          <code>/state</code>, not from device presence.
-        </Feature>
-
-        <Feature icon={Terminal} title="One command grammar, several transports" to="/docs/protocols/commands">
-          The same command handler serves serial, the MQTT console, correlated MQTTP requests and
-          persisted Scheduler command jobs.
-        </Feature>
-
-        <Feature icon={CalendarDays} title="Scheduling without application boilerplate" to="/docs/modules/scheduler">
-          Wall or monotonic, one-shot or recurring, <code>std::string</code> command or callback. USER jobs stay
-          separate from MANAGED framework/application jobs.
-        </Feature>
-
-        <Feature icon={Network} title="Local and remote MQTT are transport choices" to="/docs/modules/network">
-          Devices can use a Local MQTT cluster or Remote MQTT/backend services. Broker policy and
-          transport failover stay independent of Resource ownership.
-        </Feature>
-
-        <Feature icon={BookOpen} title="Docs and source share one MCP" to="/docs/mcp">
-          The MCP server searches the same <code>docs/</code>, active <code>src/</code> and
-          examples in the repository and stamps answers with the revision they came from.
-        </Feature>
-      </section>
-
-      <section className="wrap wire" data-reveal>
-        <h2>What goes on the wire</h2>
-        <p>
-          Device-scoped state is rooted under the logical device name. Descriptions and current
-          state are retained; writes, Action invocations and commands are transient.
-        </p>
-        <pre className="code">
-          <code>{`bedroom-ac/status                          {"name":"bedroom-ac","hardware":"...","timezone":"UTC0","online":true}  retained
-bedroom-ac/manifest/msgpack                <MessagePack Resource manifest>                            retained
-bedroom-ac/manifest/consume/msgpack        <MessagePack consume manifest>                             retained
-bedroom-ac/resource/temperature/state     23.44                                                      retained
-
-→ bedroom-ac/resource/power/set            false
-→ bedroom-ac/resource/identify/invoke
-→ bedroom-ac/console/controlled/req-42/in   INFO SYSTEM
-← bedroom-ac/console/controlled/req-42/out  {"uptime_ms":3612000,"cpu_mhz":160,...}
-
-CONFIG MANIFEST → Base64 of the MessagePack Config declaration manifest`}</code>
-        </pre>
-        <p>
-          <Link to="/docs/protocols/topics">Topics</Link> ·{" "}
-          <Link to="/docs/protocols/resources">Resources</Link> ·{" "}
-          <Link to="/docs/protocols/mqttp">MQTTP</Link> ·{" "}
-          <Link to="/docs/protocols/commands">Commands</Link>
-        </p>
-      </section>
-
-      <section className="wrap arch" data-reveal>
-        <h2>One repository, three consumers</h2>
-        <pre className="code diagram">
-          <code>{`                 NightMare Network repository
-                           │
-                ┌──────────┴──────────┐
-                │                     │
-             src/  (C++)          docs/  (Markdown)
-                │                     │
-          PlatformIO            ┌─────┴─────┐
-                │               ▼           ▼
-             ESP32           Website       MCP
-                                │           │
-                              Humans        AI`}</code>
-        </pre>
-        <p>
-          The library, documentation, website and MCP server live together. The website and MCP
-          consume the same Markdown corpus, while the MCP can also inspect the active C++ source
-          when exact implementation behavior matters.
-        </p>
-      </section>
-
-      <section className="wrap mcp-cta">
-        <div className="mcp-card" data-reveal>
-          <h2>Let your assistant read the source</h2>
-          <p>
-            A read-only Streamable HTTP MCP endpoint provides documentation search, exact API
-            lookup, source inspection, examples and revision information.
-          </p>
-          <pre className="code">
-            <code>{`claude mcp add --transport http nightmare ${MCP_URL}`}</code>
-          </pre>
-          <Link className="btn btn-primary" to="/docs/mcp">
-            MCP documentation
-          </Link>
-        </div>
-      </section>
+            {recentChanges.length > 0 && (
+              <div>
+                <h3>Recent changes</h3>
+                <ul className="changes">
+                  {recentChanges.map((c) => (
+                    <li key={c.sha}>
+                      <time dateTime={c.date}>{day(c.date)}</time>
+                      <a href={`${GITHUB}/commit/${c.sha}`}>{c.subject}</a>
+                    </li>
+                  ))}
+                </ul>
+                <a href={`${GITHUB}/commits/main`} className="text-link">
+                  All commits <ArrowRight size={17} aria-hidden="true" />
+                </a>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </>
   );

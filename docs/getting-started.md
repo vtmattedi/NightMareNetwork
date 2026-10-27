@@ -7,9 +7,133 @@ order: 10
 
 # Getting started
 
-This guide uses the current `src/` API.
+Build a device that publishes a sensor, accepts writes to a setting and runs
+an Action, in three files. This is `examples/basic` from the repository; the
+rest of this guide then explains each piece and what else you can configure.
 
-Do not use the older `Esp32Device`, `ResourceManager`, `NetEvent`, or `NetAction<T>` examples as a guide for the current architecture. The active API is built around the global NightMare services plus `Managed*` / `Remote*` Resources.
+## Quick start
+
+**1. `platformio.ini`** -- an Arduino-framework ESP32 project that depends on
+a release tag:
+
+```text
+[env:esp32dev]
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.39/platform-espressif32.zip
+framework = arduino
+board = esp32dev
+board_build.partitions = min_spiffs.csv
+monitor_speed = 115200
+monitor_filters = send_on_enter
+; The serial console is off by default; on, it takes commands like ADOPT.
+build_flags = -D NM_CONSOLE_SERIAL=1
+lib_deps =
+    https://github.com/vtmattedi/NightMareNetwork.git#v1.0.0-alpha.1
+```
+
+**2. `include/creds.h`** -- your Wi-Fi and the Local MQTT broker. The Remote
+fields only matter once you use a remote broker:
+
+```cpp
+#pragma once
+#define MQTT_CREDS_H
+
+#define DEFAULT_SSID "your-wifi"
+#define DEFAULT_PASSWORD "your-password"
+
+#define LOCAL_MQTT_HOST "192.168.1.10"   // host only, no mqtt://
+#define LOCAL_MQTT_PORT 1883
+
+#define REMOTE_MQTT_URL "mqtt.example.com"
+#define REMOTE_MQTT_PORT 8883
+#define MQTT_USER "username"
+#define MQTT_PASSWD "password"
+#define ROOT_CA ""                       // the broker's CA PEM before using Remote MQTT
+```
+
+**3. `src/main.cpp`** -- declare what the device offers, bind handlers, start:
+
+```cpp
+#include <Arduino.h>
+#include <NightMare.h>
+
+static ManagedSensor<uint32_t> uptimeSeconds("uptime_s");
+static ManagedState<uint8_t> brightness("brightness");
+static ManagedAction identify("identify");
+
+static bool onBrightnessWrite(ManagedState<uint8_t> &, const uint8_t &requested)
+{
+    return requested <= 100; // false rejects the write; state stays unchanged
+}
+
+static ActionResult onIdentify(ManagedAction &, const std::string &payload)
+{
+    if (payload.length() != 0)
+        return {false, "identify takes no arguments"};
+    Serial.println("identify");
+    return {true, "OK"};
+}
+
+static void publishUptime()
+{
+    uptimeSeconds.setValue(millis() / 1000UL);
+}
+
+static void preferLocalBroker(bool firstConnection)
+{
+    // The standard lifecycle starts Remote MQTT; use the local broker instead.
+    if (firstConnection)
+    {
+        NightMare::Mqtt_enable(NightMare::MqttProfile::LOCAL);
+        NightMare::SelectConnection(NightMare::ConnectionType::MQTT);
+    }
+}
+
+void setup()
+{
+    Serial.begin(115200);
+    brightness.onWrite = onBrightnessWrite;
+    identify.onInvoke = onIdentify;
+    uptimeSeconds.setValue(0);
+    brightness.setValue(0);
+    gScheduler.everyMonotonic("app.uptime", publishUptime, 1000);
+    WiFi_onConnected(preferLocalBroker);
+    startNightMareESP();
+}
+
+void loop()
+{
+    tickNightMareESP();
+}
+```
+
+Build and flash it (`pio run -t upload -t monitor`). The device comes up
+under a name derived from its hardware, such as `Esp32-nm-6ca172e0`. Give it a
+name by typing on the serial monitor, or by publishing the same line to
+`Esp32-nm-6ca172e0/console/in`:
+
+```text
+ADOPT desk-lamp
+```
+
+Then watch the broker (`mosquitto_sub -h 192.168.1.10 -t 'desk-lamp/#' -v`):
+
+```text
+desk-lamp/status                       {"name":"desk-lamp",...,"online":true}
+desk-lamp/manifest/msgpack             <the three Resources>
+desk-lamp/resource/uptime_s/state      42
+desk-lamp/resource/brightness/state    0
+```
+
+and drive it (`mosquitto_pub -h 192.168.1.10 -t ... -m ...`):
+
+```text
+desk-lamp/resource/brightness/set      80      accepted: state becomes 80
+desk-lamp/resource/brightness/set      180     rejected: state stays 80
+desk-lamp/resource/identify/invoke             prints "identify"
+```
+
+That is the whole contract: no topic strings, subscriptions or reconnect
+handling in the firmware. The sections below take each piece in turn.
 
 ## Requirements
 
@@ -48,14 +172,17 @@ include/NightMareHardware.h
 
 ## Add the library
 
-With PlatformIO, depend directly on the repository:
+With PlatformIO, depend on a release tag of the repository:
 
-```ini
+```text
 lib_deps =
-    https://github.com/vtmattedi/NightMareNetwork.git
+    https://github.com/vtmattedi/NightMareNetwork.git#v1.0.0-alpha.1
 ```
 
-During development against a local checkout, a project can instead use a local/symlink dependency.
+Pin a tag rather than the bare repository URL: without one, every build takes
+whatever is on the default branch at that moment. Use a commit hash instead of
+the tag only to try an unreleased fix. During development against a local
+checkout, a project can instead use a local/symlink dependency.
 
 The public umbrella header is:
 
@@ -751,6 +878,13 @@ gDeviceIdentity.getTimezone();
 ```
 
 Use `ADOPT <name>` or `CHANGE NAME <name>` for identity migration, and `TIMEZONE SET <posix-tz>` or `CHANGE TIMEZONE <posix-tz>` to change local-time presentation through the command surface.
+
+## Coming from the older API
+
+Do not use the older `Esp32Device`, `ResourceManager`, `NetEvent`, or
+`NetAction<T>` examples as a guide for the current architecture. The active
+API is built around the global NightMare services plus `Managed*` / `Remote*`
+Resources.
 
 ## Next steps
 
