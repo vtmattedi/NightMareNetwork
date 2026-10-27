@@ -46,7 +46,7 @@ const WIRE: { topic: string; payload: string; note: string; dir?: "in" }[] = [
 ];
 
 // Real firmware built on the library. Links only where the repository is public.
-const BUILT_WITH: { name: string; what: string; how: string; href?: string }[] = [
+const BUILT_WITH: { name: string; what: string; how: string; href?: string; footnote?: string }[] = [
   {
     name: "Adler-IR",
     what: "Infrared air-conditioner controller for ESP32, C3 and C6 boards.",
@@ -62,8 +62,9 @@ const BUILT_WITH: { name: string; what: string; how: string; href?: string }[] =
   {
     name: "NightMare Gateway",
     what: "ESP32-S3 bridge between ESP-NOW devices and MQTT.",
-    how: "Itself a NightMare device, with an identity, Configs, Resources and a console, so it is managed like everything it carries.",
+    how: "Pairs ESP-NOW's speed, under 10 ms per hop*, with MQTT's reach. Itself a NightMare device, with an identity, Configs, Resources and a console, so it is managed like everything it carries.",
     href: "https://github.com/vtmattedi/NightmareGateway",
+    footnote: "* Device to gateway over ESP-NOW; 5–8 ms in our testing. Radio conditions vary.",
   },
   {
     name: "Watson",
@@ -268,6 +269,7 @@ export function Home() {
                 <h3>{b.href ? <a href={b.href}>{b.name}</a> : b.name}</h3>
                 <p className="built-what">{b.what}</p>
                 <p>{b.how}</p>
+                {b.footnote && <p className="built-note">{b.footnote}</p>}
               </li>
             ))}
           </ul>
