@@ -7,3 +7,6 @@ declare module "virtual:docs-index" {
 declare module "virtual:docs-content" {
   export const content: Record<string, import("./lib/sections").DocContent>;
 }
+declare module "virtual:site-info" {
+  export const siteInfo: import("./lib/sections").SiteInfo;
+}

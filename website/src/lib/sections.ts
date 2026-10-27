@@ -22,6 +22,15 @@ export interface DocMeta {
   description: string;
   section: SectionId;
   order: number;
+  /** Date of the last commit touching the file, ISO 8601; absent without full git history. */
+  updated?: string;
+}
+
+/** What the build knows about the checkout it was built from. */
+export interface SiteInfo {
+  revision?: string;
+  date?: string;
+  changes: { sha: string; date: string; subject: string }[];
 }
 
 /** A document's rendered body, delivered to the page as route loader data. */

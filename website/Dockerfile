@@ -4,13 +4,16 @@
 #   docker build -f website/Dockerfile -t nightmare-web .
 
 FROM node:24-alpine AS build
+RUN apk add --no-cache git
 WORKDIR /repo
 COPY website/package.json website/package-lock.json website/
 RUN cd website && npm ci --no-audit --no-fund
-COPY library.json ./
-COPY docs docs
-COPY website website
-RUN cd website && npm run build
+# The whole context (see .dockerignore, which keeps .git), so the build can
+# stamp the revision and each page's last-updated date. Without a .git the
+# site still builds and leaves those out. The clone is owned by another uid
+# than the build runs as, which git refuses by default.
+COPY . .
+RUN git config --global --add safe.directory '*' && cd website && npm run build
 
 FROM nginx:1.27-alpine
 COPY website/nginx.conf /etc/nginx/conf.d/default.conf
