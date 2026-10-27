@@ -50,7 +50,7 @@ include/NightMareHardware.h
 
 With PlatformIO, depend on a release tag of the repository:
 
-```ini
+```text
 lib_deps =
     https://github.com/vtmattedi/NightMareNetwork.git#v1.0.0-alpha.1
 ```

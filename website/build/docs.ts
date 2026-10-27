@@ -83,6 +83,52 @@ function rehypeDocLinks(slug: string) {
   };
 }
 
+/** A "#" link after every h2/h3, so any section can be linked to. */
+function rehypeHeadingAnchors() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element) => {
+      if ((node.tagName !== "h2" && node.tagName !== "h3") || typeof node.properties.id !== "string") return;
+      node.children.push({
+        type: "element",
+        tagName: "a",
+        properties: { href: `#${node.properties.id}`, className: ["heading-anchor"], ariaLabel: "Link to this section" },
+        children: [{ type: "text", value: "#" }],
+      });
+    });
+  };
+}
+
+/**
+ * Wraps each fenced block with its language and a copy button. The button is
+ * plain markup; the page handles its clicks (DocPage), so it needs no
+ * per-block JavaScript.
+ */
+function rehypeCodeBlocks() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element, index, parent) => {
+      if (node.tagName !== "pre" || !parent || index === undefined) return;
+      const code = node.children.find((c): c is Element => c.type === "element" && c.tagName === "code");
+      const classes = Array.isArray(code?.properties.className) ? code.properties.className : [];
+      const lang = classes.map(String).find((c) => c.startsWith("language-"))?.slice("language-".length);
+      parent.children[index] = {
+        type: "element",
+        tagName: "div",
+        properties: { className: ["code-block"], ...(lang && lang !== "text" && lang !== "plaintext" ? { dataLang: lang } : {}) },
+        children: [
+          node,
+          {
+            type: "element",
+            tagName: "button",
+            properties: { type: "button", className: ["copy-btn"], ariaLabel: "Copy code" },
+            children: [{ type: "text", value: "Copy" }],
+          },
+        ],
+      };
+      return "skip";
+    });
+  };
+}
+
 function render(slug: string, body: string): DocContent {
   const processor = unified()
     .use(remarkParse)
@@ -91,6 +137,8 @@ function render(slug: string, body: string): DocContent {
     .use(rehypeSlug)
     .use(rehypeHighlight, { languages, detect: false })
     .use(rehypeDocLinks, slug)
+    .use(rehypeHeadingAnchors)
+    .use(rehypeCodeBlocks)
     .use(rehypeStringify);
   const mdast = processor.parse(body);
   const html = processor.stringify(processor.runSync(mdast));

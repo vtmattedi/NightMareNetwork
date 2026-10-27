@@ -1,10 +1,22 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, ScrollRestoration, useLocation } from "react-router-dom";
 import { Head } from "vite-react-ssg";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { MwLogo } from "./MwLogo";
 import { absolute, GITHUB, SITE_NAME } from "../site";
+import { docBySlug } from "../lib/docs";
+import type { SectionId } from "../lib/sections";
+
+// Each top-level link stands for a docs section and is highlighted on every
+// page of that section, not only on the page it points to.
+const NAV: { label: string; to: string; section: SectionId; className?: string }[] = [
+  { label: "Get started", to: "/docs/getting-started", section: "getting-started" },
+  { label: "Protocols", to: "/docs/protocols/topics", section: "protocols" },
+  { label: "Architecture", to: "/docs/architecture", section: "architecture" },
+  { label: "Modules", to: "/docs/modules/resources", section: "modules" },
+  { label: "MCP", to: "/docs/mcp", section: "mcp", className: "nav-mcp" },
+];
 
 type Theme = "dark" | "light";
 
@@ -47,6 +59,8 @@ export function Layout() {
   const [theme, toggleTheme] = useTheme();
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const slug = location.pathname.replace(/^\/docs\/?/, "").replace(/\/$/, "");
+  const currentSection = location.pathname.startsWith("/docs") ? docBySlug(slug || "overview")?.section : undefined;
   useEffect(() => setOpen(false), [location.pathname]);
 
   return (
@@ -70,11 +84,14 @@ export function Layout() {
             {open ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
           </button>
           <nav id="nav" className={"nav" + (open ? " open" : "")}>
-            <NavLink to="/docs/getting-started">Get started</NavLink>
-            <NavLink to="/docs/protocols/topics">Protocols</NavLink>
-            <NavLink to="/docs/architecture">Architecture</NavLink>
-            <NavLink to="/docs/modules/resources">Modules</NavLink>
-            <NavLink to="/docs/mcp" className="nav-mcp">MCP</NavLink>
+            {NAV.map((item) => {
+              const active = item.section === currentSection;
+              return (
+                <Link key={item.to} to={item.to} className={[item.className, active && "active"].filter(Boolean).join(" ") || undefined} aria-current={active ? "true" : undefined}>
+                  {item.label}
+                </Link>
+              );
+            })}
             <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
             <button className="theme-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
               <Sun className="theme-icon theme-sun" size={19} aria-hidden="true" />
@@ -85,6 +102,8 @@ export function Layout() {
       </header>
       <main id="main">
         <Outlet />
+        {/* New pages start at the top (or at their #fragment); back/forward restores the position. */}
+        <ScrollRestoration />
       </main>
       <footer className="foot">
         <div className="wrap foot-inner">
