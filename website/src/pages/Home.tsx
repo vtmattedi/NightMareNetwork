@@ -3,8 +3,7 @@ import { Link } from "react-router-dom";
 import { Head } from "vite-react-ssg";
 import { ArrowRight, BookOpen, Boxes, CalendarDays, Fingerprint, Network, Terminal, type LucideIcon } from "lucide-react";
 import { Logo } from "../components/Logo";
-
-const MCP_URL = "https://nightmare.mattediworks.com/mcp";
+import { absolute, LIB_DEPS, MCP_URL, SITE_NAME } from "../site";
 
 export function Home() {
   const pageRef = useRef<HTMLDivElement>(null);
@@ -36,7 +35,10 @@ export function Home() {
           name="description"
           content="NightMare Network gives custom ESP32 devices a quick start with shared MQTT, commands, configuration and structured Resources, while you keep control of the device."
         />
-        <meta property="og:title" content="NightMare Network" />
+        <link rel="canonical" href={absolute("/")} />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={absolute("/")} />
+        <meta property="og:title" content={SITE_NAME} />
       </Head>
 
       <div className="home-page" ref={pageRef}>
@@ -68,8 +70,7 @@ export function Home() {
             </Link>
           </div>
           <pre className="hero-code">
-            <code>{`lib_deps =
-    https://github.com/vtmattedi/NightMareNetwork.git`}</code>
+            <code>{LIB_DEPS}</code>
           </pre>
         </div>
       </section>

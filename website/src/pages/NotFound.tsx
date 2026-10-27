@@ -10,7 +10,7 @@ export function NotFound() {
       </Head>
       <h1>Not found</h1>
       <p>
-        Nothing lives at this address. Try the <Link to="/docs">documentation</Link> or the{" "}
+        Nothing lives at this address. Try the <Link to="/docs/overview">documentation</Link> or the{" "}
         <Link to="/">front page</Link>.
       </p>
     </div>

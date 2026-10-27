@@ -4,8 +4,7 @@ import { Head } from "vite-react-ssg";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { MwLogo } from "./MwLogo";
-
-const GITHUB = "https://github.com/vtmattedi/NightMareNetwork";
+import { absolute, GITHUB, SITE_NAME } from "../site";
 
 type Theme = "dark" | "light";
 
@@ -54,8 +53,9 @@ export function Layout() {
     <>
       <Head>
         <meta name="description" content="NightMare Network: practical network tools for custom ESP32 devices, with shared MQTT, structured Resources, documentation and a read-only MCP server." />
-        <meta property="og:site_name" content="NightMare Network" />
-        <meta property="og:image" content="/og-image.png" />
+        <meta property="og:site_name" content={SITE_NAME} />
+        <meta property="og:image" content={absolute("/og-image.png")} />
+        <meta name="twitter:card" content="summary_large_image" />
       </Head>
       <a className="skip" href="#main">Skip to content</a>
       <header className="top">

@@ -1,24 +1,41 @@
-import { Link, NavLink, useParams } from "react-router-dom";
+import type { MouseEvent } from "react";
+import { Link, NavLink, useLoaderData, useNavigate } from "react-router-dom";
 import { Head } from "vite-react-ssg";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Markdown } from "../components/Markdown";
-import { docBySlug, neighbours, sections } from "../lib/docs";
+import { docBySlug, neighbours, sectionLabel, sections } from "../lib/docs";
+import type { DocContent } from "../lib/sections";
+import { absolute, SITE_NAME } from "../site";
 import { NotFound } from "./NotFound";
 
 export function DocPage() {
-  const { a, b } = useParams();
-  const slug = [a, b].filter(Boolean).join("/") || "overview";
-  const doc = docBySlug(slug);
-  if (!doc) return <NotFound />;
+  const content = useLoaderData() as DocContent | null;
+  const navigate = useNavigate();
+  const doc = content && docBySlug(content.slug);
+  if (!content || !doc) return <NotFound />;
   const { prev, next } = neighbours(doc.slug);
-  const pageHeadings = doc.headings.filter((h) => h.depth === 2);
+  const pageHeadings = content.headings.filter((h) => h.depth === 2);
+  const url = absolute(`/docs/${doc.slug}/`);
+
+  // The body is prerendered HTML, so its internal links are plain anchors.
+  // Route them through the router to keep navigation client-side.
+  const onBodyClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = (e.target as HTMLElement).closest("a");
+    const href = a?.getAttribute("href");
+    if (!a || !href || a.target || !href.startsWith("/")) return;
+    e.preventDefault();
+    navigate(href);
+  };
 
   return (
     <div className="wrap docs">
       <Head>
-        <title>{doc.title} · NightMare Network</title>
+        <title>{`${doc.title} · ${SITE_NAME}`}</title>
         <meta name="description" content={doc.description} />
-        <meta property="og:title" content={`${doc.title} · NightMare Network`} />
+        <link rel="canonical" href={url} />
+        <meta property="og:type" content="article" />
+        <meta property="og:url" content={url} />
+        <meta property="og:title" content={`${doc.title} · ${SITE_NAME}`} />
         <meta property="og:description" content={doc.description} />
       </Head>
 
@@ -42,9 +59,9 @@ export function DocPage() {
 
       <article className="doc">
         <p className="crumb">
-          <Link to="/docs">Docs</Link> / {s(doc.section)} / <span>{doc.title}</span>
+          <Link to="/docs/overview">Docs</Link> / {sectionLabel(doc.section)} / <span>{doc.title}</span>
         </p>
-        <Markdown source={doc.body} slug={doc.slug} />
+        <div className="md" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: content.html }} />
         <nav className="pager" aria-label="Previous and next">
           {prev ? (
             <Link to={`/docs/${prev.slug}`} className="pager-prev">
@@ -77,11 +94,6 @@ export function DocPage() {
       )}
     </div>
   );
-}
-
-function s(id: string) {
-  const found = sections.find((x) => x.id === id);
-  return found ? found.label : id;
 }
 
 // react-router's lazy-route convention: the module exports `Component`.

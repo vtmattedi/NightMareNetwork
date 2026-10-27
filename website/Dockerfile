@@ -14,6 +14,7 @@ RUN cd website && npm run build
 
 FROM nginx:1.27-alpine
 COPY website/nginx.conf /etc/nginx/conf.d/default.conf
+COPY website/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /repo/website/dist /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
