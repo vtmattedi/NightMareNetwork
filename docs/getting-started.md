@@ -303,6 +303,14 @@ Local MQTT currently uses plain:
 mqtt://
 ```
 
+Any MQTT broker works on either side. For a self-hosted Remote broker,
+[Stackport-mqtt](https://github.com/vtmattedi/Stackport-mqtt) is the one the
+NightMare devices use: a TLS-only Mosquitto (port 8883, plus WebSocket for
+browsers) with a private CA, deployed through Stackport. Being TLS-only, it
+serves as the Remote broker; the Local broker stays a plain `mqtt://` one on
+your network. Its hostnames are one deployment's values, so replace them with
+yours.
+
 ## Optional hardware profile
 
 To make INFO report the host hardware and publish physical configuration, create:
