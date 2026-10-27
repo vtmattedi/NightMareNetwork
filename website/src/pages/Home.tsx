@@ -50,8 +50,26 @@ const BUILT_WITH: { name: string; what: string; how: string; href?: string; foot
   {
     name: "Adler-IR",
     what: "Infrared air-conditioner controller for ESP32, C3 and C6 boards.",
-    how: "Exposes ir:send and ir:recv, a temperature sensor and an RGB state, and consumes the AC's fan, compressor and beep from other devices as Remote Resources bound at runtime.",
+    how: "Exposes ir:send and ir:recv, a temperature sensor and an RGB state. It consumes the AC's fan, compressor and beep as Remote Resources bound at runtime, which is how it hears from Watson.",
     href: "https://github.com/vtmattedi/Adler-IR",
+  },
+  {
+    name: "Watson",
+    what: "Acoustic observer: an ESP32 with an INMP441 microphone listening to the air conditioner.",
+    how: "Publishes fan and compressor noise as retained Sensors and each accepted beep as an Event. It decides nothing; the conclusion is left to the controller that binds to it.",
+    href: "https://github.com/vtmattedi/Watson",
+  },
+  {
+    name: "NightMare Dashboard",
+    what: "Touchscreen wall panel on a Sunton ESP32-3248S035C.",
+    how: "Owns none of what it controls: it drives the AC, a light and an RGB light that live on other devices through Remote Resources, over ESP-NOW via the Gateway.",
+    href: "https://github.com/vtmattedi/MoriartyDashboard",
+  },
+  {
+    name: "Mycroft",
+    what: "Door, light and temperature node for ESP32 and ESP32-C3.",
+    how: "A door contact and a temperature as Managed Sensors; the light and an I/O-expander output as writable State.",
+    href: "https://github.com/vtmattedi/Mycroft-headless",
   },
   {
     name: "Sherlock",
@@ -65,11 +83,6 @@ const BUILT_WITH: { name: string; what: string; how: string; href?: string; foot
     how: "Pairs ESP-NOW's speed, under 10 ms per hop*, with MQTT's reach. Itself a NightMare device, with an identity, Configs, Resources and a console, so it is managed like everything it carries.",
     href: "https://github.com/vtmattedi/NightmareGateway",
     footnote: "* Device to gateway over ESP-NOW; 5–8 ms in our testing. Radio conditions vary.",
-  },
-  {
-    name: "Watson",
-    what: "Acoustic detector.",
-    how: "Its detection logic is its own; the beeps it hears are NightMare Events that other devices, like Adler-IR, can bind to.",
   },
   {
     name: "MwNightmareSystem",
