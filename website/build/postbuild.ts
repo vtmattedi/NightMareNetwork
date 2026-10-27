@@ -29,7 +29,9 @@ function csp(html: string): string {
   );
   return [
     "default-src 'self'",
-    `script-src 'self' ${[...new Set(hashes)].join(" ")}`,
+    // wasm-unsafe-eval: Pagefind's search runs as WebAssembly. It allows
+    // compiling wasm only, not eval() of JavaScript.
+    `script-src 'self' 'wasm-unsafe-eval' ${[...new Set(hashes)].join(" ")}`,
     "style-src 'self'",
     "img-src 'self' data:",
     "font-src 'self'",

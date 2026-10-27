@@ -31,6 +31,7 @@ import json from "highlight.js/lib/languages/json";
 import plaintext from "highlight.js/lib/languages/plaintext";
 import yaml from "highlight.js/lib/languages/yaml";
 import { SECTIONS, type DocContent, type DocMeta, type SectionId } from "../src/lib/sections.ts";
+import { readGit, type GitInfo } from "./git.ts";
 
 const languages = { cpp, c: cpp, ini, json, bash, sh: bash, shell: bash, yaml, yml: yaml, text: plaintext, plaintext };
 const sectionIds = new Set<string>(SECTIONS.map((s) => s.id));
@@ -91,7 +92,7 @@ function rehypeHeadingAnchors() {
       node.children.push({
         type: "element",
         tagName: "a",
-        properties: { href: `#${node.properties.id}`, className: ["heading-anchor"], ariaLabel: "Link to this section" },
+        properties: { href: `#${node.properties.id}`, className: ["heading-anchor"], ariaLabel: "Link to this section", dataPagefindIgnore: "all" },
         children: [{ type: "text", value: "#" }],
       });
     });
@@ -119,7 +120,7 @@ function rehypeCodeBlocks() {
           {
             type: "element",
             tagName: "button",
-            properties: { type: "button", className: ["copy-btn"], ariaLabel: "Copy code" },
+            properties: { type: "button", className: ["copy-btn"], ariaLabel: "Copy code", dataPagefindIgnore: "all" },
             children: [{ type: "text", value: "Copy" }],
           },
         ],
@@ -165,7 +166,7 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 /** Reads and renders the whole corpus. Throws one error listing every invalid document. */
-export function loadDocs(docsDir: string): Doc[] {
+export function loadDocs(docsDir: string, updated: GitInfo["updated"] = {}): Doc[] {
   const problems: string[] = [];
   const docs: Doc[] = [];
   for (const file of walk(docsDir)) {
@@ -187,6 +188,7 @@ export function loadDocs(docsDir: string): Doc[] {
       description: meta.description,
       section: meta.section as SectionId,
       order: Number(meta.order ?? 1000),
+      ...(updated[`docs/${slug}.md`] ? { updated: updated[`docs/${slug}.md`] } : {}),
       ...render(slug, body),
     });
   }
@@ -196,21 +198,28 @@ export function loadDocs(docsDir: string): Doc[] {
   return docs.sort((a, b) => rank(a.section) - rank(b.section) || a.order - b.order || a.slug.localeCompare(b.slug));
 }
 
-export function docsPlugin(docsDir: string): Plugin {
+export function docsPlugin(docsDir: string, repoDir: string): Plugin {
   const INDEX = "virtual:docs-index";
+  const SITE = "virtual:site-info";
+  let gitCache: GitInfo | undefined;
+  const gitInfo = () => (gitCache ??= readGit(repoDir));
   const CONTENT = "virtual:docs-content";
   let cache: Doc[] | undefined;
-  const docs = () => (cache ??= loadDocs(docsDir));
+  const docs = () => (cache ??= loadDocs(docsDir, gitInfo().updated));
 
   return {
     name: "nightmare-docs",
     resolveId(source) {
-      return source === INDEX || source === CONTENT ? "\0" + source : undefined;
+      return source === INDEX || source === CONTENT || source === SITE ? "\0" + source : undefined;
     },
     load(id) {
       if (id === "\0" + INDEX) {
-        const index: DocMeta[] = docs().map(({ slug, title, description, section, order }) => ({ slug, title, description, section, order }));
+        const index: DocMeta[] = docs().map(({ slug, title, description, section, order, updated }) => ({ slug, title, description, section, order, updated }));
         return `export const docs = ${JSON.stringify(index)};`;
+      }
+      if (id === "\0" + SITE) {
+        const { revision, date, changes } = gitInfo();
+        return `export const siteInfo = ${JSON.stringify({ revision, date, changes })};`;
       }
       if (id === "\0" + CONTENT) {
         const content = Object.fromEntries(docs().map(({ slug, html, headings }) => [slug, { slug, html, headings }]));

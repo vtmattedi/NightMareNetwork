@@ -1,10 +1,10 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { Link, NavLink, useLoaderData, useNavigate } from "react-router-dom";
 import { Head } from "vite-react-ssg";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import { docBySlug, neighbours, sectionLabel, sections } from "../lib/docs";
 import type { DocContent } from "../lib/sections";
-import { absolute, SITE_NAME } from "../site";
+import { absolute, GITHUB, SITE_NAME } from "../site";
 import { NotFound } from "./NotFound";
 
 /** The id of the last h2 scrolled up to the header, for the "On this page" highlight. */
@@ -33,6 +33,10 @@ function useActiveHeading(ids: string[]): string | undefined {
   }, [key]);
   return active;
 }
+
+/** "23 Oct 2026", fixed to UTC and en-GB so the build and the browser print the same text. */
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 export function DocPage() {
   const content = useLoaderData() as DocContent | null;
@@ -115,12 +119,22 @@ export function DocPage() {
         ))}
       </aside>
 
-      <article className="doc">
-        <p className="crumb">
+      <article className="doc" data-pagefind-body>
+        <p className="crumb" data-pagefind-ignore>
           <Link to="/docs/overview">Docs</Link> / {sectionLabel(doc.section)} / <span>{doc.title}</span>
         </p>
         <div className="md" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: content.html }} />
-        <nav className="pager" aria-label="Previous and next">
+        <p className="doc-meta" data-pagefind-ignore>
+          {doc.updated && (
+            <>
+              Last updated <time dateTime={doc.updated}>{formatDate(doc.updated)}</time> ·{" "}
+            </>
+          )}
+          <a href={`${GITHUB}/edit/main/docs/${doc.slug}.md`} target="_blank" rel="noreferrer">
+            <Pencil size={14} aria-hidden="true" /> Edit this page on GitHub
+          </a>
+        </p>
+        <nav className="pager" aria-label="Previous and next" data-pagefind-ignore>
           {prev ? (
             <Link to={`/docs/${prev.slug}`} className="pager-prev">
               <small>Previous</small>

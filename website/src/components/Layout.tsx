@@ -4,7 +4,9 @@ import { Head } from "vite-react-ssg";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { MwLogo } from "./MwLogo";
-import { absolute, GITHUB, SITE_NAME } from "../site";
+import { absolute, GITHUB, SITE_NAME, VERSION } from "../site";
+import { siteInfo } from "virtual:site-info";
+import { Search } from "./Search";
 import { docBySlug } from "../lib/docs";
 import type { SectionId } from "../lib/sections";
 
@@ -80,6 +82,13 @@ export function Layout() {
               NightMare<span className="brand-dim"> Network</span>
             </span>
           </Link>
+          <a
+            className="version"
+            href={`${GITHUB}/tree/${siteInfo.revision ?? "main"}`}
+            title={siteInfo.revision ? `Built from ${siteInfo.revision}` : undefined}
+          >
+            v{VERSION}
+          </a>
           <button className="menu-btn" aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="nav" onClick={() => setOpen((o) => !o)}>
             {open ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
           </button>
@@ -98,6 +107,7 @@ export function Layout() {
               <Moon className="theme-icon theme-moon" size={19} aria-hidden="true" />
             </button>
           </nav>
+          <Search />
         </div>
       </header>
       <main id="main">
@@ -112,6 +122,11 @@ export function Layout() {
           </span>
           <span>
             <a href={GITHUB}>Source on GitHub</a> · <Link to="/docs/mcp">MCP endpoint</Link> · MIT
+            {siteInfo.revision && (
+              <>
+                {" "}· v{VERSION} built from <a href={`${GITHUB}/commit/${siteInfo.revision}`}><code>{siteInfo.revision}</code></a>
+              </>
+            )}
           </span>
         </div>
       </footer>

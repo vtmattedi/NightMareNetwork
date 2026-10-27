@@ -26,6 +26,9 @@ jobs:
         working-directory: website
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, like Stackport's clone, so per-page dates are built.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
