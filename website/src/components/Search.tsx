@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search as SearchIcon } from "lucide-react";
+import { FileText, Search as SearchIcon, SearchX } from "lucide-react";
 
 // The subset of Pagefind's browser API used here.
 interface PagefindResultData {
@@ -26,6 +26,15 @@ function loadPagefind(): Promise<Pagefind> {
   });
   return pagefind;
 }
+
+/** Where people usually start; shown before typing and when nothing matches. */
+const SUGGESTIONS = [
+  { to: "/docs/getting-started", label: "Getting started" },
+  { to: "/docs/modules/resources", label: "Resources" },
+  { to: "/docs/protocols/topics", label: "MQTT topics" },
+  { to: "/docs/protocols/commands", label: "Commands" },
+  { to: "/docs/mcp", label: "MCP" },
+];
 
 interface Hit {
   url: string;
@@ -140,25 +149,60 @@ export function Search() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
           />
-          <kbd>Esc</kbd>
         </div>
-        {status === "unavailable" ? (
-          <p className="search-note">Search is built with the production site (npm run build).</p>
-        ) : query.trim() && !hits.length && status !== "loading" ? (
-          <p className="search-note">No results for “{query.trim()}”.</p>
-        ) : (
-          <ul className="search-results">
-            {hits.map((h) => (
-              <li key={h.url}>
-                <Link to={h.url} onClick={close}>
-                  <strong>{h.title}</strong>
-                  <span dangerouslySetInnerHTML={{ __html: h.excerpt }} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+        {/* Fixed-height body: the dialog keeps its size whether it shows hints, results or nothing. */}
+        <div className="search-body" aria-live="polite">
+          {status === "unavailable" ? (
+            <p className="search-note">Search is built with the production site (npm run build).</p>
+          ) : !query.trim() ? (
+            <div className="search-empty">
+              <p className="search-note">Search every page of the documentation. Or start with:</p>
+              <Suggestions onPick={close} />
+            </div>
+          ) : hits.length ? (
+            <ul className="search-results">
+              {hits.map((h) => (
+                <li key={h.url}>
+                  <Link to={h.url} onClick={close}>
+                    <strong>{h.title}</strong>
+                    <span dangerouslySetInnerHTML={{ __html: h.excerpt }} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : status === "loading" ? (
+            <p className="search-note">Searching…</p>
+          ) : (
+            <div className="search-empty">
+              <SearchX size={28} className="search-empty-icon" aria-hidden="true" />
+              <p className="search-note">
+                Nothing found for <strong>“{query.trim()}”</strong>. Check the spelling, try fewer or more general
+                words, or browse:
+              </p>
+              <Suggestions onPick={close} />
+            </div>
+          )}
+        </div>
+        <div className="search-foot" aria-hidden="true">
+          <span><kbd>↵</kbd> open first result</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
       </dialog>
     </>
+  );
+}
+
+function Suggestions({ onPick }: { onPick: () => void }) {
+  return (
+    <ul className="search-suggestions">
+      {SUGGESTIONS.map((p) => (
+        <li key={p.to}>
+          <Link to={p.to} onClick={onPick}>
+            <FileText size={15} aria-hidden="true" />
+            {p.label}
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }
