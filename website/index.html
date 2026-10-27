@@ -8,10 +8,12 @@
     <!-- No static <title>: every route sets its own through <Head>, and a static
          one here would be prerendered alongside it as a duplicate. -->
     <script>
-      // Theme before first paint, so a dark preference never flashes light.
+      // Theme before first paint, so neither preference flashes the other. An
+      // explicit choice wins; otherwise follow the system setting.
       try {
         var t = localStorage.getItem("nm-theme");
-        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+        if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
     </script>
   </head>

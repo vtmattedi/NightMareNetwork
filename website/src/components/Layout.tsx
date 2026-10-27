@@ -16,6 +16,20 @@ function useTheme(): [Theme, () => void] {
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme");
     if (t === "light" || t === "dark") setTheme(t);
+    // Until the visitor picks a theme, keep following the system setting.
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const follow = (e: MediaQueryListEvent) => {
+      try {
+        if (localStorage.getItem("nm-theme")) return;
+      } catch {
+        /* private mode */
+      }
+      const next: Theme = e.matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      setTheme(next);
+    };
+    media.addEventListener("change", follow);
+    return () => media.removeEventListener("change", follow);
   }, []);
   const toggle = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
