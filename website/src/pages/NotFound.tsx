@@ -6,6 +6,7 @@ export function NotFound() {
     <div className="wrap notfound">
       <Head>
         <title>Not found · NightMare Network</title>
+        <meta name="robots" content="noindex" />
       </Head>
       <h1>Not found</h1>
       <p>

@@ -1,3 +1,9 @@
+---
+title: ESP-NOW security review
+description: Threat model, reviewed concerns, and the decision taken for each one in the ESP-NOW transport.
+section: security
+order: 10
+---
 
 # NMNW ESP-NOW Security Review
 

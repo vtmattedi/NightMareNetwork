@@ -2,6 +2,13 @@
 // glob import. Same front-matter convention the MCP server parses, so the
 // website and the AI see one set of documents.
 
+import GithubSlugger from "github-slugger";
+import { toString } from "mdast-util-to-string";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+import { visit } from "unist-util-visit";
+
 const raw = import.meta.glob<string>("../../../docs/**/*.md", {
   query: "?raw",
   import: "default",
@@ -19,7 +26,7 @@ export interface Doc {
   headings: { depth: number; text: string; id: string }[];
 }
 
-export const SECTION_ORDER = ["overview", "getting-started", "protocols", "architecture", "modules", "contributing", "mcp"];
+export const SECTION_ORDER = ["overview", "getting-started", "protocols", "architecture", "modules", "security", "contributing", "mcp"];
 
 export const SECTION_LABEL: Record<string, string> = {
   overview: "Overview",
@@ -27,6 +34,7 @@ export const SECTION_LABEL: Record<string, string> = {
   protocols: "Protocols",
   architecture: "Architecture",
   modules: "Modules",
+  security: "Security",
   contributing: "Contributing",
   mcp: "MCP",
 };
@@ -43,25 +51,20 @@ function parseFrontMatter(text: string): { meta: Record<string, string>; body: s
   return { meta, body: text.slice(end + 4).replace(/^\r?\n/, "") };
 }
 
-/** Same algorithm rehype-slug uses for ids (github-slugger), close enough for our headings. */
-export function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/`/g, "")
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .trim()
-    .replace(/\s+/g, "-");
-}
+// Heading ids must match the ones rehype-slug puts on the rendered page, so
+// they come from the same parse and the same slugger: one slugger per
+// document, fed every heading in order, so repeated headings get the same
+// "-1", "-2" suffixes and inline markup (`code`, links) slugs as its text.
+const parser = unified().use(remarkParse).use(remarkGfm);
 
 function headingsOf(body: string) {
   const out: Doc["headings"] = [];
-  let fence = false;
-  for (const line of body.split(/\r?\n/)) {
-    if (/^\s*```/.test(line)) fence = !fence;
-    if (fence) continue;
-    const m = /^(#{2,3})\s+(.+?)\s*$/.exec(line);
-    if (m) out.push({ depth: m[1].length, text: m[2], id: slugify(m[2]) });
-  }
+  const slugger = new GithubSlugger();
+  visit(parser.parse(body), "heading", (node) => {
+    const text = toString(node);
+    const id = slugger.slug(text);
+    if (node.depth === 2 || node.depth === 3) out.push({ depth: node.depth, text, id });
+  });
   return out;
 }
 

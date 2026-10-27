@@ -3,19 +3,19 @@
 
 @font-face {
   font-family: "Sansation";
-  src: url("./assets/branding/Sansation_Regular.ttf") format("truetype");
+  src: url("./assets/branding/Sansation_Regular.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "Sansation";
-  src: url("./assets/branding/Sansation_Bold.ttf") format("truetype");
+  src: url("./assets/branding/Sansation_Bold.woff2") format("woff2");
   font-weight: 700;
   font-display: swap;
 }
 @font-face {
   font-family: "Sansation";
-  src: url("./assets/branding/Sansation_Light.ttf") format("truetype");
+  src: url("./assets/branding/Sansation_Light.woff2") format("woff2");
   font-weight: 300;
   font-display: swap;
 }
@@ -242,6 +242,10 @@ summary.side-head:hover { color: var(--fg); background: var(--bg-3); }
 .pager a span { display: inline-flex; align-items: center; gap: 5px; }
 .pager-next span { justify-content: flex-end; }
 .pager-next { text-align: right; margin-left: auto; }
+@media (max-width: 560px) {
+  .pager { flex-direction: column; }
+  .pager a { min-width: 0; }
+}
 @media (max-width: 1250px) { .docs { grid-template-columns: 225px minmax(0, 1fr); gap: 28px; } .toc { display: none; } }
 @media (max-width: 760px) { .docs { grid-template-columns: 1fr; gap: 20px; } .sidebar { position: static; max-height: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 12px; border-bottom: 1px solid var(--line); padding-bottom: 12px; } }
 

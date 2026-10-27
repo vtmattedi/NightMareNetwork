@@ -27,6 +27,10 @@ export const routes: RouteRecord[] = [
         lazy: docs,
         getStaticPaths: () => nestedSlugs.map((s) => `docs/${s}`),
       },
+      // Prerendered as /404/index.html, which nginx serves with a real 404
+      // status for any path that has no page. The catch-all renders the same
+      // markup, so the client hydrates it cleanly.
+      { path: "404", element: <NotFound /> },
       { path: "*", element: <NotFound /> },
     ],
   },

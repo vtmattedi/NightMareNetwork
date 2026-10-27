@@ -1,3 +1,10 @@
+---
+title: ESP-NOW protocol
+description: Frames, discovery, the authenticated handshake, session encryption, and fragmentation between devices and the Gateway.
+section: modules
+order: 46
+---
+
 # ESP-NOW connection protocol
 
 Status: **pre-v1**. NM protocol version `0`. No compatibility with the earlier

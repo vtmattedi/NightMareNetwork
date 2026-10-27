@@ -260,7 +260,7 @@ Read back from any Value:
 const NetValueResource *dependency() const;
 ```
 
-## NetValue<T>
+## `NetValue<T>`
 
 Common Value metadata:
 
@@ -329,7 +329,7 @@ The constructor taking one `std::string` declares the stable local name. Sources
 stored by that name in `/remoteresources.json` and restored by
 `startNightMareESP()` before networking starts.
 
-## ManagedState<T>
+## `ManagedState<T>`
 
 Handler:
 
@@ -499,7 +499,7 @@ bool clearSource();
 bool invoke(const std::string &payload = std::string());
 ```
 
-## NetEvent<T>
+## `NetEvent<T>`
 
 `NetEventResource` is the non-template boundary and does not derive from
 `NetValueResource`. It holds the payload wire type and one timestamp:
@@ -514,7 +514,7 @@ API; an Event has no current value, availability, freshness, advertisement,
 hardware policy, dependency, write or invoke path, so those members are absent
 rather than present and rejected.
 
-## ManagedEvent<T>
+## `ManagedEvent<T>`
 
 ```cpp
 template <typename T>
@@ -547,7 +547,7 @@ call it. It runs synchronously inside `fire()`.
 `lastUpdateMs()` is the `millis()` timestamp of the latest occurrence the
 transport accepted, or `0` before the first.
 
-## RemoteEvent<T>
+## `RemoteEvent<T>`
 
 ```cpp
 template <typename T>
