@@ -97,7 +97,7 @@ Documentation should explain the public model, but exact behavior belongs to the
 Every normal tool result ends with a version stamp similar to:
 
 ```text
-NightMare Network 0.2.0 · <branch> @ <revision>
+NightMare Network 1.0.0-alpha.1 · <branch> @ <revision>
 ```
 
 The values come from:
