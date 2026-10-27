@@ -1852,7 +1852,7 @@ See [Known gaps](../architecture/known-gaps.md) for current couplings that may l
 At the documentation revision used for this page, `library.json` reports:
 
 ```text
-0.2.0
+1.0.0-alpha.1
 ```
 
 Use the MCP `get_version` tool when you need the version and exact revision currently being served rather than relying on a static page.

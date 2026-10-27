@@ -1,0 +1,49 @@
+name: Website
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - "docs/**"
+      - "library.json"
+      - ".github/workflows/website.yml"
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "docs/**"
+      - "library.json"
+      - ".github/workflows/website.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      # Fails on invalid front matter (build/docs.ts).
+      - run: npm run build
+      - run: npm run check:links
+      # The install snippet pins v<library.json version>; warn while that tag
+      # does not exist yet, so a release bump without a tag is visible.
+      - name: Release tag for the install snippet
+        working-directory: .
+        run: |
+          tag="v$(node -p "require('./library.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag exists."
+          else
+            echo "::warning::library.json says ${tag#v} but tag $tag does not exist; the install snippet on the site will not resolve until it is pushed."
+          fi

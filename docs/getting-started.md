@@ -48,14 +48,17 @@ include/NightMareHardware.h
 
 ## Add the library
 
-With PlatformIO, depend directly on the repository:
+With PlatformIO, depend on a release tag of the repository:
 
 ```ini
 lib_deps =
-    https://github.com/vtmattedi/NightMareNetwork.git
+    https://github.com/vtmattedi/NightMareNetwork.git#v1.0.0-alpha.1
 ```
 
-During development against a local checkout, a project can instead use a local/symlink dependency.
+Pin a tag rather than the bare repository URL: without one, every build takes
+whatever is on the default branch at that moment. Use a commit hash instead of
+the tag only to try an unreleased fix. During development against a local
+checkout, a project can instead use a local/symlink dependency.
 
 The public umbrella header is:
 
