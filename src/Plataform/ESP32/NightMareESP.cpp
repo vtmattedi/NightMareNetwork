@@ -282,7 +282,7 @@ void startNightMareESP()
     if (!NightMare::WiFiBegin())
         LOG_ERROR("NM", "Wi-Fi station did not start");
 #endif
-#if NM_NETWORK_ESPNOW
+#if NM_NETWORK_ESPNOW && NM_ESPNOW_AUTO
     if (!NightMare::EspNow_enable())
         LOG_ERROR("NM", "ESP-NOW service did not start");
 #endif

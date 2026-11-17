@@ -189,6 +189,12 @@
 #define NM_WIFI_AUTO NM_ENABLE_WIFI
 #endif
 
+// Whether startNightMareESP() calls NightMare::EspNow_enable(). If not, the application enables (and may later disable) the
+// ESP-NOW service itself, e.g. from a setting. Has no effect unless NM_NETWORK_ESPNOW is on.
+#ifndef NM_ESPNOW_AUTO
+#define NM_ESPNOW_AUTO 1
+#endif
+
 // NightMare Gateway (Gateway/NightMareGateway.h): an ESP-NOW broker for
 // NightMare devices bridged to an MQTT broker, which is itself a NightMare
 // device. NightMareGateway_init() / NightMareGateway_tick() take the place of
