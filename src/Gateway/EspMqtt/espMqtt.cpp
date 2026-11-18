@@ -59,7 +59,7 @@ void mqtt_configure(const NightMareMqttConfig &config)
 // seconds. Called from the gateway task that blocked it past the task
 // watchdog, so publishes are handed to this queue and a task of their own
 // does the blocking call instead.
-#define OUTBOUND_QUEUE_DEPTH 32
+#define OUTBOUND_QUEUE_DEPTH NM_GATEWAY_MQTT_OUTBOUND_QUEUE
 #define PUBLISHER_STACK_SIZE 6144
 #define PUBLISHER_PRIORITY 4
 static QueueHandle_t s_outbound = NULL; // NightMare::Message*; NULL is the "session connected" marker

@@ -10,6 +10,7 @@
 #include <Gateway/GatewayState.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "esp_heap_caps.h"
 #include "freertos/semphr.h"
 #include "esp_random.h"
 #include "esp_wifi.h"
@@ -25,8 +26,9 @@ static const char *TAG = "espBroker";
 
 // A device (re)connecting sends every subscription plus its last will
 // back-to-back, and each SUBSCRIBE costs an ACK and a retained replay to
-// handle, so the queue has to absorb a whole burst. ~8 KB at 32.
-#define RX_QUEUE_DEPTH 32
+// handle, so the queue has to absorb a whole burst. Several devices doing that
+// at once, each followed by a 20+ fragment hardware manifest, is what sets the
+// size (NM_GATEWAY_ESPNOW_RX_QUEUE), not one device.
 #define SEND_TIMEOUT_MS 50
 #define BEACON_INTERVAL_MS 5000
 // Told to every client in CONNACK. A session silent for SESSION_TIMEOUT_MS is
@@ -57,6 +59,10 @@ struct RxPacket
 };
 
 static QueueHandle_t s_rxQueue = NULL;
+// The queue's control block has to be in internal RAM; its slots may be in PSRAM.
+static StaticQueue_t s_rxQueueControl;
+static uint32_t s_rxQueueDepth = 0;
+static std::atomic<uint32_t> s_rxQueuePeak{0}; // deepest it has been since the last report
 static SemaphoreHandle_t s_sendDone = NULL;
 static espDeviceManager s_devices(SESSION_TIMEOUT_MS);
 static ReassemblyTable s_reassembly;
@@ -151,6 +157,29 @@ static void send_cb(const esp_now_send_info_t *info, esp_now_send_status_t statu
     xSemaphoreGive(s_sendDone);
 }
 
+// Slots in PSRAM when there is some (a few hundred cost nothing there), else a
+// small one in internal RAM: the old fixed 32 slots lost frames in a burst.
+static QueueHandle_t createRxQueue()
+{
+    const size_t slot = sizeof(RxPacket);
+    const size_t bytes = (size_t)NM_GATEWAY_ESPNOW_RX_QUEUE * slot;
+    uint8_t *storage = static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (storage != NULL)
+    {
+        QueueHandle_t queue = xQueueCreateStatic(NM_GATEWAY_ESPNOW_RX_QUEUE, slot, storage, &s_rxQueueControl);
+        if (queue != NULL)
+        {
+            s_rxQueueDepth = NM_GATEWAY_ESPNOW_RX_QUEUE;
+            LOG(TAG, "RX queue: %u slots in PSRAM (%u KB)", (unsigned)s_rxQueueDepth, (unsigned)(bytes / 1024));
+            return queue;
+        }
+        heap_caps_free(storage);
+    }
+    s_rxQueueDepth = NM_GATEWAY_ESPNOW_RX_QUEUE_INTERNAL;
+    LOG(TAG, "RX queue: %u slots in internal RAM", (unsigned)s_rxQueueDepth);
+    return xQueueCreate(s_rxQueueDepth, slot);
+}
+
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
     if (info == NULL || data == NULL || len <= 0 || len > (int)NightMare::MaxPacketSizeV1)
@@ -170,6 +199,11 @@ static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
         s_rxDropped.fetch_add(1, std::memory_order_relaxed);
         gwCount(g_gatewayStats.espnowRxDropped);
         return;
+    }
+    const uint32_t waiting = (uint32_t)uxQueueMessagesWaiting(s_rxQueue);
+    uint32_t peak = s_rxQueuePeak.load(std::memory_order_relaxed);
+    while (waiting > peak && !s_rxQueuePeak.compare_exchange_weak(peak, waiting, std::memory_order_relaxed))
+    {
     }
     // Drain now rather than at the next timed tick.
     NightMareGateway_wake();
@@ -565,7 +599,7 @@ bool espBroker_init(const uint8_t *psk, size_t pskLength)
     if (s_snapshotLock == NULL)
         s_snapshotLock = xSemaphoreCreateMutex();
     if (s_rxQueue == NULL)
-        s_rxQueue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(RxPacket));
+        s_rxQueue = createRxQueue();
     if (s_sendDone == NULL)
         s_sendDone = xSemaphoreCreateBinary();
     if (s_rxQueue == NULL || s_sendDone == NULL || s_snapshotLock == NULL)
@@ -686,8 +720,12 @@ void espBroker_process(void)
         handlePacket(packet);
 
     const uint32_t dropped = s_rxDropped.exchange(0, std::memory_order_relaxed);
+    const uint32_t peak = s_rxQueuePeak.exchange(0, std::memory_order_relaxed);
     if (dropped != 0)
-        LOG_WARNING(TAG, "RX queue full, dropped %lu packet(s)", (unsigned long)dropped);
+        LOG_WARNING(TAG, "RX queue full (%u slots), dropped %lu packet(s)", (unsigned)s_rxQueueDepth,
+                    (unsigned long)dropped);
+    else if (peak * 2 > s_rxQueueDepth)
+        LOG_WARNING(TAG, "RX queue peaked at %u of %u slots", (unsigned)peak, (unsigned)s_rxQueueDepth);
 
     s_devices.expire(nowMs(), publishLastWill);
     refreshSnapshot();

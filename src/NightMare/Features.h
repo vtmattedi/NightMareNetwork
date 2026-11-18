@@ -224,6 +224,25 @@
 #ifndef NM_GATEWAY_TASK_PRIORITY
 #define NM_GATEWAY_TASK_PRIORITY 5
 #endif
+// ESP-NOW frames the broker can hold between the radio callback and the gateway
+// task (one slot is ~260 bytes). When it is full the frame is lost and the
+// sender is not told, so it has to absorb the burst of devices (re)connecting at
+// once: each one sends a retained hardware manifest of 20+ fragments. The storage
+// is taken from PSRAM when the board has any, which makes a few hundred slots
+// cheap; without PSRAM the broker falls back to NM_GATEWAY_ESPNOW_RX_QUEUE_INTERNAL
+// slots in internal RAM.
+#ifndef NM_GATEWAY_ESPNOW_RX_QUEUE
+#define NM_GATEWAY_ESPNOW_RX_QUEUE 32
+#endif
+#ifndef NM_GATEWAY_ESPNOW_RX_QUEUE_INTERNAL
+#define NM_GATEWAY_ESPNOW_RX_QUEUE_INTERNAL 32
+#endif
+// Messages waiting for the MQTT client (pointers only; the payloads live on the
+// heap). Nothing leaves it until the session is up, so it also has to hold what
+// the ESP-NOW side forwards while the broker connects.
+#ifndef NM_GATEWAY_MQTT_OUTBOUND_QUEUE
+#define NM_GATEWAY_MQTT_OUTBOUND_QUEUE 32
+#endif
 // Longest the own task sleeps with nothing arriving: the beacon, session
 // pruning and link status are timed off this.
 #ifndef NM_GATEWAY_TICK_MS
