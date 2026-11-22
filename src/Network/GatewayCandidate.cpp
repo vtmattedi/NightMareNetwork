@@ -60,6 +60,21 @@ bool GatewayCandidateHandleMessage(const std::string &topic, const std::string &
     if (!retained)
         return false;
     const bool network = topicGatewayId(topic, topicId);
+    // A tombstoned announcement (a gateway that moved its address, an
+    // operator's clear) withdraws that gateway as the candidate.
+    if (network && payload.empty())
+    {
+        if (!ensureLock())
+            return false;
+        xSemaphoreTake(lock, portMAX_DELAY);
+        const bool wasCurrent = current.id == topicId;
+        if (wasCurrent)
+            current = GatewayCandidateStatus();
+        xSemaphoreGive(lock);
+        if (wasCurrent)
+            OnConnectivityStateChanged();
+        return true;
+    }
     if (!network)
     {
         if (!NightMare::Text::endsWith(topic, StatusSuffix) || topic.length() <= strlen(StatusSuffix))
@@ -138,8 +153,8 @@ bool GatewayCandidateMatchesAuthenticated(const char *gatewayId)
 
 void GatewayCandidateOnConnected()
 {
-    bool complete = Subscribe(GatewayNetworkTopicFilter());
-    complete = Subscribe(GatewayStatusTopicFilter()) && complete;
+    bool complete = TransportSubscribe(GatewayNetworkTopicFilter());
+    complete = TransportSubscribe(GatewayStatusTopicFilter()) && complete;
     if (!complete)
         LOG_WARNING("NET", "Gateway candidate subscriptions were not accepted");
 }

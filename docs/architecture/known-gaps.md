@@ -68,8 +68,11 @@ cooperative ESP tick to spread framework re-announcement across ticks.
 
 The intended longer-term architecture may introduce a central Runtime/queue so connection ingress is cleanly separated from application execution.
 
-A general execution queue is not implemented and should not be assumed by
-application code. `SystemState` requests are a fixed framework publication
+`NM_MESSAGE_QUEUE_DEPTH` moves the application's own `OnMessage`, `OnConnect`
+and `OnNetworkStatus` handlers onto a queue run by `DeliverEvents()`, which
+covers the common need. Framework routing itself still runs on the connection
+path, and a general execution queue is not implemented and should not be
+assumed by application code. `SystemState` requests are a fixed framework publication
 mechanism, not generic scheduling semantics.
 
 ## Projected Remote Value JSON fan-out is not implemented
@@ -120,18 +123,19 @@ Monotonic jobs are runtime-only.
 
 **Category:** Known limitation.
 
-When a device adopts a new name, old-identity cleanup can delete:
+When a device's address moves (an adoption, or the one-time migration to the
+address/label model), old-identity cleanup can delete:
 
 ```text
 retained state for currently declared Managed Values
 the old status topic
+the old info, hardware, telemetry and gateway documents
 ```
 
 If an older firmware published a Managed Value that no longer exists in the current Resource registry, the current firmware has no historical record from which to reconstruct and delete that old retained topic.
 
-The MessagePack-first protocol pass does not migrate or tombstone framework
-document topics. Broker cleanup for superseded document addresses remains an
-explicit operator concern.
+Framework documents under superseded topic names (for example from an older
+protocol pass) are not tracked and remain an explicit operator concern.
 
 ## Status does not imply Resource freshness
 

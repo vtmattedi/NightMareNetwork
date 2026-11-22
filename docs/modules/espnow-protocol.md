@@ -59,7 +59,7 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
 | 8  | SUBSCRIBE   | client → gateway    | cid | topic filter | yes |
 | 9  | UNSUBSCRIBE | client → gateway    | cid | topic filter | yes |
 | 10 | MESSAGE     | both                | cid | `[retained:1][reserved:1][topicLen:6][topic][payload]` | yes |
-| 11 | LAST_WILL   | client → gateway    | cid | same encoding as MESSAGE | yes |
+| 11 | LAST_WILL   | client → gateway    | cid | same encoding as MESSAGE; topic length 0 clears the will | yes |
 | 12 | ACK         | gateway → client    | cid | — | yes |
 | 13 | ERROR       | gateway → client    | any | `[ErrorCode]` (1) | if a session key is installed |
 

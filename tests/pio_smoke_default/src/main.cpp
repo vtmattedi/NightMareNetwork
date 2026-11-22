@@ -1,6 +1,8 @@
 #include <NightMareNetwork.h>
 #include <Network/NmMessageRouter.h>
 #include <Network/NmRoutingPolicy.h>
+#include <Network/NmConnectionInternal.h>
+#include <Core/TopicFilter.h>
 #include <Core/DocumentPayload.h>
 
 #include <type_traits>
@@ -85,8 +87,18 @@ static_assert(std::is_same<decltype(&NightMare::Publish),
                            bool (*)(const char *, const uint8_t *, size_t, bool)>::value,
               "The generic connection publication boundary must remain binary-safe");
 static_assert(std::is_same<NightMare::MessageHandler,
-                           void (*)(const char *, const uint8_t *, size_t, bool)>::value,
+                           void (*)(const NightMare::ReceivedMessage &)>::value,
               "The generic message callback boundary must remain binary-safe");
+static_assert(std::is_same<decltype(NightMare::ReceivedMessage::length), size_t>::value &&
+                  std::is_same<decltype(NightMare::ReceivedMessage::source),
+                               NightMare::ConnectionType>::value,
+              "A received message carries an explicit length and its connection");
+static_assert(std::is_same<decltype(&NightMare::PublishOn),
+                           bool (*)(NightMare::ConnectionType, const char *, const uint8_t *,
+                                    size_t, bool)>::value &&
+                  std::is_same<decltype(&NightMare::SubscribeOn),
+                               bool (*)(NightMare::ConnectionType, const char *)>::value,
+              "Every connection must be usable directly, whichever one is the transport");
 static_assert(std::is_same<decltype(&NightMare::OnMessage),
                            void (*)(NightMare::MessageHandler)>::value,
               "OnMessage must remain part of the public connection API");
@@ -97,8 +109,11 @@ static_assert(std::is_same<decltype(&NightMare::OnConnect),
               "OnConnect must remain part of the public connection API");
 static_assert(std::is_same<decltype(&NightMare::WiFiIP_enable), bool (*)()>::value,
               "WiFiIP must expose an independent enable lifecycle");
-static_assert(std::is_same<decltype(&NightMare::Mqtt_enable),
-                           bool (*)(NightMare::MqttProfile)>::value,
+static_assert(std::is_same<decltype(static_cast<bool (*)(NightMare::MqttProfile)>(
+                                        &NightMare::Mqtt_enable)),
+                           bool (*)(NightMare::MqttProfile)>::value &&
+                  std::is_same<decltype(static_cast<bool (*)()>(&NightMare::Mqtt_enable)),
+                               bool (*)()>::value,
               "MQTT must expose an independent profile-aware lifecycle");
 #if NM_NETWORK_ESPNOW
 static_assert(std::is_same<decltype(&NightMare::EspNow_suspend),
@@ -274,15 +289,14 @@ uint8_t applicationMessagePayload[3] = {};
 size_t applicationMessageLength = 0;
 bool applicationMessageRetained = false;
 
-void recordApplicationMessage(const char *topic, const uint8_t *payload,
-                              size_t length, bool retained)
+void recordApplicationMessage(const NightMare::ReceivedMessage &message)
 {
     ++applicationMessageCalls;
-    applicationMessageTopic = topic;
-    applicationMessageLength = length;
-    applicationMessageRetained = retained;
-    for (size_t i = 0; i < length && i < sizeof(applicationMessagePayload); ++i)
-        applicationMessagePayload[i] = payload[i];
+    applicationMessageTopic = message.topic;
+    applicationMessageLength = message.length;
+    applicationMessageRetained = message.retained;
+    for (size_t i = 0; i < message.length && i < sizeof(applicationMessagePayload); ++i)
+        applicationMessagePayload[i] = message.payload[i];
 }
 
 bool acceptStateWrite(ManagedState<int> &, const int &)
@@ -454,6 +468,21 @@ void setup()
         applicationMessagePayload[1] == 0 && applicationMessagePayload[2] == 'B' &&
         applicationMessageRetained;
     smokeState.setFlag("generic_message_ingress", genericMessageIngress);
+
+    const bool topicFilters =
+        NightMare::TopicMatches("a/b/c", "a/+/c") && NightMare::TopicMatches("a", "a/#") &&
+        !NightMare::TopicMatches("$SYS/x", "+/x") && !NightMare::TopicMatches("a/b", "a") &&
+        NightMare::ValidTopicFilter("a/+/#") && !NightMare::ValidTopicFilter("a/b#") &&
+        !NightMare::ValidTopicFilter("a+/b");
+    smokeState.setFlag("topic_filters", topicFilters);
+    const std::string mqttStatus =
+        NightMare::ConnectionDeviceStatusJson(false, NightMare::ConnectionType::MQTT);
+    const bool statusVia =
+        mqttStatus.find("\"via\":{\"transport\":\"MQTT\"") != std::string::npos &&
+        mqttStatus.find("\"online\":false") != std::string::npos &&
+        NightMare::ConnectionDeviceStatusJson(true, NightMare::ConnectionType::AUTO).find("\"via\"") ==
+            std::string::npos;
+    smokeState.setFlag("status_via", statusVia);
 
     JsonDocument consumePacked;
     JsonArray consumeRoot = consumePacked.to<JsonArray>();

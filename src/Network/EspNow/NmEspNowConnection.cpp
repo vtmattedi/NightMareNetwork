@@ -4,6 +4,7 @@
 #include "NmEspNowConnection.h"
 #include "EspNowClient.h"
 
+#include <Core/Config.h>
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
 #include <Network/NmMessageRouter.h>
@@ -11,6 +12,7 @@
 #include <Network/WiFiRadio/NmWifiRadioService.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 namespace
@@ -71,25 +73,46 @@ void onMessage(const char *topic, const uint8_t *payload, size_t length, bool re
 }
 
 // The gateway publishes this when the device goes silent (300 s), the same
-// role the MQTT last will plays.
-// Only resent when it changed: the client already re-sends the current one on
-// every reconnect.
+// role the MQTT last will plays. Only the transport holds presence: while
+// another connection carries the traffic the gateway keeps no will for this
+// device, so losing ESP-NOW then cannot mark a device offline that is still
+// up on MQTT. Only resent when it changed.
 std::string currentWill;
+SemaphoreHandle_t willLock = nullptr;
 
-void refreshLastWill()
+void applyLastWill()
 {
-    const std::string offline = NightMare::ConnectionDeviceStatusJson(false);
-    if (offline == currentWill)
+    if (willLock == nullptr)
+        willLock = xSemaphoreCreateMutex();
+    if (willLock == nullptr)
         return;
-    const std::string willTopic = gDeviceIdentity.topic("status");
-    if (!NightMare::EspNowClient::setLastWill(willTopic.c_str(),
-                                              reinterpret_cast<const uint8_t *>(offline.c_str()),
-                                              offline.length(), true))
+    xSemaphoreTake(willLock, portMAX_DELAY);
+    const bool holdsPresence =
+        NightMare::GetActiveConnection() == NightMare::ConnectionType::ESP_NOW &&
+        NightMare::GetConnectionState() == NightMare::ConnectionState::CONNECTED;
+    if (!holdsPresence)
     {
-        LOG_WARNING("ESPNOW", "Could not set the last will");
+        if (!currentWill.empty())
+        {
+            NightMare::EspNowClient::clearLastWill();
+            currentWill.clear();
+        }
+        xSemaphoreGive(willLock);
         return;
     }
-    currentWill = offline;
+    const std::string offline =
+        NightMare::ConnectionDeviceStatusJson(false, NightMare::ConnectionType::ESP_NOW);
+    if (offline != currentWill)
+    {
+        const std::string willTopic = gDeviceIdentity.topic("status");
+        if (NightMare::EspNowClient::setLastWill(willTopic.c_str(),
+                                                 reinterpret_cast<const uint8_t *>(offline.c_str()),
+                                                 offline.length(), true))
+            currentWill = offline;
+        else
+            LOG_WARNING("ESPNOW", "Could not set the last will");
+    }
+    xSemaphoreGive(willLock);
 }
 
 void handle(const Event &event)
@@ -99,15 +122,15 @@ void handle(const Event &event)
         LOG("ESPNOW", "Gateway state: %s", NightMare::EspNowClient::stateName(event.state));
     if (event.isMessage)
     {
-        if (NightMare::GetActiveConnection() == NightMare::ConnectionType::ESP_NOW)
-            NmMessageRouter::handleMessage(event.topic, event.payload, event.retained);
+        NightMare::OnMessageIngress(NightMare::ConnectionType::ESP_NOW, event.topic,
+                                    event.payload, event.retained);
         return;
     }
     if (event.state == State::CONNECTED)
     {
-        // Rebuilt on every connect: the offline status carries the timezone,
-        // which can change while running.
-        refreshLastWill();
+        // The will follows routing (applyLastWill from onRoutingChanged), so
+        // it is rebuilt once this session becomes the transport, with the
+        // gateway id it reports.
         connectedReported = true;
         serviceState = NightMare::ConnectivityState::CONNECTED;
         NightMare::OnConnectedIngress(NightMare::ConnectionType::ESP_NOW);
@@ -167,7 +190,10 @@ bool begin()
     drain();
     connectedReported = false;
 
-    refreshLastWill();
+    // A new client starts without a will; routing installs one when ESP-NOW
+    // becomes the transport.
+    NightMare::EspNowClient::clearLastWill();
+    currentWill.clear();
 
     NightMare::EspNowClient::onState(onState);
     NightMare::EspNowClient::onMessage(onMessage);
@@ -204,6 +230,12 @@ void end()
 bool running()
 {
     return workerRun;
+}
+
+void onRoutingChanged()
+{
+    if (workerRun)
+        applyLastWill();
 }
 
 bool enabled() { return serviceEnabled; }
@@ -257,10 +289,39 @@ bool unsubscribe(const char *topicFilter)
 }
 }
 
-namespace NightMare
+namespace
 {
-bool EspNow_enable()
+bool applyEnable();
+bool applyDisable();
+
+bool writeEnabled(Config<bool> &, const bool &requested)
 {
+    return requested ? applyEnable() : applyDisable();
+}
+}
+
+//@NightMare:Config ESP-NOW enabled
+// Saved by EspNow_enable()/EspNow_disable() and restored at startup. A CONFIG
+// SET applies it at once.
+static Config<bool> espNowEnabledSetting("nightmare:connection:espnow_enabled", NM_ESPNOW_AUTO != 0);
+
+namespace
+{
+struct SettingHandlerInstaller
+{
+    SettingHandlerInstaller() { espNowEnabledSetting.onWrite = writeEnabled; }
+};
+SettingHandlerInstaller settingHandlerInstaller;
+
+void saveEnabled(bool enabled)
+{
+    if (espNowEnabledSetting.value() != enabled && !espNowEnabledSetting.set(enabled))
+        LOG_WARNING("ESPNOW", "Could not save the ESP-NOW enable state");
+}
+
+bool applyEnable()
+{
+    using namespace NightMare;
     if (serviceEnabled)
         return true;
     if (WiFiRadio_state() != ConnectivityState::READY)
@@ -280,8 +341,9 @@ bool EspNow_enable()
     return true;
 }
 
-bool EspNow_disable()
+bool applyDisable()
 {
+    using namespace NightMare;
     if (!serviceEnabled)
         return true;
     serviceEnabled = false;
@@ -292,7 +354,27 @@ bool EspNow_disable()
     NmEspNowConnection::end();
     return true;
 }
+}
 
+namespace NightMare
+{
+bool EspNow_enable()
+{
+    if (!applyEnable())
+        return false;
+    saveEnabled(true);
+    return true;
+}
+
+bool EspNow_disable()
+{
+    if (!applyDisable())
+        return false;
+    saveEnabled(false);
+    return true;
+}
+
+bool EspNow_savedEnabled() { return espNowEnabledSetting.value(); }
 bool EspNow_enabled() { return serviceEnabled; }
 ConnectivityState EspNow_state() { return serviceState; }
 bool EspNow_suspend(ConnectivitySuspendReason reason) { return NmEspNowConnection::suspend(reason); }

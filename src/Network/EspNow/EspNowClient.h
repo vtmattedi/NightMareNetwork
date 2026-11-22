@@ -73,6 +73,9 @@ bool unsubscribe(const char *filter);
 // Kept and re-sent after every new session; also sent right away when CONNECTED.
 bool setLastWill(const char *topic, const uint8_t *payload, size_t length,
                  bool retained = false);
+// Forgets the last will, here and (while CONNECTED) at the gateway: a
+// one-byte LAST_WILL with topic length 0.
+bool clearLastWill();
 
 // Only while CONNECTED. A message may span up to 255 frames (~61 KB).
 bool publish(const char *topic, const uint8_t *payload, size_t length,

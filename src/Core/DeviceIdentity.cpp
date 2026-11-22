@@ -16,7 +16,8 @@ namespace
 {
 // "<oldName>/<flags>". The separator is safe because '/' never appears in a
 // device name, and one record is all v1 allows.
-constexpr uint8_t AllCleanupFlags = CLEANUP_RESOURCES | CLEANUP_STATUS;
+constexpr uint8_t AllCleanupFlags = CLEANUP_RESOURCES | CLEANUP_STATUS | CLEANUP_DOCUMENTS;
+constexpr char AddressModel[] = "2";
 
 bool applyTimezone(const std::string &timezone)
 {
@@ -35,6 +36,19 @@ bool DeviceIdentity::validDeviceName(const std::string &name)
     {
         const char c = name[i];
         if (c == '/' || c == '+' || c == '#' || static_cast<uint8_t>(c) < 0x20)
+            return false;
+    }
+    return true;
+}
+
+bool DeviceIdentity::validLabel(const std::string &label)
+{
+    if (label.length() > 64)
+        return false;
+    for (size_t i = 0; i < label.length(); ++i)
+    {
+        const uint8_t c = static_cast<uint8_t>(label[i]);
+        if (c < 0x20 || c == 0x7F)
             return false;
     }
     return true;
@@ -83,6 +97,10 @@ bool DeviceIdentity::begin()
         storedName = PersistentSettings.get(NightMare::PersistentKey::DeviceName, defaultName);
         storedTimezone = PersistentSettings.get(NightMare::PersistentKey::DeviceTimezone,
                                                 defaultTimezone);
+        const std::string storedLabel =
+            PersistentSettings.get(NightMare::PersistentKey::DeviceLabel, std::string());
+        label_ = validLabel(storedLabel) ? storedLabel : std::string();
+        migrateToAddressModel(defaultName, storedName);
     }
 #endif
     deviceName_ = validDeviceName(storedName) ? storedName : defaultName;
@@ -103,6 +121,40 @@ bool DeviceIdentity::begin()
         loadPendingCleanup();
 #endif
     return true;
+}
+
+// Before the address/label split the stored name was both the topic root and
+// what people read. Once per board: that name becomes the label, the address
+// goes back to the hardware signature, and the old root is cleaned up like an
+// adoption's (status, Resource states and manifests, framework documents).
+void DeviceIdentity::migrateToAddressModel(const std::string &defaultName, std::string &storedName)
+{
+#if NM_ENABLE_SETTINGS
+    if (PersistentSettings.get(NightMare::PersistentKey::IdentityModel, std::string()) == AddressModel)
+        return;
+    if (validDeviceName(storedName) && storedName != defaultName)
+    {
+        if (label_.empty() && validLabel(storedName))
+        {
+            label_ = storedName;
+            PersistentSettings.set(NightMare::PersistentKey::DeviceLabel, label_);
+        }
+        if (!PersistentSettings.exists(NightMare::PersistentKey::PendingIdentityCleanup))
+            PersistentSettings.set(NightMare::PersistentKey::PendingIdentityCleanup,
+                                   storedName + "/" + std::to_string(AllCleanupFlags));
+        else
+            LOG_WARNING("ID", "Identity cleanup already pending; '%s' is not cleaned up",
+                        storedName.c_str());
+        LOG("ID", "Address model: '%s' is now the label, the address is %s",
+            storedName.c_str(), defaultName.c_str());
+        storedName = defaultName;
+        PersistentSettings.set(NightMare::PersistentKey::DeviceName, defaultName);
+    }
+    PersistentSettings.set(NightMare::PersistentKey::IdentityModel, AddressModel);
+#else
+    (void)defaultName;
+    (void)storedName;
+#endif
 }
 
 void DeviceIdentity::loadPendingCleanup()
@@ -149,6 +201,63 @@ const std::string &DeviceIdentity::getDeviceName()
 {
     begin();
     return deviceName_;
+}
+
+const std::string &DeviceIdentity::getLabel()
+{
+    begin();
+    return label_;
+}
+
+const std::string &DeviceIdentity::getDisplayName()
+{
+    begin();
+    return label_.empty() ? deviceName_ : label_;
+}
+
+std::string DeviceIdentity::hostname()
+{
+    std::string host;
+    bool dash = false;
+    for (char c : getDisplayName())
+    {
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+        const bool keep = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        if (keep)
+        {
+            host += c;
+            dash = false;
+        }
+        else if (!host.empty() && !dash)
+        {
+            host += '-';
+            dash = true;
+        }
+        if (host.length() >= 32)
+            break;
+    }
+    while (!host.empty() && host.back() == '-')
+        host.pop_back();
+    return host.empty() ? deviceName_ : host;
+}
+
+bool DeviceIdentity::setLabel(const std::string &label)
+{
+    if (!begin() || !validLabel(label))
+        return false;
+    if (label == label_)
+        return true;
+#if NM_ENABLE_SETTINGS
+    const bool saved = label.empty()
+                           ? (!PersistentSettings.exists(NightMare::PersistentKey::DeviceLabel) ||
+                              PersistentSettings.remove(NightMare::PersistentKey::DeviceLabel))
+                           : PersistentSettings.set(NightMare::PersistentKey::DeviceLabel, label);
+    if (!saved)
+        return false;
+#endif
+    label_ = label;
+    return true;
 }
 
 const std::string &DeviceIdentity::getDeviceId()

@@ -7,7 +7,7 @@
 
 static const char *TAG = "espSessions";
 
-using NightMare::ConnectionState;
+using NightMare::SessionState;
 using NightMare::Device;
 using NightMare::FrameType;
 
@@ -61,9 +61,9 @@ espDeviceManager::Admission espDeviceManager::admit(const MacAddress &mac, const
 
     switch (device->state())
     {
-    case ConnectionState::CONNECTED:
+    case SessionState::CONNECTED:
         return {Verdict::SESSION, device};
-    case ConnectionState::SECURING:
+    case SessionState::SECURING:
         // The encrypted PING is what completes it; DISCONNECT may always end it.
         if (type == FrameType::PING || type == FrameType::DISCONNECT)
             return {Verdict::SESSION, device};
@@ -205,7 +205,7 @@ bool espDeviceManager::secureSession(Device &device, const uint8_t *lmk)
     }
     // Kept so an unproven handshake later can put encryption back.
     device.setSessionKey(lmk);
-    device.setState(ConnectionState::SECURING);
+    device.setState(SessionState::SECURING);
     return true;
 }
 

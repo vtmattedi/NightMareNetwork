@@ -29,14 +29,11 @@
 #ifndef NM_ENABLE_MQTT
 #define NM_ENABLE_MQTT 1
 #endif
-// Selectable NightMare connection profiles. NM_ENABLE_MQTT controls whether
-// the shared MQTT implementation is compiled; these flags control which
-// profiles NmConnection will accept. Defaults preserve existing builds.
-#ifndef NM_NETWORK_MQTT
-#define NM_NETWORK_MQTT NM_ENABLE_MQTT
-#endif
-#ifndef NM_NETWORK_LOCALMQTT
-#define NM_NETWORK_LOCALMQTT NM_ENABLE_MQTT
+// The MQTT broker profile (REMOTE or LOCAL) is chosen at runtime and saved
+// (Mqtt_enable(profile), NETWORK MQTT ENABLE <profile>); a profile exists when
+// creds.h describes its broker. The old compile-time profile switches are gone.
+#if defined(NM_NETWORK_MQTT) || defined(NM_NETWORK_LOCALMQTT)
+#error "NM_NETWORK_MQTT / NM_NETWORK_LOCALMQTT were removed: use NM_ENABLE_MQTT; the broker profile is a saved runtime setting (Mqtt_enable(profile)) and exists when creds.h describes that broker"
 #endif
 #ifndef NM_NETWORK_ESPNOW
 #define NM_NETWORK_ESPNOW 0
@@ -182,17 +179,38 @@
 #define NM_SERIAL_RX_BUFFER 512
 #endif
 
-// Whether NightMare::WiFiBegin() (the IP station) is called from startNightMareESP(). If not,
-// the application must call it itself. The radio starts regardless whenever
-// NM_ENABLE_WIFI_RADIO is on, so an ESP-NOW device can leave this off and never join an AP.
+// First-boot default of the saved Wi-Fi station enable state (Config
+// nightmare:connection:wifi_enabled): whether startNightMareESP() starts the IP
+// station before anything was saved. WiFiIP_enable()/WiFiIP_disable() save it.
+// The radio starts regardless whenever NM_ENABLE_WIFI_RADIO is on, so an
+// ESP-NOW device can leave this off and never join an AP.
 #ifndef NM_WIFI_AUTO
 #define NM_WIFI_AUTO NM_ENABLE_WIFI
 #endif
 
-// Whether startNightMareESP() calls NightMare::EspNow_enable(). If not, the application enables (and may later disable) the
-// ESP-NOW service itself, e.g. from a setting. Has no effect unless NM_NETWORK_ESPNOW is on.
+// First-boot default of the saved ESP-NOW enable state (Config
+// nightmare:connection:espnow_enabled); EspNow_enable()/EspNow_disable() save
+// it. Has no effect unless NM_NETWORK_ESPNOW is on.
 #ifndef NM_ESPNOW_AUTO
 #define NM_ESPNOW_AUTO 1
+#endif
+// First-boot default of the saved MQTT enable state.
+#ifndef NM_MQTT_AUTO
+#define NM_MQTT_AUTO NM_WIFI_AUTO
+#endif
+// Filters kept for Subscribe(), and per connection for SubscribeOn().
+#ifndef NM_MAX_APP_SUBSCRIPTIONS
+#define NM_MAX_APP_SUBSCRIPTIONS 64
+#endif
+// 0: OnMessage/OnConnect/OnNetworkStatus run on the network tasks.
+// N > 0: their events are copied into an N-deep queue and run by
+// NightMare::DeliverEvents(), from tickNightMareESP() unless NM_DELIVER_IN_TICK
+// is 0 (then the application calls DeliverEvents() from the task it wants).
+#ifndef NM_MESSAGE_QUEUE_DEPTH
+#define NM_MESSAGE_QUEUE_DEPTH 0
+#endif
+#ifndef NM_DELIVER_IN_TICK
+#define NM_DELIVER_IN_TICK 1
 #endif
 
 // NightMare Gateway (Gateway/NightMareGateway.h): an ESP-NOW broker for
@@ -255,14 +273,14 @@
 #if NM_ENABLE_MQTT && !NM_ENABLE_WIFI
 #error "NM_ENABLE_MQTT requires NM_ENABLE_WIFI: MQTT depends on the WiFiIP service"
 #endif
-#if NM_NETWORK_MQTT && !NM_ENABLE_MQTT
-#error "NM_NETWORK_MQTT requires NM_ENABLE_MQTT"
+#if NM_NETWORK_ESPNOW && !NM_ENABLE_NETWORK
+#error "NM_NETWORK_ESPNOW requires NM_ENABLE_NETWORK"
 #endif
-#if NM_NETWORK_LOCALMQTT && !NM_ENABLE_MQTT
-#error "NM_NETWORK_LOCALMQTT requires NM_ENABLE_MQTT"
+#if NM_MESSAGE_QUEUE_DEPTH < 0
+#error "NM_MESSAGE_QUEUE_DEPTH must be 0 (direct callbacks) or a queue depth"
 #endif
-#if (NM_NETWORK_MQTT || NM_NETWORK_LOCALMQTT || NM_NETWORK_ESPNOW) && !NM_ENABLE_NETWORK
-#error "NM_NETWORK_* connection profiles require NM_ENABLE_NETWORK"
+#if NM_MAX_APP_SUBSCRIPTIONS < 1
+#error "NM_MAX_APP_SUBSCRIPTIONS must be at least 1"
 #endif
 #if NM_ENABLE_NETWORK && !NM_ENABLE_RESOURCES
 #error "NM_ENABLE_NETWORK requires NM_ENABLE_RESOURCES"
@@ -340,16 +358,19 @@
 #endif
 // The gateway carries its own traffic. NmConnection would inject a second
 // publisher into the ResourcesManager and select a transport of its own.
-#if NM_ENABLE_GATEWAY && NM_ENABLE_NETWORK
-#error "NM_ENABLE_GATEWAY requires NM_ENABLE_NETWORK 0: the gateway carries its own traffic"
+#if NM_ENABLE_GATEWAY && !NM_ENABLE_NETWORK
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_NETWORK: the gateway is a device whose transport is its own broker (ConnectionType::GATEWAY)"
+#endif
+#if NM_ENABLE_GATEWAY && NM_ENABLE_MQTT
+#error "NM_ENABLE_GATEWAY requires NM_ENABLE_MQTT 0: the gateway's MQTT uplink is its own client (NM_GATEWAY_MQTT)"
 #endif
 #if NM_GATEWAY_ESPNOW && NM_NETWORK_ESPNOW
 #error "NM_GATEWAY_ESPNOW and NM_NETWORK_ESPNOW both own ESP-NOW: a gateway is not also a client"
 #endif
 // Jobs would run on the Scheduler task, while the gateway's Resources and
 // device table belong to whoever ticks the gateway.
-#if NM_ENABLE_GATEWAY && NM_ENABLE_SCHEDULER
-#error "NM_ENABLE_GATEWAY requires NM_ENABLE_SCHEDULER 0: jobs would run outside the gateway tick"
+#if NM_ENABLE_GATEWAY && NM_ENABLE_SCHEDULER && NM_SCHEDULER_OWN_TASK
+#error "NM_ENABLE_GATEWAY requires NM_SCHEDULER_OWN_TASK 0: jobs run in the gateway tick (MANUAL), not in a task of their own"
 #endif
 #if NM_GATEWAY_TICK_MS < 1
 #error "NM_GATEWAY_TICK_MS must be at least 1"

@@ -20,6 +20,9 @@ bool publish(const char *topic, const uint8_t *payload, size_t length,
 bool subscribe(const char *topicFilter);
 bool unsubscribe(const char *topicFilter);
 bool running();
+// The transport changed: install the gateway Last Will while ESP-NOW is the
+// transport, clear it otherwise.
+void onRoutingChanged();
 bool enabled();
 NightMare::ConnectivityState connectivityState();
 bool suspend(NightMare::ConnectivitySuspendReason reason);
@@ -28,8 +31,12 @@ bool resume(NightMare::ConnectivitySuspendReason reason);
 
 namespace NightMare
 {
+// Each enable/disable is saved (Config nightmare:connection:espnow_enabled)
+// and restored by startNightMareESP().
 bool EspNow_enable();
 bool EspNow_disable();
+// The saved enable state: what startNightMareESP() restores.
+bool EspNow_savedEnabled();
 bool EspNow_enabled();
 ConnectivityState EspNow_state();
 bool EspNow_suspend(ConnectivitySuspendReason reason);

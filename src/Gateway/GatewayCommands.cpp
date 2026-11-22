@@ -152,7 +152,7 @@ NightMareResults clients(NightmareContext context)
         entry["mac"] = device.mac;
         entry["name"] = device.name;
         entry["cid"] = device.cid;
-        entry["state"] = NightMare::connectionStateName(device.state);
+        entry["state"] = NightMare::sessionStateName(device.state);
         entry["suspended"] = device.suspended;
         entry["subscriptions"] = device.subscriptions.size();
         if (device.hasRssi)

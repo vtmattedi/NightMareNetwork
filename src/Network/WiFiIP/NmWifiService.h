@@ -18,8 +18,12 @@ namespace NightMare
 WiFiProfile WiFiStoredProfile();
 // Prepares and enables the independent WiFiIP service. It does not start MQTT.
 bool WiFiBegin();
+// Each enable/disable is saved (Config nightmare:connection:wifi_enabled) and
+// restored by startNightMareESP().
 bool WiFiIP_enable();
 bool WiFiIP_disable();
+// The saved enable state: what startNightMareESP() restores.
+bool WiFiIP_savedEnabled();
 bool WiFiIP_enabled();
 ConnectivityState WiFiIP_state();
 // Services scan completion/timeout cleanup, including ESP-NOW resume.

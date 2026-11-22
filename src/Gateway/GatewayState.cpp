@@ -39,7 +39,8 @@ std::string render(cJSON *root)
 void addIdentity(cJSON *root, bool online)
 {
     cJSON_AddNumberToObject(root, "schema", 1);
-    cJSON_AddStringToObject(root, "name", gatewayId.c_str());
+    cJSON_AddStringToObject(root, "name", gDeviceIdentity.getDisplayName().c_str());
+    cJSON_AddStringToObject(root, "address", gatewayId.c_str());
     cJSON_AddStringToObject(root, "hardware", hardwareSignature.c_str());
     cJSON_AddStringToObject(root, "timezone", timezoneName.c_str());
     cJSON_AddStringToObject(root, "device", gatewayId.c_str());
@@ -135,7 +136,7 @@ std::string clientsJson(const std::vector<EspBrokerDeviceInfo> &devices)
         cJSON *entry = cJSON_CreateObject();
         cJSON_AddStringToObject(entry, "id", device.mac.c_str());
         cJSON_AddStringToObject(entry, "name", device.name.c_str());
-        cJSON_AddBoolToObject(entry, "connected", device.state == NightMare::ConnectionState::CONNECTED && !device.suspended);
+        cJSON_AddBoolToObject(entry, "connected", device.state == NightMare::SessionState::CONNECTED && !device.suspended);
         cJSON *will = cJSON_AddObjectToObject(entry, "last_will");
         cJSON_AddStringToObject(will, "topic", device.lastWillTopic.c_str());
         cJSON_AddBoolToObject(will, "retained", device.lastWillRetained);

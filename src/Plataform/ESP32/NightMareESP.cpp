@@ -33,6 +33,9 @@
 #include <Network/NmConnection.h>
 #include <Network/NmConnectionInternal.h>
 #endif
+#if NM_ENABLE_GATEWAY
+#include <Gateway/NightMareGateway.h>
+#endif
 
 namespace
 {
@@ -87,7 +90,11 @@ namespace
         switch (request)
         {
         case SystemRequest::PublishStatus:
-#if NM_ENABLE_NETWORK
+#if NM_ENABLE_GATEWAY
+            // A gateway's status is its own presence document.
+            NightMareGateway_requestPresence();
+            return true;
+#elif NM_ENABLE_NETWORK
             return NightMare::PublishText(gDeviceIdentity.topic("status"), NightMare::ConnectionDeviceStatusJson(true), true);
 #else
             return true;
@@ -230,7 +237,7 @@ void introNightMareESP()
     if (!configManager().restore())
         LOG_ERROR("NM", "Could not restore persistent Config values");
     std::printf("%s%s%s\n", MattediWorksPresents, NightMareNetworkFiglet,
-                gDeviceIdentity.getDeviceName().c_str());
+                gDeviceIdentity.getDisplayName().c_str());
 #ifdef VERSION
     // Device projects normally generate VERSION and BUILD_TIMESTAMP from their
     // version pre-script. Guards keep standalone library builds usable too.
@@ -276,27 +283,20 @@ void startNightMareESP()
     if (!NightMare::WiFiRadioBegin())
         LOG_ERROR("NM", "Wi-Fi radio did not start; ESP-NOW and the IP station cannot run");
 #endif
-#if NM_ENABLE_WIFI && NM_WIFI_AUTO
-    // Each connectivity service starts independently; preference does not
-    // decide which services exist or run.
-    if (!NightMare::WiFiBegin())
+    // Each connectivity service starts independently from its saved enable
+    // state (NM_WIFI_AUTO, NM_MQTT_AUTO and NM_ESPNOW_AUTO are only the first
+    // boot's defaults); preference does not decide which services exist or run.
+#if NM_ENABLE_WIFI
+    if (NightMare::WiFiIP_savedEnabled() && !NightMare::WiFiBegin())
         LOG_ERROR("NM", "Wi-Fi station did not start");
 #endif
-#if NM_NETWORK_ESPNOW && NM_ESPNOW_AUTO
-    if (!NightMare::EspNow_enable())
+#if NM_NETWORK_ESPNOW
+    if (NightMare::EspNow_savedEnabled() && !NightMare::EspNow_enable())
         LOG_ERROR("NM", "ESP-NOW service did not start");
 #endif
-#if NM_ENABLE_MQTT && NM_WIFI_AUTO
-    {
-        NightMare::MqttProfile profile =
-#if NM_NETWORK_MQTT
-            NightMare::MqttProfile::REMOTE;
-#else
-            NightMare::MqttProfile::LOCAL;
-#endif
-        if (!NightMare::Mqtt_enable(profile))
-            LOG_ERROR("NM", "MQTT service did not start");
-    }
+#if NM_ENABLE_MQTT
+    if (NightMare::Mqtt_savedEnabled() && !NightMare::Mqtt_enable())
+        LOG_ERROR("NM", "MQTT service did not start");
 #endif
 #if NM_ENABLE_NETWORK
     // Routing observes the services above; it never starts or stops them.

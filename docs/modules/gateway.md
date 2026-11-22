@@ -37,7 +37,11 @@ void loop()
 ```
 
 The gateway owns NightMare's lifecycle. `NightMareGateway_init()` runs
-`startNightMareESP()`, and every gateway tick runs `tickNightMareESP()`. That
+`startNightMareESP()`, and every gateway tick runs `tickNightMareESP()`.
+The gateway runs the normal device stack: its NMNW transport is the `GATEWAY`
+connection, the gateway's own broker, so status, manifests, Resource states,
+`/info`, `/hardware`, telemetry, heartbeat, the scheduler (in the gateway
+tick), the Wi-Fi station and SNTP work as on any device. That
 keeps Resources, Configs and the ESP-NOW device table on one task: whichever
 task ticks the gateway. Bind application Resources before init, as with
 `startNightMareESP()`.
@@ -69,15 +73,19 @@ espnowConfig     the network PSK, 16..64 bytes, shared with every device
 mqttClient       run the MQTT uplink (needs NM_GATEWAY_MQTT)
 mqttConfig       uplink REMOTE | LOCAL, host, port, tls, caCertificate,
                  username, password
-radioReady       required: whether the Wi-Fi driver is started
-ipReady          required with mqttClient: whether the station has an address
+radioReady       whether the Wi-Fi driver is started; defaults to WiFiRadio
+                 with the library's Wi-Fi compiled in
+ipReady          whether the station has an address (mqttClient); defaults
+                 to WiFiIP with NM_ENABLE_WIFI
 tickMode         TASK | MANUAL
 onTick           application work run by every gateway tick
 onLinkChange     link status changes
 ```
 
-Wi-Fi belongs to the application. The gateway only asks `radioReady` and
-`ipReady`. ESP-NOW starts once the radio is up; MQTT starts once there is an
+With `NM_ENABLE_WIFI` the library's Wi-Fi station runs the gateway's Wi-Fi
+(stored profile, `NETWORK WIFI ...` commands, SNTP) and the two callbacks
+default to it. Without it, Wi-Fi belongs to the application, which provides
+`radioReady` and `ipReady`. ESP-NOW starts once the radio is up; MQTT starts once there is an
 address and, with `tls`, a valid clock, since the broker certificate's dates
 are checked. `uplink` is what devices read in the gateway announcement
 (`uplinks.remote_mqtt` / `uplinks.local_mqtt`).
@@ -94,18 +102,39 @@ NM_GATEWAY_TASK_PRIORITY  own task priority                 default 5
 NM_GATEWAY_TICK_MS        own task's longest sleep          default 50
 ```
 
-The gateway requires `NM_ENABLE_RESOURCES` and `NM_ENABLE_CONSOLE`. It refuses
-three combinations:
+The gateway requires `NM_ENABLE_RESOURCES`, `NM_ENABLE_CONSOLE` and
+`NM_ENABLE_NETWORK`. It refuses three combinations:
 
-- `NM_ENABLE_NETWORK`: the gateway carries its own traffic, and NmConnection
-  would inject a second Resource publisher.
+- `NM_ENABLE_MQTT`: the uplink is the gateway's own MQTT client.
 - `NM_NETWORK_ESPNOW`: a gateway is not also a client.
-- `NM_ENABLE_SCHEDULER`: jobs would run outside the gateway tick.
+- `NM_SCHEDULER_OWN_TASK`: jobs run in the gateway tick (`MANUAL`).
+
+## Standard Resources
+
+Every gateway publishes the same quick status and accepts the same controls,
+on the normal Resource topics (`<id>/resource/<name>/state`, `/set`):
+
+```text
+gateway:clients          sensor int   ESP-NOW sessions
+gateway:uplink           sensor bool  MQTT uplink connected
+gateway:rx_dropped       sensor int   ESP-NOW frames dropped (cumulative)
+gateway:msgs_from_local  sensor int   messages from ESP-NOW devices (cumulative)
+gateway:msgs_from_remote sensor int   messages from the broker (cumulative)
+gateway:enabled          state  bool  the gateway service on/off
+gateway:espnow_paused    state  bool  ESP-NOW side paused (diagnostic)
+gateway:hardware_trace   state  bool  per-hop trace of <device>/hardware
+```
+
+Sensors refresh every `NM_GATEWAY_STATUS_INTERVAL_MS` (default 5000). The
+states follow the gateway whoever changed it (a `/set`, a `GATEWAY` command,
+the application). Counters wrap at 2^31; consumers derive rates from two
+samples.
 
 ## As a NightMare device
 
 The gateway id is the NightMare device name (`gDeviceIdentity`). It is the
-generated hardware signature until adopted with `ADOPT <name>`. The address is
+generated hardware signature unless a replacement board takes it over with
+`ADOPT <address>`; `LABEL SET` gives it a readable name. The address is
 locked at init, so an adoption takes effect after a reboot. The same id roots
 the gateway's MQTT topics, is its MQTT client id, and is the id in every ESP-NOW
 beacon.
@@ -152,7 +181,9 @@ The frozen retained MQTT topics are:
 
 `status` is the normal presence document. It carries the gateway fields
 (`schema`, `id`, `kind`, `generation`) and a NightMare device's own (`name`,
-`hardware`, `timezone`), with `online`. Its MQTT LWT has `online=false` and
+the label; `address`; `hardware`; `timezone`), with `online`. The device
+stack's own status requests (reconnect, presence reassertion) republish this
+document. Its MQTT LWT has `online=false` and
 the current generation. `gateway/network` contains schema 1 identity,
 capabilities, radio (`channel`, `ssid`, `bssid`) and remote/local MQTT uplink
 readiness. `gateway/clients` is a schema 1 projection of `espDeviceManager`;
@@ -182,12 +213,15 @@ generation.
 The gateway id in an ESP-NOW beacon is discovery correlation only. The PSK
 handshake and encrypted session remain the authentication boundary.
 
+A device gives the gateway a Last Will only while ESP-NOW is its transport. A
+`LAST_WILL` frame whose topic length is 0 clears the stored will, so a device
+that moved its traffic to MQTT is not marked offline when its ESP-NOW session
+later expires.
+
 ## Current limits
 
 - A Resource tombstone published while the uplink is down reaches local
   subscribers and the vault but not the broker, so the broker keeps the old
   retained value.
-- The gateway's broker-model types (`NightMare::Message`, `NightMare::Device`,
-  and its `NightMare::ConnectionState`) share the `NightMare` namespace with
-  NmConnection's. They cannot meet only because `NM_ENABLE_GATEWAY` refuses
-  `NM_ENABLE_NETWORK`.
+- The application's `OnMessage` on a gateway receives only topics matching its
+  `Subscribe()` filters: the gateway's broker carries the whole network.

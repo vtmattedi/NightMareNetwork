@@ -4,6 +4,7 @@
 #include "NmWifiService.h"
 
 #include <Network/WiFiRadio/NmWifiRadioService.h>
+#include <Core/Config.h>
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
 #include <Core/PersistentKeys.h>
@@ -121,9 +122,13 @@ bool WiFiBegin()
         return false;
     return WiFiIP_enable();
 }
+}
 
-bool WiFiIP_enable()
+namespace
 {
+bool applyEnable()
+{
+    using namespace NightMare;
     if (stationEnabled && WiFi_state() != WiFiState::STOPPED)
         return true;
     if (!stationPrepared && !prepareStation())
@@ -131,7 +136,7 @@ bool WiFiIP_enable()
     if (WiFiRadio_state() != ConnectivityState::READY)
         return false;
     stationEnabled = true;
-    if (!WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str()))
+    if (!WiFi_start(WiFiStoredProfile(), gDeviceIdentity.hostname().c_str()))
     {
         stationEnabled = false;
 #if NM_ENABLE_NETWORK
@@ -145,8 +150,9 @@ bool WiFiIP_enable()
     return true;
 }
 
-bool WiFiIP_disable()
+bool applyDisable()
 {
+    using namespace NightMare;
 #if NM_ENABLE_MQTT
     if (NmMqttConnection::enabled())
         return false;
@@ -161,6 +167,52 @@ bool WiFiIP_disable()
 #endif
     return true;
 }
+
+bool writeEnabled(Config<bool> &, const bool &requested)
+{
+    return requested ? applyEnable() : applyDisable();
+}
+}
+
+//@NightMare:Config Wi-Fi station enabled
+// Saved by WiFiIP_enable()/WiFiIP_disable() and restored at startup. A CONFIG
+// SET applies it at once.
+static Config<bool> wifiEnabledSetting("nightmare:connection:wifi_enabled", NM_WIFI_AUTO != 0);
+
+namespace
+{
+struct SettingHandlerInstaller
+{
+    SettingHandlerInstaller() { wifiEnabledSetting.onWrite = writeEnabled; }
+};
+SettingHandlerInstaller settingHandlerInstaller;
+
+void saveEnabled(bool enabled)
+{
+    if (wifiEnabledSetting.value() != enabled && !wifiEnabledSetting.set(enabled))
+        LOG_WARNING("WIFI", "Could not save the Wi-Fi enable state");
+}
+}
+
+namespace NightMare
+{
+bool WiFiIP_enable()
+{
+    if (!applyEnable())
+        return false;
+    saveEnabled(true);
+    return true;
+}
+
+bool WiFiIP_disable()
+{
+    if (!applyDisable())
+        return false;
+    saveEnabled(false);
+    return true;
+}
+
+bool WiFiIP_savedEnabled() { return wifiEnabledSetting.value(); }
 
 bool WiFiIP_enabled() { return stationEnabled; }
 
@@ -203,7 +255,7 @@ void WiFiIP_onRadioState(bool ready)
         return;
     }
     if (WiFi_state() == WiFiState::STOPPED &&
-        !WiFi_start(WiFiStoredProfile(), gDeviceIdentity.getDeviceName().c_str()))
+        !WiFi_start(WiFiStoredProfile(), gDeviceIdentity.hostname().c_str()))
     {
 #if NM_ENABLE_NETWORK
         OnConnectivityStateChanged();

@@ -297,25 +297,30 @@ A `Control/time` payload must be a JSON object containing both:
 Applications may register additional topic filters with:
 
 ```cpp
-void subscribeProjectTopics()
+void onMessage(const NightMare::ReceivedMessage &message)
 {
-    NightMare::Subscribe("project/topic");
+    // message.topic, message.payload, message.length, message.retained,
+    // message.source (the connection), message.transport
 }
 
 void setup()
 {
-    NightMare::OnConnect(subscribeProjectTopics);
+    NightMare::Subscribe("project/topic");
+    NightMare::OnMessage(onMessage);
     startNightMareESP();
 }
 ```
 
-`Subscribe()` and `Unsubscribe()` act immediately on the active transport and
-store no reconnect state. Firmware therefore owns its filter list and installs
-it again from `OnConnect()`. Framework owners follow the same event-driven
-pattern internally. Messages not consumed by a framework route are delivered
-to the handler registered with `NightMare::OnMessage()`. Another device's
-manifest, `/state` and `/event` are delivered there too, also when the
-Resource Manager read them for a Remote Resource.
+`Subscribe()` and `Unsubscribe()` maintain the application's filter set; the
+library installs it on the transport on every connect and transport change,
+so there is nothing to repeat from `OnConnect()`. `SubscribeOn()` does the same
+for one connection, whichever connection is the transport (see
+[Network](../modules/network.md#connections-and-the-transport)). Framework
+owners keep their own event-driven filters. Messages not consumed by a
+framework route are delivered to the handler registered with
+`NightMare::OnMessage()`. Another device's manifest, `/state` and `/event`, and
+every gateway `status` and `gateway/network` document, are delivered there
+too, also when the framework read them.
 
 The connection boundary validates:
 

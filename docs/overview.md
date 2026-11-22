@@ -138,12 +138,13 @@ period.
 
 A device identity exposes four related values:
 
-- a logical device name used in MQTT topics,
+- an address used as the MQTT topic root (the hardware signature by default),
+- a free-text label people read,
 - a stable hardware signature generated from the physical board,
 - a raw machine-oriented device ID,
 - a persisted POSIX timezone used for local-time presentation.
 
-The logical name may be adopted. The hardware signature does not change when the device is renamed.
+Renaming changes the label only; the address, and with it every topic and binding, stays.
 
 Presence is published separately from application state:
 

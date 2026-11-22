@@ -531,7 +531,9 @@ bool TelemetryService::start()
 
 void TelemetryService::appendIdentity(JsonObject dst) const
 {
-    dst["name"] = gDeviceIdentity.getDeviceName();
+    dst["name"] = gDeviceIdentity.getDisplayName();
+    dst["address"] = gDeviceIdentity.getDeviceName();
+    dst["label"] = gDeviceIdentity.getLabel();
     dst["hardware"] = gDeviceIdentity.getHardwareSignature();
     dst["id"] = gDeviceIdentity.getDeviceId();
     dst["timezone"] = gDeviceIdentity.getTimezone();
@@ -692,6 +694,11 @@ void TelemetryService::appendNetwork(JsonObject dst) const
     espNow["enabled"] = NightMare::EspNow_enabled();
     espNow["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state());
     espNow["gateway_connected"] = NightMare::EspNow_state() == NightMare::ConnectivityState::CONNECTED;
+    // The gateway this device authenticated with, not just the announced
+    // candidate. Empty without a session.
+    espNow["gateway_id"] = NightMare::EspNow_state() == NightMare::ConnectivityState::CONNECTED
+                               ? NightMare::EspNowClient::gatewayId()
+                               : std::string();
     espNow["channel"] = WiFiRadio_channel();
     espNow["rtt_ms"] = NightMare::EspNowClient::rttMs();
     espNow["session_id"] = NightMare::EspNowClient::sessionId();

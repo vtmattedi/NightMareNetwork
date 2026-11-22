@@ -14,16 +14,41 @@
 #include <limits.h>
 #include <stdio.h>
 
-#ifndef MQTT_CREDS_H
-#error "Please create a creds.h file with the MQTT definitions."
+// Each broker profile exists when creds.h describes it: REMOTE needs
+// REMOTE_MQTT_URL, REMOTE_MQTT_PORT and ROOT_CA (TLS), LOCAL needs
+// LOCAL_MQTT_HOST and LOCAL_MQTT_PORT. MQTT_USER / MQTT_PASSWD are optional.
+#if defined(REMOTE_MQTT_URL) && defined(REMOTE_MQTT_PORT) && defined(ROOT_CA)
+#define NM_MQTT_HAS_REMOTE 1
+#else
+#define NM_MQTT_HAS_REMOTE 0
 #endif
-#ifndef ROOT_CA
-#error "Please define ROOT_CA in creds.h for the remote MQTT broker."
+#if defined(LOCAL_MQTT_HOST) && defined(LOCAL_MQTT_PORT)
+#define NM_MQTT_HAS_LOCAL 1
+#else
+#define NM_MQTT_HAS_LOCAL 0
+#endif
+#if !NM_MQTT_HAS_REMOTE && !NM_MQTT_HAS_LOCAL
+#error "creds.h describes no MQTT broker: define REMOTE_MQTT_URL/REMOTE_MQTT_PORT/ROOT_CA or LOCAL_MQTT_HOST/LOCAL_MQTT_PORT"
+#endif
+#ifndef MQTT_USER
+#define MQTT_USER nullptr
+#endif
+#ifndef MQTT_PASSWD
+#define MQTT_PASSWD nullptr
 #endif
 
 namespace
 {
-enum class ControlCommand : uint8_t { LAN, CLOUD, STOP, SHUTDOWN };
+enum class ControlAction : uint8_t { START, STOP, SHUTDOWN };
+struct ControlCommand
+{
+    ControlAction action = ControlAction::STOP;
+    bool lan = false;
+    // START: install the status Last Will on the new session.
+    bool will = false;
+    // Publish the offline status before closing a session that holds presence.
+    bool publishOffline = false;
+};
 constexpr size_t MaxIncomingLength = 32768;
 
 QueueHandle_t controlQueue = nullptr;
@@ -35,6 +60,8 @@ NmMqttEsp::DisconnectedHandler onDisconnected = nullptr;
 NmMqttEsp::ErrorHandler onError = nullptr;
 volatile int8_t connectionState = -1;
 bool lanBroker = false;
+// The current session carries the status Last Will.
+volatile bool sessionWill = false;
 std::string incomingTopic;
 std::string incomingPayload;
 bool incomingRetained = false;
@@ -49,20 +76,25 @@ char willTopic[96] = {};
 // ends up with the same retained payload however the device went away.
 char willMessage[512] = {};
 char clientId[48] = {};
+#if NM_MQTT_HAS_REMOTE
 const char *rootCa = ROOT_CA;
+#endif
 
-void stopClient()
+// Only a session that holds presence speaks for <device>/status: closing one
+// that does not (ESP-NOW carries the traffic) must not mark the device offline.
+void stopClient(bool publishOffline)
 {
     receiving = false;
     if (client != nullptr)
     {
-        if (connectionState > 0)
+        if (connectionState > 0 && sessionWill && publishOffline)
             esp_mqtt_client_publish(client, willTopic, willMessage,
                                     static_cast<int>(strlen(willMessage)), 0, true);
         esp_mqtt_client_stop(client);
         esp_mqtt_client_destroy(client);
         client = nullptr;
     }
+    sessionWill = false;
     connectionState = -1;
 }
 
@@ -134,13 +166,19 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
     }
 }
 
-bool startClient(bool useLan)
+bool startClient(bool useLan, bool withWill)
 {
+    if (!NmMqttEsp::profileSupported(useLan))
+    {
+        LOG_ERROR("MQTT", "creds.h does not describe the %s broker", useLan ? "LAN" : "cloud");
+        return false;
+    }
     gDeviceIdentity.begin();
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
     snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
-    const std::string offlineStatus = NightMare::ConnectionDeviceStatusJson(false);
+    const std::string offlineStatus =
+        NightMare::ConnectionDeviceStatusJson(false, NightMare::ConnectionType::MQTT);
     if (offlineStatus.length() >= sizeof(willMessage))
     {
         // Cannot happen with a valid name, but a cut-off JSON last will would be
@@ -150,31 +188,45 @@ bool startClient(bool useLan)
     }
     snprintf(willMessage, sizeof(willMessage), "%s", offlineStatus.c_str());
     snprintf(clientId, sizeof(clientId), "nm-%s", gDeviceIdentity.getDeviceId().c_str());
+#if NM_MQTT_HAS_LOCAL
     if (useLan)
         snprintf(brokerUri, sizeof(brokerUri), "mqtt://%s:%d", LOCAL_MQTT_HOST, LOCAL_MQTT_PORT);
-    else
+#endif
+#if NM_MQTT_HAS_REMOTE
+    if (!useLan)
         snprintf(brokerUri, sizeof(brokerUri), "mqtts://%s:%d", REMOTE_MQTT_URL, REMOTE_MQTT_PORT);
+#endif
 
     esp_mqtt_client_config_t config = {};
     config.broker.address.uri = brokerUri;
+#if NM_MQTT_HAS_REMOTE
     if (!useLan)
         config.broker.verification.certificate = rootCa;
+#endif
     config.credentials.username = MQTT_USER;
     config.credentials.authentication.password = MQTT_PASSWD;
     config.credentials.client_id = clientId;
-    config.session.last_will.topic = willTopic;
-    config.session.last_will.msg = willMessage;
-    config.session.last_will.qos = 0;
-    config.session.last_will.retain = 1;
+    // Without a Last Will the session says nothing about presence; the
+    // connection that carries the traffic does.
+    if (withWill)
+    {
+        config.session.last_will.topic = willTopic;
+        config.session.last_will.msg = willMessage;
+        config.session.last_will.qos = 0;
+        config.session.last_will.retain = 1;
+    }
+    sessionWill = withWill;
     config.task.stack_size = 8192;
     config.task.priority = 5;
 
-    LOG("MQTT", "Starting connection to %s broker at %s", useLan ? "LAN" : "cloud", brokerUri);
+    LOG("MQTT", "Starting connection to %s broker at %s%s", useLan ? "LAN" : "cloud", brokerUri,
+        withWill ? "" : " (no presence: another connection carries it)");
 
     client = esp_mqtt_client_init(&config);
     if (client == nullptr)
     {
         LOG_ERROR("MQTT", "Failed to initialize client for %s", brokerUri);
+        sessionWill = false;
         return false;
     }
     esp_mqtt_client_register_event(client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
@@ -185,6 +237,7 @@ bool startClient(bool useLan)
         LOG_ERROR("MQTT", "Failed to start client for %s", brokerUri);
         esp_mqtt_client_destroy(client);
         client = nullptr;
+        sessionWill = false;
         connectionState = -1;
         return false;
     }
@@ -196,14 +249,12 @@ void controlTask(void *)
     ControlCommand cmd;
     while (xQueueReceive(controlQueue, &cmd, portMAX_DELAY) == pdTRUE)
     {
-        stopClient();
-        if (cmd == ControlCommand::STOP)
+        stopClient(cmd.publishOffline);
+        if (cmd.action == ControlAction::STOP)
             stopRequested = false;
-        if (cmd == ControlCommand::LAN || cmd == ControlCommand::CLOUD)
-        {
-            startClient(cmd == ControlCommand::LAN);
-        }
-        if (cmd == ControlCommand::SHUTDOWN)
+        if (cmd.action == ControlAction::START)
+            startClient(cmd.lan, cmd.will);
+        if (cmd.action == ControlAction::SHUTDOWN)
         {
             QueueHandle_t completedQueue = controlQueue;
             controlQueue = nullptr;
@@ -228,7 +279,12 @@ void setHandlers(MessageHandler message, ConnectedHandler connectedHandler,
     onError = errorHandler;
 }
 
-bool begin(bool useLan)
+bool profileSupported(bool useLan)
+{
+    return useLan ? NM_MQTT_HAS_LOCAL != 0 : NM_MQTT_HAS_REMOTE != 0;
+}
+
+bool begin(bool useLan, bool withWill)
 {
     if (shuttingDown)
         return false;
@@ -244,16 +300,18 @@ bool begin(bool useLan)
             return false;
         }
     }
-    if (client != nullptr && lanBroker == useLan && !stopRequested)
+    if (client != nullptr && lanBroker == useLan && sessionWill == withWill && !stopRequested)
         return true;
-    return changeTo(useLan);
+    return changeTo(useLan, withWill);
 }
 
 void end()
 {
     if (controlQueue != nullptr)
     {
-        const ControlCommand cmd = ControlCommand::STOP;
+        ControlCommand cmd;
+        cmd.action = ControlAction::STOP;
+        cmd.publishOffline = true;
         if (xQueueSend(controlQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE)
             stopRequested = true;
     }
@@ -263,18 +321,26 @@ void finish()
 {
     if (controlQueue == nullptr || shuttingDown)
         return;
-    const ControlCommand cmd = ControlCommand::SHUTDOWN;
+    ControlCommand cmd;
+    cmd.action = ControlAction::SHUTDOWN;
+    cmd.publishOffline = true;
     if (xQueueSend(controlQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE)
         shuttingDown = true;
 }
 
-bool changeTo(bool useLan)
+bool changeTo(bool useLan, bool withWill)
 {
     if (shuttingDown)
         return false;
     if (controlQueue == nullptr)
-        return begin(useLan);
-    const ControlCommand cmd = useLan ? ControlCommand::LAN : ControlCommand::CLOUD;
+        return begin(useLan, withWill);
+    ControlCommand cmd;
+    cmd.action = ControlAction::START;
+    cmd.lan = useLan;
+    cmd.will = withWill;
+    // Leaving a broker that holds presence says goodbye there; changing only
+    // the Last Will (presence moved to another connection) does not.
+    cmd.publishOffline = useLan != lanBroker;
     return xQueueSend(controlQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE;
 }
 
@@ -306,6 +372,7 @@ bool unsubscribe(const char *topicFilter)
 }
 
 bool connected() { return connectionState > 0; }
+bool sessionHoldsPresence() { return connectionState > 0 && sessionWill; }
 bool isLanBroker() { return lanBroker; }
 int8_t state() { return connectionState; }
 }

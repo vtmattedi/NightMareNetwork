@@ -25,17 +25,14 @@ The current topic format does not include namespace.
 
 NightMare keeps the logical name, physical identifiers, and local timezone together as device identity because they describe how a node is addressed and presented.
 
-### Device name
+### Address and label
 
-The **device name** is the logical network identity.
+The **address** is the device's topic root. It is the hardware signature
+(below) and stays it, so renaming a device never moves a topic. It moves only
+when a replacement board takes over another's address (`ADOPT`).
 
-Example:
-
-```text
-bedroom-ac
-```
-
-It is used in MQTT addressing and may be changed through identity adoption.
+The **label** is the name people read, free text such as `Bedroom AC`. It
+changes at once (`LABEL SET`) and is published in `/status` and `/info`.
 
 ### Hardware signature
 
@@ -47,7 +44,7 @@ Example:
 Esp32-nm-6ca172e0
 ```
 
-It remains stable when the logical device name is adopted.
+It is the default address and does not change when the device is relabelled.
 
 ### Device ID
 

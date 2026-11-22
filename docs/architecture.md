@@ -180,13 +180,16 @@ connectivity lifecycle request.
 ### NmConnection
 
 `NmConnection` owns preferred and active NMNW transport selection, routing
-failover, binary-safe generic publication, stateless subscribe/unsubscribe
-dispatch, application connect/message-handler registration, and Resource
-connection injection.
+failover, binary-safe generic publication, the application's filter sets (one
+that follows the transport, one per connection), direct per-connection
+publication, application connect/message-handler registration and optional
+queued delivery, and Resource connection injection.
 It observes connectivity state and never starts or stops WiFiIP, MQTT, or
-ESP-NOW. Only one usable transport is active for framework traffic at a time.
-It does not remember topic filters. Each logical owner reinstalls its filters
-from the active-transport connection event.
+ESP-NOW. Only one usable transport is active for framework traffic at a time;
+the other connections stay usable through `PublishOn()`/`SubscribeOn()`.
+Framework owners keep no filters there and reinstall theirs from the
+active-transport connection event. Presence (`<device>/status` and the Last
+Wills behind it) follows the transport.
 
 ### NmMqttConnection
 

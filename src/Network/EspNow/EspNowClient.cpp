@@ -1259,6 +1259,25 @@ namespace NightMare::EspNowClient
         return true;
     }
 
+    bool clearLastWill()
+    {
+        if (!ensureMutexes())
+            return false;
+        bool hadWill = false;
+        {
+            Guard guard(willMutex);
+            hadWill = willSet;
+            willRaw.clear();
+            willSet = false;
+        }
+        // A LAST_WILL whose topic length is 0 removes the stored will. A new
+        // session starts without one, so only a live session needs telling.
+        static const uint8_t NoWill[] = {0};
+        if (hadWill && state() == State::CONNECTED)
+            sendSession(FrameType::LAST_WILL, NoWill, sizeof(NoWill));
+        return true;
+    }
+
     bool publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
     {
         if (state() != State::CONNECTED)

@@ -85,10 +85,11 @@ struct NightMareGatewayConfig
     bool mqttBroker = true; // not implemented yet do not implent.
     NightMareEspNowConfig espnowConfig;
     NightMareMqttConfig mqttConfig;
-    // Wi-Fi belongs to the application; the gateway only asks about it.
-    // Required: whether the Wi-Fi driver is started, which is all ESP-NOW needs.
+    // Whether the Wi-Fi driver is started (all ESP-NOW needs) and whether the
+    // station has an address (needed by mqttClient). With the library's Wi-Fi
+    // compiled in (NM_ENABLE_WIFI_RADIO / NM_ENABLE_WIFI) both default to
+    // WiFiRadio and WiFiIP; otherwise the application provides them.
     bool (*radioReady)() = nullptr;
-    // Required with mqttClient: whether the station has an IP address.
     bool (*ipReady)() = nullptr;
     NightMareGatewayTickMode tickMode =
         NM_GATEWAY_OWN_TASK ? NightMareGatewayTickMode::TASK : NightMareGatewayTickMode::MANUAL;
@@ -126,6 +127,10 @@ void NightMareGateway_tick();
 // For the gateway's own drivers: work has arrived. Wakes the gateway task in
 // TASK mode; in MANUAL mode the next NightMareGateway_tick() picks it up.
 void NightMareGateway_wake();
+// Republish the gateway's status and gateway/network documents on the next
+// tick (the device stack's "publish status" request lands here: a gateway's
+// status is its own presence document).
+void NightMareGateway_requestPresence();
 
 // Thread-safe views of the retained-message vault, for the web UI.
 size_t NightMareGateway_vaultSnapshot(std::vector<NightMare::RetainedEntry> &out, uint32_t *version = nullptr);

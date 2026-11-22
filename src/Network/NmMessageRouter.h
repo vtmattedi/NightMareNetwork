@@ -8,6 +8,9 @@
 namespace NmMessageRouter
 {
 void onConnected();
-bool handleMessage(const std::string &topic, const std::string &payload, bool retained = false);
+// True when a route or the application handler took the message.
+// frameworkConsumed, when given, says whether a framework route took it.
+bool handleMessage(const std::string &topic, const std::string &payload, bool retained = false,
+                   bool *frameworkConsumed = nullptr);
 }
 #endif // NM_ENABLE_NETWORK

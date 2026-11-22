@@ -36,7 +36,7 @@ static const char *TAG = "espBroker";
 #define HEARTBEAT_MS 15000
 #define SESSION_TIMEOUT_MS (4 * HEARTBEAT_MS)
 
-using NightMare::ConnectionState;
+using NightMare::SessionState;
 using NightMare::Device;
 using NightMare::ErrorCode;
 using NightMare::Frame;
@@ -439,10 +439,10 @@ static void handleSessionFrame(Device *device, const Frame &frame)
     switch ((FrameType)frame.header.type)
     {
     case FrameType::PING:
-        if (device->state() == ConnectionState::SECURING)
+        if (device->state() == SessionState::SECURING)
         {
             // It arrived decrypted with the session LMK: both ends hold the same key.
-            device->setState(ConnectionState::CONNECTED);
+            device->setState(SessionState::CONNECTED);
             LOG(TAG, "client connected: %s cid=%u", device->label().c_str(), (unsigned)device->cid());
         }
         reply(device, FrameType::PONG, frame.header.messageId);
@@ -451,7 +451,7 @@ static void handleSessionFrame(Device *device, const Frame &frame)
     case FrameType::DISCONNECT:
     {
         // A clean goodbye: no last will, like an MQTT DISCONNECT.
-        if (device->state() == ConnectionState::CONNECTED)
+        if (device->state() == SessionState::CONNECTED)
             LOG(TAG, "client disconnected: %s cid=%u (said goodbye)", device->label().c_str(),
                      (unsigned)device->cid());
         const MacAddress mac = device->address();
@@ -503,6 +503,14 @@ static void handleSessionFrame(Device *device, const Frame &frame)
 
     case FrameType::LAST_WILL:
     {
+        // A topic length of 0 removes the will: the device's presence moved to
+        // another connection, so losing this session must not mark it offline.
+        if (frame.header.length >= 1 && (frame.data[0] & 0x3F) == 0)
+        {
+            device->clearLastWill();
+            reply(device, FrameType::ACK, frame.header.messageId);
+            break;
+        }
         // Same [retained|topicLen][topic][payload] encoding as MESSAGE, just
         // stored rather than routed: it only goes out once this device is
         // presumed gone, see publishLastWill().
@@ -781,7 +789,7 @@ void espBroker_shutdown(void)
     for (uint8_t i = 0; i < s_devices.getDeviceCount(); i++)
     {
         const Device *device = s_devices.deviceAt(i);
-        if (device != NULL && device->state() == ConnectionState::CONNECTED)
+        if (device != NULL && device->state() == SessionState::CONNECTED)
             LOG(TAG, "client disconnected: %s cid=%u (gateway stopped)", device->label().c_str(),
                      (unsigned)device->cid());
     }

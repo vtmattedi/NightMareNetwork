@@ -1280,7 +1280,8 @@ enum class ConnectionType : uint8_t
 {
     AUTO = 0,
     MQTT = 1,
-    ESP_NOW = 3
+    ESP_NOW = 3,
+    GATEWAY = 4   // a gateway's own broker (NM_ENABLE_GATEWAY)
 };
 
 enum class MqttProfile : uint8_t
@@ -1318,21 +1319,42 @@ struct ConnectivityStatus
 
 extern Config<int> preferredConnection;
 
-using MessageHandler =
-    void (*)(const char *topic,
-             const uint8_t *payload,
-             size_t length,
-             bool retained);
+struct ReceivedMessage
+{
+    const char *topic;
+    const uint8_t *payload; // followed by a NUL byte
+    size_t length;
+    bool retained;
+    ConnectionType source;  // the connection it arrived on
+    bool transport;         // true: from the NMNW transport
+};
+using MessageHandler = void (*)(const ReceivedMessage &message);
 using ConnectHandler = void (*)();
 
+// NMNW transport
 bool Publish(const char *topic,
              const uint8_t *payload,
              size_t length,
              bool retained = false);
+bool PublishText(const std::string &topic, const std::string &payload,
+                 bool retained = false);
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
 void OnConnect(ConnectHandler handler);
 void OnMessage(MessageHandler handler);
+
+// Connections, used directly whichever one is the transport
+bool ConnectionUp(ConnectionType connection);
+bool PublishOn(ConnectionType connection, const char *topic,
+               const uint8_t *payload, size_t length, bool retained = false);
+bool PublishTextOn(ConnectionType connection, const std::string &topic,
+                   const std::string &payload, bool retained = false);
+bool SubscribeOn(ConnectionType connection, const char *topicFilter);
+bool UnsubscribeOn(ConnectionType connection, const char *topicFilter);
+
+// Delivery (NM_MESSAGE_QUEUE_DEPTH > 0)
+void DeliverEvents(uint32_t budgetMs = 0);
+DeliveryStats GetDeliveryStats(); // queued, delivered, dropped, highWater
 
 bool SelectConnection(ConnectionType connection);
 ConnectionType GetActiveConnection();
@@ -1349,19 +1371,36 @@ generic boundary binary-safe. `ESP_NOW` is available when built with
 Local versus remote MQTT is an `MqttProfile`, not another transport. Selection changes only the preferred routing transport. Active
 routing is restricted to an enabled, connected service.
 
-`OnConnect()` replaces the single firmware connection handler, or unregisters
-it when passed `nullptr`. Register it before framework startup and install
-firmware-owned topic filters from that callback. `Subscribe()` and
-`Unsubscribe()` act only on the active connected transport and do not retain
-filters for reconnect.
+`Subscribe()` and `Unsubscribe()` maintain the application's transport filter
+set (at most `NM_MAX_APP_SUBSCRIPTIONS`). The library installs it on the
+transport on every connect and transport change, so a filter is subscribed
+once, from anywhere, at any time; subscribing to a filter already in the set
+does nothing. `OnConnect()` replaces the single firmware connection handler,
+or unregisters it when passed `nullptr`. It runs after the framework and the
+application filters are installed.
+
+`SubscribeOn()`, `UnsubscribeOn()` and `PublishOn()` address one connection
+directly, whether or not it is the transport. Each connection keeps its own
+filter set and reinstalls it on every session of that connection.
+`ConnectionUp()` reports that the connection is connected.
 
 `OnMessage()` replaces the single application message handler, or unregisters
-it when passed `nullptr`. The handler receives messages left unconsumed by
-enabled framework routes, plus every other device's manifest, `/state` and
-`/event` the Resource Manager reads, which includes topics the manager
-subscribed itself for a Remote Resource. Requests addressed to this device
-(`/set`, `/invoke`, console) are never delivered. Its topic and payload
+it when passed `nullptr`. It receives, with `transport == true`, transport
+messages left unconsumed by enabled framework routes, plus every other
+device's manifest, `/state` and `/event` the Resource Manager reads and every
+gateway `status` and `gateway/network` document. Requests addressed to this
+device (`/set`, `/invoke`, console) are never delivered. With
+`transport == false` it receives messages from another connection that match
+that connection's `SubscribeOn()` filters; nothing else from a non-transport
+connection reaches the application or the framework. Topic and payload
 pointers remain valid for the duration of the callback.
+
+With `NM_MESSAGE_QUEUE_DEPTH` above 0, `OnMessage`, `OnConnect` and
+`OnNetworkStatus` events are copied into a queue of that depth (PSRAM first)
+and run by `DeliverEvents()`. `tickNightMareESP()` calls it unless
+`NM_DELIVER_IN_TICK` is 0, in which case the application calls it from the
+task that should run its handlers. An event that finds the queue full is
+dropped and counted in `GetDeliveryStats()`.
 
 ## MQTT service and implementation limits
 
@@ -1369,14 +1408,28 @@ When `NM_ENABLE_MQTT`:
 
 ```cpp
 bool NightMare::Mqtt_enable(MqttProfile profile);
+bool NightMare::Mqtt_enable();          // the saved profile
 bool NightMare::Mqtt_disable();
 bool NightMare::Mqtt_enabled();
 ConnectivityState NightMare::Mqtt_state();
 MqttProfile NightMare::Mqtt_profile();
+bool NightMare::Mqtt_profileSupported(MqttProfile profile);
+bool NightMare::Mqtt_savedEnabled();
 ```
 
-MQTT enable requires WiFiIP enabled and never starts it. The selected broker
-profile is MQTT-owned service state. Current implementation limits are:
+MQTT enable requires WiFiIP enabled and never starts it. The broker profile is
+MQTT-owned service state chosen at runtime. A profile exists when `creds.h`
+describes its broker: `REMOTE` needs `REMOTE_MQTT_URL`, `REMOTE_MQTT_PORT` and
+`ROOT_CA`; `LOCAL` needs `LOCAL_MQTT_HOST` and `LOCAL_MQTT_PORT`. `MQTT_USER`
+and `MQTT_PASSWD` are optional. Every enable and disable is saved in the
+Configs `nightmare:connection:mqtt_enabled` and
+`nightmare:connection:mqtt_profile` and restored by `startNightMareESP()`;
+`CONFIG SET` on either applies it at once.
+
+The MQTT session carries the `<device>/status` Last Will only while MQTT may
+hold presence (see [Network](modules/network.md#presence-follows-the-transport)).
+It reconnects when that changes and is not a usable transport until it holds
+one. Current implementation limits are:
 
 ```text
 queued reconnect messages: 5
@@ -1444,8 +1497,9 @@ typedef void (*WiFiConnectedCallback)(bool firstConnection);
 void WiFi_onConnected(WiFiConnectedCallback callback);
 NightMare::WiFiProfile NightMare::WiFiStoredProfile();
 bool NightMare::WiFiBegin();
-bool NightMare::WiFiIP_enable();
-bool NightMare::WiFiIP_disable();
+bool NightMare::WiFiIP_enable();        // saved
+bool NightMare::WiFiIP_disable();       // saved
+bool NightMare::WiFiIP_savedEnabled();
 bool NightMare::WiFiIP_enabled();
 ConnectivityState NightMare::WiFiIP_state();
 bool NightMare::WiFiApplyProfile(const NightMare::WiFiProfile &profile);
@@ -1486,15 +1540,18 @@ When `NM_NETWORK_ESPNOW`:
 
 ```cpp
 enum class ConnectivitySuspendReason : uint8_t { WIFI_SCAN };
-bool NightMare::EspNow_enable();
-bool NightMare::EspNow_disable();
+bool NightMare::EspNow_enable();        // saved
+bool NightMare::EspNow_disable();       // saved
+bool NightMare::EspNow_savedEnabled();
 bool NightMare::EspNow_enabled();
 ConnectivityState NightMare::EspNow_state();
 bool NightMare::EspNow_suspend(ConnectivitySuspendReason reason);
 bool NightMare::EspNow_resume(ConnectivitySuspendReason reason);
 ```
 
-ESP-NOW requires WiFiRadio `READY` and never changes WiFiIP or MQTT. A Wi-Fi
+ESP-NOW requires WiFiRadio `READY` and never changes WiFiIP or MQTT. Its
+enable state is saved in `nightmare:connection:espnow_enabled`; the station's
+in `nightmare:connection:wifi_enabled`. A Wi-Fi
 scan uses the runtime-only `WIFI_SCAN` suspension; `enabled` stays true while
 the service reports `SUSPENDED`.
 
@@ -1779,6 +1836,14 @@ NM_SCHEDULER_OWN_TASK               1
 NM_CONSOLE_BUILTINS                 1
 NM_CONSOLE_SERIAL                   0
 
+NM_NETWORK_ESPNOW                   0
+NM_WIFI_AUTO                        NM_ENABLE_WIFI     first-boot default, then saved
+NM_MQTT_AUTO                        NM_WIFI_AUTO       first-boot default, then saved
+NM_ESPNOW_AUTO                      1                  first-boot default, then saved
+NM_MAX_APP_SUBSCRIPTIONS            64                 per filter set
+NM_MESSAGE_QUEUE_DEPTH              0                  0 = handlers run on network tasks
+NM_DELIVER_IN_TICK                  1
+
 NM_PLATFORM_ESP32                   1
 
 NM_ENABLE_GATEWAY                   0
@@ -1809,6 +1874,8 @@ Current enforced dependencies:
 
 ```text
 MQTT -> NETWORK
+MQTT -> WIFI
+NETWORK_ESPNOW -> NETWORK
 NETWORK -> RESOURCES
 
 TELEMETRY -> SCHEDULER
@@ -1840,8 +1907,9 @@ GATEWAY -> GATEWAY_ESPNOW or GATEWAY_MQTT
 GATEWAY_ESPNOW, GATEWAY_MQTT -> GATEWAY
 GATEWAY -> RESOURCES
 GATEWAY -> CONSOLE
-GATEWAY -> not NETWORK
-GATEWAY -> not SCHEDULER
+GATEWAY -> NETWORK
+GATEWAY -> not MQTT
+GATEWAY -> not SCHEDULER_OWN_TASK
 GATEWAY_ESPNOW -> not NETWORK_ESPNOW
 ```
 

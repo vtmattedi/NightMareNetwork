@@ -24,7 +24,7 @@ board = esp32dev
 board_build.partitions = min_spiffs.csv
 monitor_speed = 115200
 monitor_filters = send_on_enter
-; The serial console is off by default; on, it takes commands like ADOPT.
+; The serial console is off by default; on, it takes commands like LABEL SET.
 build_flags = -D NM_CONSOLE_SERIAL=1
 lib_deps =
     https://github.com/vtmattedi/NightMareNetwork.git#v1.0.0-alpha.1
@@ -107,21 +107,23 @@ void loop()
 ```
 
 Build and flash it (`pio run -t upload -t monitor`). The device comes up
-under a name derived from its hardware, such as `Esp32-nm-6ca172e0`. Give it a
-name by typing on the serial monitor, or by publishing the same line to
+under an address derived from its hardware, such as `Esp32-nm-6ca172e0`; that
+address stays its topic root. Give it a name people read by typing on the
+serial monitor, or by publishing the same line to
 `Esp32-nm-6ca172e0/console/in`:
 
 ```text
-ADOPT desk-lamp
+LABEL SET Desk lamp
 ```
 
-Then watch the broker (`mosquitto_sub -h 192.168.1.10 -t 'desk-lamp/#' -v`):
+The label applies at once and moves no topic. Then watch the broker
+(`mosquitto_sub -h 192.168.1.10 -t 'Esp32-nm-6ca172e0/#' -v`):
 
 ```text
-desk-lamp/status                       {"name":"desk-lamp",...,"online":true}
-desk-lamp/manifest/msgpack             <the three Resources>
-desk-lamp/resource/uptime_s/state      42
-desk-lamp/resource/brightness/state    0
+Esp32-nm-6ca172e0/status                     {"name":"Desk lamp","address":"Esp32-nm-6ca172e0",...,"online":true}
+Esp32-nm-6ca172e0/manifest/msgpack           <the three Resources>
+Esp32-nm-6ca172e0/resource/uptime_s/state    42
+Esp32-nm-6ca172e0/resource/brightness/state  0
 ```
 
 and drive it (`mosquitto_pub -h 192.168.1.10 -t ... -m ...`):
@@ -885,7 +887,7 @@ The persisted POSIX timezone is available through:
 gDeviceIdentity.getTimezone();
 ```
 
-Use `ADOPT <name>` or `CHANGE NAME <name>` for identity migration, and `TIMEZONE SET <posix-tz>` or `CHANGE TIMEZONE <posix-tz>` to change local-time presentation through the command surface.
+Use `LABEL SET <label>` (or `CHANGE NAME <label>`) to rename a device and `ADOPT <address>` only when a replacement board takes over another's address, and `TIMEZONE SET <posix-tz>` or `CHANGE TIMEZONE <posix-tz>` to change local-time presentation through the command surface.
 
 ## Coming from the older API
 

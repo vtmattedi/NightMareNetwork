@@ -11,7 +11,7 @@ namespace NightMare
 {
     // Where an ESP-NOW session stands. A peer still in CONNECT/CHALLENGE is not
     // a Device yet: it lives in espDeviceManager's pending-handshake table.
-    enum class ConnectionState : uint8_t
+    enum class SessionState : uint8_t
     {
         HANDSHAKE,     // not used by a Device; named for completeness of the lifecycle
         AUTHENTICATED, // AUTH verified and a cid assigned; CONNACK going out
@@ -19,7 +19,7 @@ namespace NightMare
         CONNECTED,     // encrypted PING/PONG done: broker traffic allowed
     };
 
-    const char *connectionStateName(ConnectionState state);
+    const char *sessionStateName(SessionState state);
 
     // One ESP-NOW session: the peer MAC, the gateway-assigned cid, and what the
     // broker keeps for it. Session and broker state go away together.
@@ -29,7 +29,7 @@ namespace NightMare
 
         MacAddress mac;
         uint16_t cid_ = 0;
-        ConnectionState state_ = ConnectionState::AUTHENTICATED;
+        SessionState state_ = SessionState::AUTHENTICATED;
         // The session's ESP-NOW key. Kept because a handshake from this MAC
         // turns the peer back to plaintext, and an unproven one has to leave
         // the session exactly as it was -- encryption included.
@@ -60,10 +60,10 @@ namespace NightMare
 
         const MacAddress &address() const { return mac; }
         uint16_t cid() const { return cid_; }
-        ConnectionState state() const { return state_; }
-        void setState(ConnectionState state) { state_ = state; }
+        SessionState state() const { return state_; }
+        void setState(SessionState state) { state_ = state; }
         // Usable right now: secured, and not paused by a handshake.
-        bool isConnected() const { return state_ == ConnectionState::CONNECTED && !suspended_; }
+        bool isConnected() const { return state_ == SessionState::CONNECTED && !suspended_; }
 
         static constexpr size_t SessionKeySize = sizeof(sessionKey_);
         void setSessionKey(const uint8_t *key);

@@ -12,6 +12,13 @@
 #include <Gateway/GatewayState.h>
 #include <Gateway/GatewayRecovery.h>
 #include <Gateway/GatewayNode.h>
+#include <Gateway/GatewayResources.h>
+#if NM_ENABLE_WIFI_RADIO
+#include <Network/WiFiRadio/NmWifiRadioService.h>
+#endif
+#if NM_ENABLE_WIFI
+#include <Network/WiFiIP/NmWifiService.h>
+#endif
 #include "cJSON.h"
 #include "freertos/queue.h"
 #include "esp_task_wdt.h"
@@ -284,7 +291,7 @@ static NightMare::Message buildDebugTelemetry()
         char row[160];
         snprintf(row, sizeof(row), "{\"mac\":\"%s\",\"cid\":%u,\"state\":\"%s\",\"subs\":%u,\"lastSeenS\":%llu,\"lastWill\":%s}",
                  device->address().toString().c_str(), (unsigned)device->cid(),
-                 NightMare::connectionStateName(device->state()), (unsigned)device->subscriptionCount(),
+                 NightMare::sessionStateName(device->state()), (unsigned)device->subscriptionCount(),
                  (unsigned long long)((nowMs - device->lastSeenAtMs()) / 1000),
                  device->hasLastWill() ? "true" : "false");
         json += row;
@@ -684,6 +691,7 @@ static void gatewayStep()
 
     if (s_onTick != nullptr)
         s_onTick();
+    GatewayResources::tick();
     GatewayNode::tick();
     reportLink();
 }
@@ -702,6 +710,25 @@ static void gatewayTask(void *)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(NM_GATEWAY_TICK_MS));
     }
 }
+
+void NightMareGateway_requestPresence()
+{
+    s_projectionStale.store(true, std::memory_order_release);
+    NightMareGateway_wake();
+}
+
+#if NM_ENABLE_WIFI_RADIO
+static bool libraryRadioReady()
+{
+    return NightMare::WiFiRadio_state() == NightMare::ConnectivityState::READY;
+}
+#endif
+#if NM_ENABLE_WIFI
+static bool libraryIpReady()
+{
+    return NightMare::WiFiIP_state() == NightMare::ConnectivityState::CONNECTED;
+}
+#endif
 
 void NightMareGateway_wake()
 {
@@ -791,12 +818,24 @@ bool NightMareGateway_init(const NightMareGatewayConfig &config)
         LOG_ERROR(TAG, "mqttClient needs NM_GATEWAY_MQTT compiled in");
         return false;
     }
-    if (config.radioReady == nullptr)
+    // With the library's Wi-Fi compiled in, the gateway follows it unless the
+    // application says otherwise.
+    bool (*radioReady)() = config.radioReady;
+    bool (*ipReadyFn)() = config.ipReady;
+#if NM_ENABLE_WIFI_RADIO
+    if (radioReady == nullptr)
+        radioReady = libraryRadioReady;
+#endif
+#if NM_ENABLE_WIFI
+    if (ipReadyFn == nullptr)
+        ipReadyFn = libraryIpReady;
+#endif
+    if (radioReady == nullptr)
     {
         LOG_ERROR(TAG, "radioReady is required: the gateway waits for the Wi-Fi driver");
         return false;
     }
-    if (config.mqttClient && (config.ipReady == nullptr || config.mqttConfig.host == nullptr ||
+    if (config.mqttClient && (ipReadyFn == nullptr || config.mqttConfig.host == nullptr ||
                               config.mqttConfig.host[0] == '\0'))
     {
         LOG_ERROR(TAG, "mqttClient needs mqttConfig.host and ipReady");
@@ -811,8 +850,8 @@ bool NightMareGateway_init(const NightMareGatewayConfig &config)
     s_onTick = config.onTick;
     s_onLinkChange = config.onLinkChange;
     s_tickMode = config.tickMode;
-    s_radioReady = config.radioReady;
-    s_ipReady = config.ipReady;
+    s_radioReady = radioReady;
+    s_ipReady = ipReadyFn;
 #if NM_GATEWAY_MQTT
     if (s_mqttEnabled)
     {

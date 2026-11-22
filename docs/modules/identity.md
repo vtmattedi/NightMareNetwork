@@ -7,7 +7,40 @@ order: 20
 
 # Device identity
 
-`DeviceIdentity` owns the address NightMare uses for this device on MQTT and its persisted local-time timezone.
+`DeviceIdentity` owns the address NightMare uses for this device on MQTT, the
+label people read, and its persisted local-time timezone.
+
+## Address and label
+
+```cpp
+const std::string &getDeviceName();   // the address, also getAddress()
+const std::string &getLabel();        // empty when none was set
+const std::string &getDisplayName();  // the label, or the address
+bool setLabel(const std::string &label);
+std::string hostname();               // DNS-safe, from the display name
+```
+
+The **address** is the topic root. It is the hardware signature
+(`Esp32-nm-6ca172e0`) and stays it: renaming a device never moves a topic, so
+no Remote Resource source, dashboard binding or gateway client entry breaks.
+It moves only when a replacement board takes over another's address
+(`ADOPT`, below).
+
+The **label** is the name people read ("Bedroom AC"). It is free text, at most
+64 characters without control characters, changes at once without a reboot
+(`LABEL SET`), and is published in `/status` (`name`) and `/info`
+(`identity.name`, `identity.label`). The Wi-Fi and OTA host name is derived
+from it.
+
+### Migration from the single-name model
+
+Before the split, the adopted name was both the topic root and the display
+name. The first boot of a firmware with the split migrates once: a stored name
+other than the hardware signature becomes the label, the address goes back to
+the hardware signature, and the old root is cleaned up as after an adoption
+(status, Resource states and manifests, and the `info`, `hardware` and
+`telemetry` documents). `_identity_model` records that the migration ran, so a
+later deliberate `ADOPT` is kept.
 
 The public singleton is:
 
@@ -315,11 +348,12 @@ Applications should use the `DeviceIdentity` API rather than editing these keys 
 Adopt a logical name with either command spelling:
 
 ```text
-ADOPT bedroom-ac
-CHANGE NAME bedroom-ac
+LABEL SET Bedroom AC
+CHANGE NAME Bedroom AC
+ADOPT Esp32-nm-6ca172e0
 ```
 
-Both use `beginAdoption()` and therefore preserve the normal migration and cleanup rules. The JSON response contains `name`, `active_name`, and `reboot_required`.
+`LABEL SET` and `CHANGE NAME` set the label at once. `ADOPT` moves the address (board replacement); it uses `beginAdoption()` and therefore preserves the normal migration and cleanup rules. Its JSON response contains `address`, `active_address`, and `reboot_required`.
 
 Query or change timezone with:
 

@@ -76,10 +76,61 @@ calls a service enable/disable function.
 
 Only the active transport carries normal framework traffic. When it changes,
 each framework owner installs its own filters on the new transport, the
-firmware `OnConnect()` callback installs project filters, and NightMare runs
-the normal reconnect publication path. Drivers discard ingress from inactive
-transports. The framework does not duplicate publications over MQTT and
-ESP-NOW, and `NmConnection` stores no topic filters.
+application's `Subscribe()` filters follow, the firmware `OnConnect()` callback
+runs, and NightMare runs the normal reconnect publication path. The framework
+does not duplicate publications over MQTT and ESP-NOW.
+
+## Connections and the transport
+
+A connection is one compiled link (`MQTT`, `ESP_NOW`); the NMNW transport is
+whichever connection currently carries the framework's traffic. The other
+connections stay usable by the application:
+
+```cpp
+NightMare::Subscribe("Control/forecast");               // follows the transport
+NightMare::SubscribeOn(NightMare::ConnectionType::MQTT, // stays on MQTT
+                       "stackport/+/status");
+NightMare::PublishTextOn(NightMare::ConnectionType::MQTT, "pc/cmd", "sleep");
+```
+
+- `Subscribe()` keeps the application's transport filter set and installs it
+  on every connect and transport change.
+- `SubscribeOn()` keeps a filter set per connection and installs it on every
+  session of that connection, whichever connection is the transport.
+- `PublishOn()` publishes on one connection; it fails while that connection is
+  not connected. `ConnectionUp()` reports that.
+
+Every message reaches `NmConnection` with its connection. A transport message
+goes through the framework routes and then, if unconsumed, to `OnMessage` with
+`transport == true`. A message from another connection reaches `OnMessage`
+with `transport == false`, and only when it matches that connection's
+`SubscribeOn()` filters; the framework never acts on it. Filters left on a
+connection from when it was the transport therefore do not leak through.
+
+## Presence follows the transport
+
+`<device>/status` has one owner: the transport. Each connection's Last Will
+follows that:
+
+- **MQTT** carries the status Last Will unless ESP-NOW is the transport and is
+  going to stay it (the preference is not `MQTT`). When that changes, MQTT
+  reconnects with or without the will. Until it holds the will it is not a
+  usable transport, so it never carries traffic without presence. Closing a
+  session without the will publishes nothing on `status`; disabling MQTT while
+  it holds the will publishes the offline document first, as before.
+- **ESP-NOW** gives the gateway a Last Will only while it is the transport and
+  clears it otherwise (a `LAST_WILL` whose topic length is 0, see
+  [ESP-NOW protocol](espnow-protocol.md)).
+
+Losing or disabling the non-transport connection therefore never marks a
+device offline that is up on the other one. As a safety net, the device also
+watches its own `status` on the transport: a retained offline document or an
+empty tombstone there while it is connected makes it publish `online` again,
+the way the gateway reasserts its own documents.
+
+Every status document carries the route in `via`
+(see [Status](../protocols/status-info.md#status)): the transport, the MQTT
+profile, or the authenticated gateway id for ESP-NOW.
 
 ## Public lifecycle API
 
@@ -104,10 +155,27 @@ bool EspNow_suspend(ConnectivitySuspendReason reason);
 bool EspNow_resume(ConnectivitySuspendReason reason);
 ```
 
-Service enable state is runtime-only in this architecture pass. WiFiIP follows
-`NM_WIFI_AUTO`; compiled MQTT and ESP-NOW services start independently when
-their dependencies are satisfied. The preferred transport is not used as an
-enable policy.
+```cpp
+bool Mqtt_enable();                     // the saved profile
+bool Mqtt_profileSupported(MqttProfile profile);
+bool WiFiIP_savedEnabled();
+bool Mqtt_savedEnabled();
+bool EspNow_savedEnabled();
+```
+
+Every enable and disable is saved, in the Configs
+`nightmare:connection:wifi_enabled`, `nightmare:connection:mqtt_enabled`,
+`nightmare:connection:mqtt_profile` and `nightmare:connection:espnow_enabled`.
+`startNightMareESP()` starts each service from its saved state.
+`NM_WIFI_AUTO`, `NM_MQTT_AUTO` (default `NM_WIFI_AUTO`) and `NM_ESPNOW_AUTO`
+are only the defaults before anything was saved. A `CONFIG SET` on any of them
+applies it at once. The preferred transport is not used as an enable policy.
+
+The MQTT profile is a runtime choice. `REMOTE` exists when `creds.h` defines
+`REMOTE_MQTT_URL`, `REMOTE_MQTT_PORT` and `ROOT_CA`; `LOCAL` when it defines
+`LOCAL_MQTT_HOST` and `LOCAL_MQTT_PORT`. A saved profile `creds.h` no longer
+describes falls back to the other one. The former compile-time switches
+`NM_NETWORK_MQTT` and `NM_NETWORK_LOCALMQTT` are gone and are a build error.
 
 ## Scanning and channel coexistence
 
@@ -130,7 +198,9 @@ reevaluate routing. No callback starts or stops an unrelated service.
 
 `<device>/telemetry/network` and `NETWORK GET` expose the same independent
 view: `transport`, `wifi_radio`, `wifi_ip`, `esp_now`, `mqtt`, and
-`gateway_candidate`. Candidate observation never initiates discovery. Publication
+`gateway_candidate`. `esp_now.gateway_id` is the gateway this device
+authenticated with (empty without a session); `gateway_candidate.id` is only
+the gateway announced on MQTT. Candidate observation never initiates discovery. Publication
 failure does not change connectivity state. Duplicate refresh requests are
 coalesced by `SystemState`.
 
@@ -155,9 +225,10 @@ MQTT or ESP-NOW is `CONNECTED`. A layer that is not compiled in never reports.
 The handler costs one pointer and no heap; the event lives on the caller's
 stack.
 
-It runs directly on the task that caused the change (the Wi-Fi monitor, MQTT
-or ESP-NOW task, or the application loop), from the same hook that refreshes
-telemetry. Keep it short, never block, guard state shared with the
+Without a delivery queue it runs directly on the task that caused the change
+(the Wi-Fi monitor, MQTT or ESP-NOW task, or the application loop), from the
+same hook that refreshes telemetry. With `NM_MESSAGE_QUEUE_DEPTH` it runs from
+`DeliverEvents()`, like `OnMessage` and `OnConnect`. Keep it short, never block, guard state shared with the
 application, and do not start or stop network services from it. Layers already
 running when it is installed report only their next change. The handler sees
 the states the services publish, so a transition a service never publishes

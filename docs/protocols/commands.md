@@ -430,26 +430,43 @@ ESP.restart();
 
 This is an immediate device restart operation.
 
-## ADOPT and CHANGE NAME
+## LABEL and CHANGE NAME
 
 ```text
-ADOPT <device-name>
-CHANGE NAME <device-name>
+LABEL
+LABEL SET <label>
+LABEL CLEAR
+CHANGE NAME <label>
 ```
 
-These are equivalent spellings for identity adoption. They call `DeviceIdentity::beginAdoption()` rather than editing settings directly, so validation, address locking, reboot behavior, and old-identity cleanup all remain in force.
+The label is the name people read. It is free text (at most 64 characters, no
+control characters), takes effect at once, refreshes `/status` and `/info`,
+and moves no topic. Quote a label with spaces, or give several words: they are
+joined with single spaces. Every form answers
+`{"label": "...", "address": "..."}`.
 
-A successful response is JSON:
+## ADOPT
+
+```text
+ADOPT <address>
+```
+
+`ADOPT` moves the address, the topic root, for a board that replaces another
+and takes over its address. It calls `DeviceIdentity::beginAdoption()`, so
+validation, address locking, reboot behavior and old-identity cleanup all
+remain in force. A successful response is JSON:
 
 ```json
 {
-  "name": "bedroom-ac",
-  "active_name": "Esp32-nm-6ca172e0",
+  "address": "Esp32-nm-6ca172e0",
+  "active_address": "Esp32-nm-1a2b3c4d",
   "reboot_required": true
 }
 ```
 
-`active_name` is the name still in use by the current boot. When the address was already locked, `reboot_required` is true and the adopted name becomes active after reboot.
+`active_address` is the address still in use by the current boot. When it was
+already locked, `reboot_required` is true and the new address becomes active
+after reboot.
 
 A second adoption is rejected while cleanup from the previous identity remains pending.
 

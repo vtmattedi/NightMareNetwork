@@ -6,14 +6,14 @@
 
 namespace NightMare
 {
-    const char *connectionStateName(ConnectionState state)
+    const char *sessionStateName(SessionState state)
     {
         switch (state)
         {
-        case ConnectionState::HANDSHAKE: return "handshake";
-        case ConnectionState::AUTHENTICATED: return "authenticated";
-        case ConnectionState::SECURING: return "securing";
-        case ConnectionState::CONNECTED: return "connected";
+        case SessionState::HANDSHAKE: return "handshake";
+        case SessionState::AUTHENTICATED: return "authenticated";
+        case SessionState::SECURING: return "securing";
+        case SessionState::CONNECTED: return "connected";
         }
         return "?";
     }

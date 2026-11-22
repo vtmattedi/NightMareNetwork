@@ -44,14 +44,15 @@ Topic:
 
 Status is retained.
 
-Its JSON shape is always:
+Its JSON shape is:
 
 ```json
 {
   "name": "bedroom-ac",
   "hardware": "Esp32-nm-6ca172e0",
   "timezone": "<-03>3",
-  "online": true
+  "online": true,
+  "via": {"transport": "ESP_NOW", "gateway": "Gateway-Prime"}
 }
 ```
 
@@ -59,7 +60,10 @@ Fields:
 
 ```text
 name
-    logical/adoptable device name represented by this status topic
+    what people read: the label, or the address when there is none
+
+address
+    the topic root this status lives under (normally the hardware signature)
 
 hardware
     stable hardware signature of the physical board
@@ -69,7 +73,19 @@ timezone
 
 online
     current presence state represented by this publication
+
+via
+    the route this document travelled, absent when there is none:
+      transport  "MQTT" or "ESP_NOW"
+      profile    MQTT only: "REMOTE" or "LOCAL"
+      gateway    ESP-NOW only: the id of the gateway this device
+                 authenticated with (absent with a gateway that predates
+                 the beacon identity)
 ```
+
+`via` answers "which gateway is this device connected to". A Last Will carries
+the route it was installed on, so an offline document also says which gateway
+or broker the device was last on.
 
 The same JSON shape is used for:
 

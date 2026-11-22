@@ -9,6 +9,7 @@
 #include <Core/Logs.h>
 #include <Core/ResourcesManager.h>
 #include <Core/SystemState.h>
+#include <ArduinoJson.h>
 #if NM_ENABLE_TELEMETRY
 #include <Core/Telemetry.h>
 #endif
@@ -58,6 +59,26 @@ void runCommand(const std::string &payload, const std::string &replyTopic)
 
 #endif
 
+// This device is up on the transport, so a retained "offline" (or an empty
+// tombstone) under its own status is stale: a Last Will that fired late, a
+// connection that has since handed presence over, an operator's clear. Put
+// the truth back, the way the gateway reasserts its own documents. The
+// device's own "online" echo needs nothing.
+void reassertPresence(const std::string &payload)
+{
+    if (NightMare::GetConnectionState() != NightMare::ConnectionState::CONNECTED)
+        return;
+    bool online = false;
+    if (!payload.empty())
+    {
+        JsonDocument doc;
+        if (!deserializeJson(doc, payload))
+            online = doc["online"] | false;
+    }
+    if (!online)
+        SystemState.request(SystemRequest::PublishStatus);
+}
+
 #if NM_ENABLE_TIME_SYNC
 bool syncTime(const std::string &payload)
 {
@@ -90,19 +111,23 @@ void onConnected()
 {
     bool subscriptionsComplete = true;
 #if NM_ENABLE_CONSOLE
-    subscriptionsComplete = NightMare::Subscribe(
+    subscriptionsComplete = NightMare::TransportSubscribe(
                                 gDeviceIdentity.topic("console/in").c_str()) &&
                             subscriptionsComplete;
-    subscriptionsComplete = NightMare::Subscribe(
+    subscriptionsComplete = NightMare::TransportSubscribe(
                                 gDeviceIdentity.topic("console/controlled/+/in").c_str()) &&
                             subscriptionsComplete;
-    subscriptionsComplete = NightMare::Subscribe("all/console/in") &&
+    subscriptionsComplete = NightMare::TransportSubscribe("all/console/in") &&
                             subscriptionsComplete;
 #endif
 #if NM_ENABLE_TIME_SYNC
-    subscriptionsComplete = NightMare::Subscribe("Control/time") &&
+    subscriptionsComplete = NightMare::TransportSubscribe("Control/time") &&
                             subscriptionsComplete;
 #endif
+    // Presence reassertion; see reassertPresence(). The gateway candidate's
+    // +/status filter usually covers it already, so this costs nothing new.
+    subscriptionsComplete = NightMare::TransportSubscribe(gDeviceIdentity.topic("status").c_str()) &&
+                            subscriptionsComplete;
     if (!subscriptionsComplete)
         LOG_WARNING("NET", "Message-router subscriptions were not accepted");
 
@@ -127,12 +152,16 @@ void onConnected()
 #endif
 }
 
-bool handleMessage(const std::string &fullTopic, const std::string &payload, bool retained)
+// The framework routes. True when one of them took the message.
+bool routeFramework(const std::string &fullTopic, const std::string &payload, bool retained)
 {
-    if (NightMare::GatewayCandidateHandleMessage(fullTopic, payload, retained))
-        return true;
+    // A gateway's status and announcement are observations: the candidate
+    // reads them and the application still sees them.
+    NightMare::GatewayCandidateHandleMessage(fullTopic, payload, retained);
     std::string relative;
     const bool addressedHere = gDeviceIdentity.relativeTopic(fullTopic, relative);
+    if (addressedHere && relative == "status")
+        reassertPresence(payload);
     // The resource manager accepts owned /set and /invoke requests, as well as
     // manifests, states and events from other devices. It sees full topics in
     // both cases. Only a request addressed to this device ends here: another
@@ -166,6 +195,20 @@ bool handleMessage(const std::string &fullTopic, const std::string &payload, boo
         return true;
     }
 #endif
+    return false;
+}
+}
+
+namespace NmMessageRouter
+{
+bool handleMessage(const std::string &fullTopic, const std::string &payload, bool retained,
+                   bool *frameworkConsumed)
+{
+    const bool framework = routeFramework(fullTopic, payload, retained);
+    if (frameworkConsumed != nullptr)
+        *frameworkConsumed = framework;
+    if (framework)
+        return true;
     return NightMare::DispatchApplicationMessage(
         fullTopic.c_str(), reinterpret_cast<const uint8_t *>(payload.c_str()),
         payload.length(), retained);

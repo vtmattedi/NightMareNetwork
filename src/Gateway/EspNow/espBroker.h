@@ -65,7 +65,7 @@ struct EspBrokerDeviceInfo
     std::string mac;
     std::string name; // learned from "<name>/status", may be empty
     uint16_t cid = 0;
-    NightMare::ConnectionState state = NightMare::ConnectionState::AUTHENTICATED;
+    NightMare::SessionState state = NightMare::SessionState::AUTHENTICATED;
     bool suspended = false; // a re-handshake is in progress
     std::vector<std::string> subscriptions;
     bool hasLastWill = false;

@@ -52,7 +52,9 @@ void otaTask(void *param)
 void initOTA()
 {
 
-    ArduinoOTA.setHostname(gDeviceIdentity.getDeviceName().c_str());
+    static std::string hostname;
+    hostname = gDeviceIdentity.hostname();
+    ArduinoOTA.setHostname(hostname.c_str());
     ArduinoOTA.onStart(startOTA);
     ArduinoOTA.onEnd(endOTA);
     ArduinoOTA.onProgress(progressOTA);

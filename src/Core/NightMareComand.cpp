@@ -385,13 +385,52 @@ static NightMareResults executeAdoptCommand(const std::string &newName, Nightmar
     }
 
     JsonDocument doc;
-    doc["name"] = newName;
+    doc["address"] = newName;
     const bool rebootRequired = gDeviceIdentity.getDeviceName() != newName;
-    doc["active_name"] = gDeviceIdentity.getDeviceName();
+    doc["active_address"] = gDeviceIdentity.getDeviceName();
     doc["reboot_required"] = rebootRequired;
     serializeJson(doc, result.response);
     result.result = true;
     return result;
+}
+
+static void refreshIdentityDocuments();
+
+// The label is display only: it changes at once, no reboot, no topic moves.
+static NightMareResults executeLabelCommand(const std::string &label, NightmareContext context)
+{
+    NightMareResults result;
+    result.result = false;
+    result.context = context;
+    if (!DeviceIdentity::validLabel(label))
+    {
+        result.response = "Invalid label: at most 64 characters, no control characters.";
+        return result;
+    }
+    if (!gDeviceIdentity.setLabel(label))
+    {
+        result.response = "Could not persist the label.";
+        return result;
+    }
+    refreshIdentityDocuments();
+    JsonDocument doc;
+    doc["label"] = gDeviceIdentity.getLabel();
+    doc["address"] = gDeviceIdentity.getDeviceName();
+    serializeJson(doc, result.response);
+    result.result = true;
+    return result;
+}
+
+static std::string joinArgs(const NightMareMessage &message, int first)
+{
+    std::string text;
+    for (int i = first; i < message.argc; ++i)
+    {
+        if (!text.empty())
+            text += ' ';
+        text += message.args[i];
+    }
+    return text;
 }
 
 static void refreshIdentityDocuments()
@@ -706,25 +745,39 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
 #if NM_CONSOLE_BUILTINS
     bool prehandled = true;
     // Basic commands that can be handled without a resolver
+    // ADOPT moves the address (the topic root): a board replacing another
+    // takes over its address. Reboot, then the old root is cleaned up.
     if (parsedMsg.command == "ADOPT")
     {
         if (parsedMsg.argc != 1)
         {
             result.result = false;
-            result.response = "Usage: ADOPT <device-name>";
+            result.response = "Usage: ADOPT <address>   (to rename, use LABEL SET <label>)";
         }
         else
             return executeAdoptCommand(parsedMsg.args[0], context);
     }
-    else if (parsedMsg.command == "CHANGE" && parsedMsg.subcommand == "NAME")
+    // The name people read. Quote a label with spaces, or give several words.
+    else if ((parsedMsg.command == "CHANGE" && parsedMsg.subcommand == "NAME") ||
+             (parsedMsg.command == "LABEL" && parsedMsg.subcommand == "SET"))
     {
-        if (parsedMsg.argc != 2)
+        if (parsedMsg.argc < 2)
         {
             result.result = false;
-            result.response = "Usage: CHANGE NAME <device-name>";
+            result.response = "Usage: LABEL SET <label> | CHANGE NAME <label>";
         }
         else
-            return executeAdoptCommand(parsedMsg.args[1], context);
+            return executeLabelCommand(joinArgs(parsedMsg, 1), context);
+    }
+    else if (parsedMsg.command == "LABEL" && (parsedMsg.subcommand == "CLEAR" || parsedMsg.argc == 0))
+    {
+        if (parsedMsg.subcommand == "CLEAR")
+            return executeLabelCommand(std::string(), context);
+        JsonDocument doc;
+        doc["label"] = gDeviceIdentity.getLabel();
+        doc["address"] = gDeviceIdentity.getDeviceName();
+        serializeJson(doc, result.response);
+        result.result = true;
     }
     else if (parsedMsg.command == "TIMEZONE")
     {
@@ -781,7 +834,8 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
                       static_cast<unsigned long>(uptimeS / 3600),
                       static_cast<unsigned long>(uptimeS / 60 % 60),
                       static_cast<unsigned long>(uptimeS % 60));
-        row("name", gDeviceIdentity.getDeviceName());
+        row("name", gDeviceIdentity.getDisplayName());
+        row("address", gDeviceIdentity.getDeviceName());
         row("firmware", NM_FIRMWARE_VERSION);
         row("uptime", uptime);
         row("free heap", std::to_string(esp_get_free_heap_size()) + " bytes");
@@ -1048,6 +1102,9 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
             espNow["supported"] = true;
             espNow["enabled"] = NightMare::EspNow_enabled();
             espNow["state"] = NightMare::ConnectivityStateName(NightMare::EspNow_state());
+            espNow["gateway_id"] = NightMare::EspNow_state() == NightMare::ConnectivityState::CONNECTED
+                                       ? NightMare::EspNowClient::gatewayId()
+                                       : std::string();
 #else
             espNow["supported"] = false; espNow["enabled"] = false; espNow["state"] = "STOPPED";
 #endif
@@ -1237,6 +1294,8 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
                 else if (requested == "LOCAL") profile = NightMare::MqttProfile::LOCAL;
                 if (!known)
                     lifecycleResult(false, "invalid_mqtt_profile", NightMare::Mqtt_state());
+                else if (!NightMare::Mqtt_profileSupported(profile))
+                    lifecycleResult(false, "profile_not_in_creds", NightMare::Mqtt_state());
                 else if (!NightMare::WiFiIP_enabled())
                     lifecycleResult(false, "wifi_ip_disabled", NightMare::Mqtt_state());
                 else
