@@ -40,6 +40,11 @@ bool TransportUnsubscribe(const char *topicFilter);
 // Whether MQTT should carry the device's status Last Will right now. False
 // only while ESP-NOW is the transport and is going to stay it.
 bool MqttMayHoldPresence();
+// MQTT only: a message received outside the namespace prefix, with its absolute topic.
+// Delivered to the application when it matches a SubscribeGlobal() filter, otherwise
+// dropped and counted (TopicNamespace::foreignDroppedCount()). It never reaches the
+// framework routes.
+void OnGlobalMessageIngress(const std::string &topic, const std::string &payload, bool retained);
 #if NM_ENABLE_GATEWAY
 // A message the gateway's broker received from either side, offered to the
 // device stack as GATEWAY-connection ingress. `consumed` is set when a

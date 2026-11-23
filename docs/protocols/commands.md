@@ -456,7 +456,7 @@ NAMESPACE RESET
 ```
 
 Reads or sets the namespace ID and the topic root (see
-[Namespaces](../architecture/namespaces.md); settings only, no topic is prefixed yet).
+[Namespaces](../architecture/namespaces.md)). A non-empty namespace puts `<root>/<ns>/` in front of every MQTT topic ([topics](topics.md#namespace-prefix)).
 
 - `NAMESPACE` prints the state.
 - `NAMESPACE <id>` stores a namespace ID (1-16 characters of `[a-z0-9-]`, starting with a

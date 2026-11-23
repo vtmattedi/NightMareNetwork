@@ -1,6 +1,7 @@
 #include <NightMare.h>
 
 #include <ArduinoJson.h>
+#include <Core/TopicNamespace.h>
 
 #include <type_traits>
 #include <utility>
@@ -52,6 +53,42 @@ static_assert(!NsId::validTopicRoot("") && !NsId::validTopicRoot("a/b") &&
                   !NsId::validTopicRoot("a+") && !NsId::validTopicRoot("#") &&
                   !NsId::validTopicRoot("a\tb") && !NsId::validTopicRoot("abcdefghijklmnopq"),
               "invalid topic roots");
+
+// Namespace topic prefix (NS-L2): pure rules, checked at compile time.
+namespace TopicNs = NightMare::TopicNamespace;
+constexpr bool prefixStrips(std::string_view root, std::string_view ns, std::string_view full,
+                            std::string_view expected)
+{
+    std::string_view out;
+    return TopicNs::stripView(root, ns, full, out) && out == expected;
+}
+static_assert(TopicNs::prefixLength("nm", "home") == 8 && TopicNs::prefixLength("nm", "") == 0,
+              "prefix length");
+static_assert(prefixStrips("nm", "home", "nm/home/Esp32-nm-c4d2e801/status", "Esp32-nm-c4d2e801/status") &&
+                  prefixStrips("nm", "home", "nm/home/Control/time", "Control/time") &&
+                  prefixStrips("nm", "home", "nm/home/#", "#") &&
+                  prefixStrips("nm", "home", "nm/home/", ""),
+              "strip under the prefix");
+static_assert(!TopicNs::underPrefix("nm", "home", "nm/home") &&
+                  !TopicNs::underPrefix("nm", "home", "nm/homer/a") &&
+                  !TopicNs::underPrefix("nm", "home", "nm/turing/a") &&
+                  !TopicNs::underPrefix("nm", "home", "x/home/a") &&
+                  !TopicNs::underPrefix("nm", "home", "Control/time") &&
+                  !TopicNs::underPrefix("nm", "home", "stackport/host/state"),
+              "outside the namespace");
+static_assert(prefixStrips("nm", "", "Control/time", "Control/time") &&
+                  prefixStrips("nm", "", "stackport/host/state", "stackport/host/state"),
+              "an empty (legacy) namespace strips nothing");
+static_assert(TopicNs::fitsMqttLimit(192) && !TopicNs::fitsMqttLimit(193) && !TopicNs::fitsMqttLimit(0) &&
+                  TopicNs::prefixedLength("nm", "home", 100) == 108,
+              "the MQTT limit applies to the full topic");
+static_assert(NightMare::MaxTopicFilterLength == 192, "full topic limit");
+
+const bool smokeTopicPrefix =
+    TopicNs::applyPrefix("nm", "home", "+/status") == "nm/home/+/status" &&
+    TopicNs::applyPrefix("nm", "home", "#") == "nm/home/#" &&
+    TopicNs::applyPrefix("nm", "", "+/status") == "+/status" &&
+    TopicNs::applyPrefix("a/b").length() >= 3 && TopicNs::foreignDroppedCount() == 0;
 static_assert(NetCodec<TimeType>::Type == NetValueType::TIME,
               "TimeType must have a first-class wire type");
 static_assert(NetCodec<ColourType>::Type == NetValueType::COLOUR,

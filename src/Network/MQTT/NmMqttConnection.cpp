@@ -168,6 +168,12 @@ void messageReceived(const std::string &topic, const std::string &payload, bool 
     NightMare::OnMessageIngress(NightMare::ConnectionType::MQTT, topic, payload, retained);
 }
 
+// A message outside <root>/<ns>/: only a global subscription may deliver it.
+void globalMessageReceived(const std::string &topic, const std::string &payload, bool retained)
+{
+    NightMare::OnGlobalMessageIngress(topic, payload, retained);
+}
+
 void connected(bool isLocalBroker)
 {
     if (!serviceEnabled)
@@ -223,6 +229,7 @@ bool applyEnable(NightMare::MqttProfile mqttProfile)
     serviceEnabled = true;
     serviceState = ConnectivityState::STARTING;
     NmMqttEsp::setHandlers(messageReceived, connected, disconnected, connectionError);
+    NmMqttEsp::setGlobalHandler(globalMessageReceived);
     if (NightMare::WiFiIP_state() == ConnectivityState::CONNECTED)
     {
         serviceState = ConnectivityState::CONNECTING;
@@ -266,6 +273,21 @@ bool subscribe(const char *topicFilter)
 bool unsubscribe(const char *topicFilter)
 {
     return NmMqttEsp::unsubscribe(topicFilter);
+}
+
+bool publishGlobal(const char *topic, const uint8_t *payload, size_t length, bool retained)
+{
+    return NmMqttEsp::publishGlobal(topic, payload, length, retained);
+}
+
+bool subscribeGlobal(const char *topicFilter)
+{
+    return NmMqttEsp::subscribeGlobal(topicFilter);
+}
+
+bool unsubscribeGlobal(const char *topicFilter)
+{
+    return NmMqttEsp::unsubscribeGlobal(topicFilter);
 }
 
 int8_t state()

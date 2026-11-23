@@ -5,6 +5,7 @@
 
 #include <Core/DeviceIdentity.h>
 #include <Core/Logs.h>
+#include <Core/TopicNamespace.h>
 #include <creds.h>
 #include <mqtt_client.h>
 #include <freertos/FreeRTOS.h>
@@ -55,6 +56,7 @@ QueueHandle_t controlQueue = nullptr;
 TaskHandle_t controlTaskHandle = nullptr;
 esp_mqtt_client_handle_t client = nullptr;
 NmMqttEsp::MessageHandler onMessage = nullptr;
+NmMqttEsp::MessageHandler onGlobalMessage = nullptr;
 NmMqttEsp::ConnectedHandler onConnected = nullptr;
 NmMqttEsp::DisconnectedHandler onDisconnected = nullptr;
 NmMqttEsp::ErrorHandler onError = nullptr;
@@ -64,6 +66,7 @@ bool lanBroker = false;
 volatile bool sessionWill = false;
 std::string incomingTopic;
 std::string incomingPayload;
+std::string relativeTopic;
 bool incomingRetained = false;
 bool receiving = false;
 bool shuttingDown = false;
@@ -71,7 +74,8 @@ bool stopRequested = false;
 
 // ESP MQTT retains pointers to these values for the client's lifetime.
 char brokerUri[192] = {};
-char willTopic[96] = {};
+// Holds the full topic, namespace prefix included (limit: MaxTopicFilterLength).
+char willTopic[NightMare::MaxTopicFilterLength + 1] = {};
 // The offline status JSON. Also what a graceful stop publishes, so the broker
 // ends up with the same retained payload however the device went away.
 char willMessage[512] = {};
@@ -142,8 +146,19 @@ void mqttEvent(void *, esp_event_base_t, int32_t eventId, void *eventData)
         if (incomingPayload.length() == static_cast<size_t>(event->total_data_len))
         {
             receiving = false;
-            if (onMessage != nullptr)
-                onMessage(incomingTopic, incomingPayload, incomingRetained);
+            // Under <root>/<ns>/: the library sees the relative topic. Anywhere else
+            // it can only be a global subscription, delivered with its absolute topic;
+            // whoever owns the global filters decides (and counts what matches none).
+            // An empty namespace strips nothing, so the legacy path is untouched.
+            if (NightMare::TopicNamespace::stripPrefix(incomingTopic, relativeTopic))
+            {
+                if (onMessage != nullptr)
+                    onMessage(relativeTopic, incomingPayload, incomingRetained);
+            }
+            else if (onGlobalMessage != nullptr)
+                onGlobalMessage(incomingTopic, incomingPayload, incomingRetained);
+            else
+                NightMare::TopicNamespace::noteForeignDropped();
         }
         break;
     case MQTT_EVENT_ERROR:
@@ -176,7 +191,15 @@ bool startClient(bool useLan, bool withWill)
     gDeviceIdentity.begin();
     gDeviceIdentity.lockAddress();
     lanBroker = useLan;
-    snprintf(willTopic, sizeof(willTopic), "%s", gDeviceIdentity.topic("status").c_str());
+    const std::string fullWillTopic =
+        NightMare::TopicNamespace::applyPrefix(gDeviceIdentity.topic("status"));
+    if (!NightMare::TopicNamespace::fitsMqttLimit(fullWillTopic.length()))
+    {
+        LOG_ERROR("MQTT", "Last Will topic %s exceeds %u characters", fullWillTopic.c_str(),
+                  static_cast<unsigned>(NightMare::MaxTopicFilterLength));
+        return false;
+    }
+    snprintf(willTopic, sizeof(willTopic), "%s", fullWillTopic.c_str());
     const std::string offlineStatus =
         NightMare::ConnectionDeviceStatusJson(false, NightMare::ConnectionType::MQTT);
     if (offlineStatus.length() >= sizeof(willMessage))
@@ -279,6 +302,11 @@ void setHandlers(MessageHandler message, ConnectedHandler connectedHandler,
     onError = errorHandler;
 }
 
+void setGlobalHandler(MessageHandler message)
+{
+    onGlobalMessage = message;
+}
+
 bool profileSupported(bool useLan)
 {
     return useLan ? NM_MQTT_HAS_LOCAL != 0 : NM_MQTT_HAS_REMOTE != 0;
@@ -344,31 +372,78 @@ bool changeTo(bool useLan, bool withWill)
     return xQueueSend(controlQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE;
 }
 
-bool publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
+namespace
 {
-    if (client == nullptr || connectionState <= 0 || topic == nullptr || topic[0] == '\0' ||
+bool publishFull(const std::string &topic, const uint8_t *payload, size_t length, bool retained)
+{
+    if (client == nullptr || connectionState <= 0 ||
+        !NightMare::TopicNamespace::fitsMqttLimit(topic.length()) ||
         (payload == nullptr && length != 0) || length > static_cast<size_t>(INT_MAX))
         return false;
-    return esp_mqtt_client_publish(client, topic,
+    return esp_mqtt_client_publish(client, topic.c_str(),
                                    reinterpret_cast<const char *>(payload),
                                    static_cast<int>(length), 0, retained) >= 0;
 }
 
+bool subscribeFull(const std::string &filter)
+{
+    const bool ok = client != nullptr && connectionState > 0 &&
+                    NightMare::TopicNamespace::fitsMqttLimit(filter.length()) &&
+                    esp_mqtt_client_subscribe(client, filter.c_str(), 0) >= 0;
+    LOG_DEBUG("MQTT", "Subscribe %s: %s", filter.c_str(), OK_LOG(ok));
+    return ok;
+}
+
+bool unsubscribeFull(const std::string &filter)
+{
+    return client != nullptr && connectionState > 0 &&
+           NightMare::TopicNamespace::fitsMqttLimit(filter.length()) &&
+           esp_mqtt_client_unsubscribe(client, filter.c_str()) >= 0;
+}
+}
+
+// Namespace-relative entry points: the prefix is added here and nowhere else.
+bool publish(const char *topic, const uint8_t *payload, size_t length, bool retained)
+{
+    if (topic == nullptr || topic[0] == '\0')
+        return false;
+    return publishFull(NightMare::TopicNamespace::applyPrefix(topic), payload, length, retained);
+}
+
 bool subscribe(const char *topicFilter)
 {
-    const bool ok = client != nullptr && connectionState > 0 && topicFilter != nullptr &&
-                    topicFilter[0] != '\0' &&
-                    esp_mqtt_client_subscribe(client, topicFilter, 0) >= 0;
-    LOG_DEBUG("MQTT", "Subscribe %s: %s", topicFilter == nullptr ? "" : topicFilter,
-              OK_LOG(ok));
-    return ok;
+    if (topicFilter == nullptr || topicFilter[0] == '\0')
+        return false;
+    return subscribeFull(NightMare::TopicNamespace::applyFilterPrefix(topicFilter));
 }
 
 bool unsubscribe(const char *topicFilter)
 {
-    return client != nullptr && connectionState > 0 && topicFilter != nullptr &&
-           topicFilter[0] != '\0' &&
-           esp_mqtt_client_unsubscribe(client, topicFilter) >= 0;
+    if (topicFilter == nullptr || topicFilter[0] == '\0')
+        return false;
+    return unsubscribeFull(NightMare::TopicNamespace::applyFilterPrefix(topicFilter));
+}
+
+// Absolute entry points: sent as given, outside the namespace.
+bool publishGlobal(const char *topic, const uint8_t *payload, size_t length, bool retained)
+{
+    if (topic == nullptr || topic[0] == '\0')
+        return false;
+    return publishFull(topic, payload, length, retained);
+}
+
+bool subscribeGlobal(const char *topicFilter)
+{
+    if (topicFilter == nullptr || topicFilter[0] == '\0')
+        return false;
+    return subscribeFull(topicFilter);
+}
+
+bool unsubscribeGlobal(const char *topicFilter)
+{
+    if (topicFilter == nullptr || topicFilter[0] == '\0')
+        return false;
+    return unsubscribeFull(topicFilter);
 }
 
 bool connected() { return connectionState > 0; }

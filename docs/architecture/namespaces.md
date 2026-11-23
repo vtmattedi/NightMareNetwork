@@ -7,7 +7,8 @@ order: 40
 
 # Namespaces (design)
 
-Status: **planned**, agreed 2026-11-23. Only the settings are implemented (below). Each
+Status: **planned**, agreed 2026-11-23. The settings and sections 1 and 2 (MQTT topic prefix,
+gateway binding at the MQTT boundary) are implemented (below). Each
 phase updates the protocol docs it changes: [topics](../protocols/topics.md),
 the [ESP-NOW protocol](../modules/espnow-protocol.md) and the
 [security review](../security/espnow_security_review.md).
@@ -15,9 +16,14 @@ the [ESP-NOW protocol](../modules/espnow-protocol.md) and the
 > **Status: settings implemented (NS-L1).** The compile-time defaults `NM_NAMESPACE` (empty,
 > legacy) and `NM_TOPIC_ROOT` (`"nm"`), their persisted runtime override, the `NAMESPACE`
 > console command, the validators (`NightMare::NamespaceId`, `Core/NamespaceId.h`) and the
-> accessors `NightMare::Namespace()` / `NightMare::TopicRoot()` exist. Nothing reads them
-> yet: MQTT prefixing, ESP-NOW and the backend are later tasks, and with an empty
-> namespace behavior is unchanged. See [identity](../modules/identity.md#namespace-and-topic-root)
+> accessors `NightMare::Namespace()` / `NightMare::TopicRoot()` exist.
+>
+> **Status: sections 1 and 2 implemented (NS-L2).** `Core/TopicNamespace.h` adds the prefix
+> at the two MQTT client boundaries (`NmMqttEsp.cpp`, `espMqtt.cpp`) and strips it on
+> receive; `NightMare::SubscribeGlobal()` / `UnsubscribeGlobal()` / `PublishGlobal()` are
+> the absolute-topic escape. ESP-NOW, the namespace key and the backend are later tasks,
+> and with an empty namespace behavior is unchanged. Rules: [topics](../protocols/topics.md#namespace-prefix).
+> See [identity](../modules/identity.md#namespace-and-topic-root)
 > and [commands](../protocols/commands.md#namespace).
 
 ## Goal
