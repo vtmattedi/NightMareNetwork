@@ -28,7 +28,8 @@ void espDeviceManager::removePeer(const MacAddress &mac)
         peers.remove(mac);
 }
 
-espDeviceManager::Admission espDeviceManager::admit(const MacAddress &mac, const NightMare::FrameHeader &header)
+espDeviceManager::Admission espDeviceManager::admit(const MacAddress &linkMac, const MacAddress &clientMac,
+                                                         const NightMare::FrameHeader &header)
 {
     const FrameType type = static_cast<FrameType>(header.type);
     switch (type)
@@ -36,7 +37,7 @@ espDeviceManager::Admission espDeviceManager::admit(const MacAddress &mac, const
     case FrameType::CONNECT:
         return {Verdict::HANDSHAKE, nullptr};
     case FrameType::AUTH:
-        return {pendingFor(mac) != nullptr ? Verdict::HANDSHAKE : Verdict::IGNORE, nullptr};
+        return {pendingFor(linkMac) != nullptr ? Verdict::HANDSHAKE : Verdict::IGNORE, nullptr};
     case FrameType::BEACON:    // another gateway, or our own echo
     case FrameType::CHALLENGE: // only a gateway sends these
     case FrameType::CONNACK:
@@ -45,9 +46,9 @@ espDeviceManager::Admission espDeviceManager::admit(const MacAddress &mac, const
         break;
     }
 
-    // Everything else belongs to a session: the sender MAC picks it, the cid
+    // Everything else belongs to a session: the client MAC picks it, the cid
     // must then match. A valid cid from another MAC finds no session here.
-    Device *device = sessionFor(mac);
+    Device *device = sessionFor(clientMac);
     if (device == nullptr)
         return {Verdict::IGNORE, nullptr};
     // Suspended: the peer is plaintext for a handshake nobody has proven yet,
@@ -81,9 +82,9 @@ espDeviceManager::PendingHandshake *espDeviceManager::pendingFor(const MacAddres
     return nullptr;
 }
 
-espDeviceManager::PendingHandshake *espDeviceManager::beginHandshake(const MacAddress &mac, uint64_t clientNonce,
-                                                                     uint16_t capabilities, uint64_t gatewayNonce,
-                                                                     uint64_t nowMs)
+espDeviceManager::PendingHandshake *espDeviceManager::beginHandshake(const MacAddress &mac, const MacAddress &clientMac,
+                                                                     uint64_t clientNonce, uint16_t capabilities,
+                                                                     uint64_t gatewayNonce, uint64_t nowMs)
 {
     PendingHandshake *slot = pendingFor(mac);
     if (slot == nullptr)
@@ -116,7 +117,7 @@ espDeviceManager::PendingHandshake *espDeviceManager::beginHandshake(const MacAd
     }
     // Only now, with the peer actually plaintext, does the session pause --
     // and it survives: nothing but a verified AUTH may replace it.
-    Device *existing = sessionFor(mac);
+    Device *existing = sessionFor(clientMac);
     if (existing != nullptr && !existing->isSuspended())
     {
         existing->suspend();
@@ -125,7 +126,7 @@ espDeviceManager::PendingHandshake *espDeviceManager::beginHandshake(const MacAd
     }
     slot->active = true;
     slot->mac = mac;
-    slot->clientMac = mac; // the caller overrides it for a protocol 1 CONNECT
+    slot->clientMac = clientMac;
     slot->clientNonce = clientNonce;
     slot->gatewayNonce = gatewayNonce;
     slot->capabilities = capabilities;
@@ -138,9 +139,10 @@ void espDeviceManager::abandonHandshake(const MacAddress &mac)
     PendingHandshake *entry = pendingFor(mac);
     if (entry == nullptr)
         return;
+    const MacAddress clientMac = entry->clientMac;
     NightMare::EspNowAuth::wipe(entry, sizeof(*entry)); // also clears `active`
 
-    Device *existing = sessionFor(mac);
+    Device *existing = sessionFor(clientMac);
     if (existing == nullptr)
     {
         removePeer(mac);
@@ -152,17 +154,17 @@ void espDeviceManager::abandonHandshake(const MacAddress &mac)
     // Nothing was proven, so the session goes back exactly as it was -- which
     // means putting its key back on the peer we turned to plaintext.
     const bool restored = existing->hasSessionKey() &&
-                          (peers.secure == nullptr || peers.secure(mac, existing->sessionKey()));
+                          (peers.secure == nullptr || peers.secure(existing->linkMac(), existing->sessionKey()));
     if (!restored)
     {
         // Encryption cannot be restored, so the session is unusable. End it
         // quietly: the device is presumably still there and will reconnect.
-        LOG_ERROR(TAG, "Could not re-secure session %u (%s); ending it", existing->cid(), mac.toString().c_str());
-        eraseSession(mac, false);
+        LOG_ERROR(TAG, "Could not re-secure session %u (%s); ending it", existing->cid(), clientMac.toString().c_str());
+        eraseSession(clientMac, false);
         return;
     }
     existing->resume();
-    LOG_DEBUG(TAG, "Handshake with %s went nowhere; session %u resumes", mac.toString().c_str(), existing->cid());
+    LOG_DEBUG(TAG, "Handshake with %s went nowhere; session %u resumes", clientMac.toString().c_str(), existing->cid());
 }
 
 Device *espDeviceManager::completeHandshake(const MacAddress &mac, uint64_t nowMs)
@@ -173,7 +175,8 @@ Device *espDeviceManager::completeHandshake(const MacAddress &mac, uint64_t nowM
 
     // Replacing takes the old session's place, so only a brand new one needs
     // room in the table.
-    Device *previous = sessionFor(mac);
+    const MacAddress clientMac = entry->clientMac;
+    Device *previous = sessionFor(clientMac);
     if (previous == nullptr && devices.size() >= MaxDevices)
     {
         LOG_WARNING(TAG, "Session table full, refusing %s", mac.toString().c_str());
@@ -189,19 +192,19 @@ Device *espDeviceManager::completeHandshake(const MacAddress &mac, uint64_t nowM
         // A verified AUTH: the sender holds the network key, so it is the
         // device, and this supersedes its old session. No last will -- it is
         // reconnecting, not gone. The peer stays, for the new session.
-        LOG_DEBUG(TAG, "%s proved itself; session %u replaced", mac.toString().c_str(), previous->cid());
-        eraseSession(mac, true);
+        LOG_DEBUG(TAG, "%s proved itself; session %u replaced", clientMac.toString().c_str(), previous->cid());
+        eraseSession(clientMac, true);
     }
-    devices.emplace_back(mac, allocateCid(), nowMs);
+    devices.emplace_back(clientMac, mac, allocateCid(), nowMs);
     return &devices.back();
 }
 
 bool espDeviceManager::secureSession(Device &device, const uint8_t *lmk)
 {
-    if (peers.secure != nullptr && !peers.secure(device.address(), lmk))
+    if (peers.secure != nullptr && !peers.secure(device.linkMac(), lmk))
     {
-        const MacAddress mac = device.address();
-        endSession(mac);
+        const MacAddress clientMac = device.clientMac();
+        endSession(clientMac);
         return false;
     }
     // Kept so an unproven handshake later can put encryption back.
@@ -210,30 +213,39 @@ bool espDeviceManager::secureSession(Device &device, const uint8_t *lmk)
     return true;
 }
 
-void espDeviceManager::eraseSession(const MacAddress &mac, bool keepPeer)
+void espDeviceManager::eraseSession(const MacAddress &clientMac, bool keepPeer)
 {
     for (size_t i = 0; i < devices.size(); i++)
     {
-        if (devices[i].address() == mac)
+        if (devices[i].clientMac() == clientMac)
         {
+            const MacAddress linkMac = devices[i].linkMac();
             devices[i].forgetSessionKey();
             devices.erase(devices.begin() + i);
             if (!keepPeer)
-                removePeer(mac);
+                removePeer(linkMac);
             return;
         }
     }
 }
 
-void espDeviceManager::endSession(const MacAddress &mac)
+void espDeviceManager::endSession(const MacAddress &clientMac)
 {
-    eraseSession(mac, false);
+    eraseSession(clientMac, false);
 }
 
-Device *espDeviceManager::sessionFor(const MacAddress &mac)
+Device *espDeviceManager::sessionFor(const MacAddress &clientMac)
 {
     for (Device &device : devices)
-        if (device.address() == mac)
+        if (device.clientMac() == clientMac)
+            return &device;
+    return nullptr;
+}
+
+Device *espDeviceManager::sessionByLink(const MacAddress &linkMac)
+{
+    for (Device &device : devices)
+        if (device.linkMac() == linkMac)
             return &device;
     return nullptr;
 }
@@ -293,8 +305,8 @@ void espDeviceManager::expire(uint64_t nowMs, void (*onLost)(Device &device))
             LOG(TAG, "client auth failed: %s (never finished securing)", device.label().c_str());
         if (connected && onLost != nullptr && device.hasLastWill())
             onLost(device);
-        const MacAddress mac = device.address();
-        endSession(mac);
+        const MacAddress clientMac = device.clientMac();
+        endSession(clientMac);
     }
 }
 

@@ -42,7 +42,7 @@ namespace NightMare
 
         bool knownType(uint8_t type)
         {
-            return type <= static_cast<uint8_t>(FrameType::ERROR);
+            return type <= static_cast<uint8_t>(FrameType::FORWARD);
         }
 
         // Handshake frames run before a session exists and must carry cid 0;
@@ -125,6 +125,7 @@ namespace NightMare
         case FrameType::LAST_WILL: return "LAST_WILL";
         case FrameType::ACK: return "ACK";
         case FrameType::ERROR: return "ERROR";
+        case FrameType::FORWARD: return "FORWARD";
         }
         return "?";
     }
@@ -139,6 +140,7 @@ namespace NightMare
         case FrameCheck::UNSUPPORTED_FRAMING: return "unsupported ESP-NOW framing version";
         case FrameCheck::UNSUPPORTED_PROTOCOL: return "unsupported NM protocol version";
         case FrameCheck::UNKNOWN_TYPE: return "unknown frame type";
+        case FrameCheck::UNSUPPORTED_TYPE: return "reserved frame type not supported";
         case FrameCheck::BAD_FRAGMENT: return "bad fragment fields";
         case FrameCheck::BAD_CID: return "cid not valid for this frame type";
         case FrameCheck::BAD_PAYLOAD: return "wrong payload size";
@@ -165,6 +167,8 @@ namespace NightMare
             return FrameCheck::UNKNOWN_TYPE;
 
         const FrameType type = static_cast<FrameType>(header.type);
+        if (type == FrameType::FORWARD) // reserved: known, but nothing parses it yet
+            return FrameCheck::UNSUPPORTED_TYPE;
         if (header.totalFrames == 0 || header.frameIndex >= header.totalFrames)
             return FrameCheck::BAD_FRAGMENT;
         if (type != FrameType::MESSAGE && header.totalFrames != 1)

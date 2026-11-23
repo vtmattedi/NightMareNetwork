@@ -243,7 +243,7 @@ static bool sendRawFrame(const uint8_t *mac, const Frame &frame)
     // A unicast that was ACKed doubles as a ping: how long the round trip took.
     if (done && s_sendOk.load(std::memory_order_relaxed) && memcmp(mac, BROADCAST_MAC, MacAddress::Length) != 0)
     {
-        Device *device = s_devices.sessionFor(MacAddress(mac));
+        Device *device = s_devices.sessionByLink(MacAddress(mac));
         const uint64_t doneUs = s_sendDoneUs.load(std::memory_order_relaxed);
         if (device != NULL && doneUs >= startUs)
             device->noteRtt((float)(doneUs - startUs) / 1000.0f);
@@ -268,7 +268,7 @@ bool espBroker_sendFrame(const Device *device, const Frame &frame)
 {
     if (device == NULL || !device->isConnected())
         return false;
-    return sendRawFrame(device->address().bytes, frame);
+    return sendRawFrame(device->linkMac().bytes, frame);
 }
 
 static void sendBeacon()
@@ -304,7 +304,7 @@ bool espBroker_sendMessage(const Device *device, const NightMare::Message &messa
             !espBroker_sendFrame(device, frame))
         {
             if (trace)
-                HW_TRACE("tx espnow to %s: '%s' %u B FAILED at frame %u/%u", device->address().toString().c_str(),
+                HW_TRACE("tx espnow to %s: '%s' %u B FAILED at frame %u/%u", device->clientMac().toString().c_str(),
                          message.topic.c_str(), (unsigned)message.payload.size(), (unsigned)(i + 1),
                          (unsigned)totalFrames);
             return false;
@@ -312,7 +312,7 @@ bool espBroker_sendMessage(const Device *device, const NightMare::Message &messa
     }
     gwCount(g_gatewayStats.msgsToLocal);
     if (trace)
-        HW_TRACE("tx espnow to %s: '%s' %u B retained=%d in %u frame(s) ok", device->address().toString().c_str(),
+        HW_TRACE("tx espnow to %s: '%s' %u B retained=%d in %u frame(s) ok", device->clientMac().toString().c_str(),
                  message.topic.c_str(), (unsigned)message.payload.size(), (int)message.persistent,
                  (unsigned)totalFrames);
     return true;
@@ -352,7 +352,7 @@ static void handleConnect(const MacAddress &mac, const Frame &frame)
     // validateFrame() already sized the payload for the active protocol.
     uint64_t clientNonce;
     uint16_t capabilities;
-    MacAddress clientMac = mac;
+    MacAddress clientMac = mac; // protocol 0: the sender is the client
     if (s_nsIdLength > 0)
     {
         NightMare::ConnectPayloadV1 connect;
@@ -390,10 +390,9 @@ static void handleConnect(const MacAddress &mac, const Frame &frame)
 
     const uint64_t gatewayNonce = Auth::freshNonce();
     espDeviceManager::PendingHandshake *pending =
-        s_devices.beginHandshake(mac, clientNonce, capabilities, gatewayNonce, nowMs());
+        s_devices.beginHandshake(mac, clientMac, clientNonce, capabilities, gatewayNonce, nowMs());
     if (pending == NULL)
         return;
-    pending->clientMac = clientMac;
 
     // The messageId echo is how the client pairs this with its CONNECT.
     const NightMare::ChallengePayload challenge{gatewayNonce};
@@ -446,7 +445,7 @@ static void handleAuth(const MacAddress &mac, const Frame &frame)
         s_devices.secureSession(*device, lmk);
     Auth::wipe(lmk, sizeof(lmk));
     if (!sent)
-        s_devices.endSession(mac);
+        s_devices.endSession(device->clientMac());
 }
 
 // --- Session traffic ---------------------------------------------------------
@@ -454,7 +453,7 @@ static void handleAuth(const MacAddress &mac, const Frame &frame)
 static void handleMessageFrame(Device *device, const Frame &frame)
 {
     std::vector<uint8_t> whole;
-    switch (s_reassembly.feed(device->address(), frame.header, frame.data, nowMs(), whole))
+    switch (s_reassembly.feed(device->clientMac(), frame.header, frame.data, nowMs(), whole))
     {
     case ReassemblyTable::Result::COMPLETE:
     {
@@ -474,7 +473,7 @@ static void handleMessageFrame(Device *device, const Frame &frame)
 
 static void reply(const Device *device, FrameType type, uint16_t messageId)
 {
-    sendTo(device->address(), type, messageId, device->cid());
+    sendTo(device->linkMac(), type, messageId, device->cid());
 }
 
 // Only reached through admit(): right MAC, right cid, and CONNECTED -- or
@@ -499,9 +498,9 @@ static void handleSessionFrame(Device *device, const Frame &frame)
         if (device->state() == SessionState::CONNECTED)
             LOG(TAG, "client disconnected: %s cid=%u (said goodbye)", device->label().c_str(),
                      (unsigned)device->cid());
-        const MacAddress mac = device->address();
-        s_devices.endSession(mac);
-        s_reassembly.drop(mac);
+        const MacAddress clientMac = device->clientMac();
+        s_devices.endSession(clientMac);
+        s_reassembly.drop(clientMac);
         break;
     }
 
@@ -524,7 +523,7 @@ static void handleSessionFrame(Device *device, const Frame &frame)
                      device->label().c_str(), (unsigned)frame.header.messageId, (unsigned)device->cid(),
                      filter.c_str(), (unsigned)filter.size(), reason, (unsigned)device->subscriptionCount(),
                      (unsigned)device->subscriptionCapacity());
-            sendError(device->address(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
+            sendError(device->linkMac(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
         }
         if (ok)
             espBroker_onSubscribe(device, filter);
@@ -538,7 +537,7 @@ static void handleSessionFrame(Device *device, const Frame &frame)
         if (ok)
             reply(device, FrameType::ACK, frame.header.messageId);
         else
-            sendError(device->address(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
+            sendError(device->linkMac(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
         break;
     }
 
@@ -562,7 +561,7 @@ static void handleSessionFrame(Device *device, const Frame &frame)
         const NightMare::Message will = NightMare::Message::fromRawData(frame.data, frame.header.length);
         const bool ok = device->setLastWill(will);
         if (!ok)
-            LOG_WARNING(TAG, "%s last will on '%s' rejected", device->address().toString().c_str(), will.topic.c_str());
+            LOG_WARNING(TAG, "%s last will on '%s' rejected", device->clientMac().toString().c_str(), will.topic.c_str());
         // A "<name>/status" will names the device before it has published any
         // status itself. A real status message still overrides this later.
         if (ok && device->assumedName().empty() && topicMatchesPattern(will.topic, "+/status"))
@@ -570,7 +569,7 @@ static void handleSessionFrame(Device *device, const Frame &frame)
         if (ok)
             reply(device, FrameType::ACK, frame.header.messageId);
         else
-            sendError(device->address(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
+            sendError(device->linkMac(), device->cid(), frame.header.messageId, ErrorCode::REJECTED);
         break;
     }
 
@@ -582,7 +581,10 @@ static void handleSessionFrame(Device *device, const Frame &frame)
 
 static void handlePacket(const RxPacket &packet)
 {
-    const MacAddress mac(packet.mac);
+    const MacAddress mac(packet.mac); // linkMac: the radio peer, where replies go
+    // The client the frame speaks for. Until relays exist that is the radio
+    // sender (CONNECT enforces it); a relay will resolve it differently here.
+    const MacAddress clientMac = mac;
     Frame frame{};
     const FrameCheck check = NightMare::decodeFrame(frame, packet.data, packet.length);
     if (check != FrameCheck::OK)
@@ -591,17 +593,18 @@ static void handlePacket(const RxPacket &packet)
         gwCount(g_gatewayStats.invalidFrames);
         // Only a sender with a live session is worth answering; anyone else
         // could be an old-protocol device, noise, or an unproven handshake.
-        const Device *device = s_devices.sessionFor(mac);
+        const Device *device = s_devices.sessionFor(clientMac);
         if (device != NULL && !device->isSuspended())
         {
             LOG_WARNING(TAG, "Invalid frame from session %u: %s", device->cid(), NightMare::frameCheckName(check));
-            const bool version = check == FrameCheck::UNSUPPORTED_FRAMING || check == FrameCheck::UNSUPPORTED_PROTOCOL;
+            const bool version = check == FrameCheck::UNSUPPORTED_FRAMING || check == FrameCheck::UNSUPPORTED_PROTOCOL ||
+                                 check == FrameCheck::UNSUPPORTED_TYPE; // FORWARD: relaying is not built
             sendError(mac, device->cid(), 0, version ? ErrorCode::UNSUPPORTED_VERSION : ErrorCode::INVALID_FRAME);
         }
         return;
     }
 
-    const espDeviceManager::Admission admission = s_devices.admit(mac, frame.header);
+    const espDeviceManager::Admission admission = s_devices.admit(mac, clientMac, frame.header);
     switch (admission.verdict)
     {
     case espDeviceManager::Verdict::HANDSHAKE:
@@ -733,7 +736,7 @@ bool espBroker_init(const uint8_t *psk, size_t pskLength)
 static void publishLastWill(Device &device)
 {
     LOG_DEBUG(TAG, "%s went stale, publishing its last will on '%s'",
-             device.address().toString().c_str(), device.lastWillMessage().topic.c_str());
+             device.clientMac().toString().c_str(), device.lastWillMessage().topic.c_str());
     espBroker_onMessage(&device, device.lastWillMessage());
 }
 
@@ -752,7 +755,7 @@ static void refreshSnapshot(void)
             continue;
 
         EspBrokerDeviceInfo info;
-        info.mac = device->address().toString();
+        info.mac = device->clientMac().toString();
         info.name = device->assumedName();
         info.cid = device->cid();
         info.state = device->state();
@@ -867,7 +870,7 @@ void espBroker_shutdown(void)
     {
         const Device *device = s_devices.deviceAt(i);
         if (device != NULL)
-            s_reassembly.drop(device->address());
+            s_reassembly.drop(device->clientMac());
     }
     s_devices.reset();
 

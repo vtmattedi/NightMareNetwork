@@ -74,6 +74,7 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
 | 11 | LAST_WILL   | client → gateway    | cid | same encoding as MESSAGE; topic length 0 clears the will | yes |
 | 12 | ACK         | gateway → client    | cid | — | yes |
 | 13 | ERROR       | gateway → client    | any | `[ErrorCode]` (1) | if a session key is installed |
+| 14 | FORWARD     | reserved (R1 relay) | cid | `[clientMac:6][inner frame]`, see below | yes |
 
 Replies echo the request's `messageId`: CHALLENGE echoes CONNECT, CONNACK
 echoes AUTH, PONG echoes PING, and ACK/ERROR echo the frame they answer.
@@ -83,7 +84,8 @@ echoes AUTH, PONG echoes PING, and ACK/ERROR echo the frame they answer.
 
 - at least a header, and `length` equal to the bytes that follow it;
 - V1 framing and the node's own NM protocol (`0` legacy, `1` namespaced);
-- a known type;
+- a known type; FORWARD is known but reserved, and is reported as unsupported
+  (below) rather than accepted;
 - `totalFrames ≠ 0`, `frameIndex < totalFrames`, and only MESSAGE may be
   fragmented;
 - the cid rule for the type: handshake types carry `0`, CONNACK and session
@@ -92,6 +94,23 @@ echoes AUTH, PONG echoes PING, and ACK/ERROR echo the frame they answer.
 
 Anything else is dropped. The gateway answers a bad frame only when it comes
 from a MAC that holds a session.
+
+**Reserved: FORWARD (14) and the RELAY capability.** Both are space held for a
+trusted relay (see "Future: R1 trusted relay"); nothing sends or parses them yet.
+
+- `FORWARD` is an envelope: `data = [clientMac:6][one inner frame]`, the inner
+  frame being a complete `FrameHeader` plus its data, so it fits in
+  `MaxFrameDataSize - 6 = 234` bytes. The envelope itself carries the relay's
+  session cid and is encrypted with the relay's session key. `FrameHeader` stays
+  10 bytes.
+- `CAPABILITY_RELAY` is bit 1 (`1 << 1`) of the `capabilities` field in CONNECT
+  and CONNACK (bit 0 is `CAPABILITY_FRAME_V2`). Nothing advertises it yet.
+- A gateway that receives FORWARD treats it as an unsupported request.
+  `validateFrame()` returns `UNSUPPORTED_TYPE`, so the frame never reaches
+  payload handling. If the sender holds a live, unsuspended session the gateway
+  answers `ERROR UNSUPPORTED_VERSION` (cid of that session, `messageId` 0);
+  from any other sender it stays silent, like for every other invalid frame.
+  The same applies to a client that receives one: it drops it.
 
 ## Handshake
 
@@ -194,7 +213,7 @@ derived from anything.
 | Offset | Field | Type | Meaning |
 |-------:|-------|------|---------|
 | 0  | `clientNonce`  | `uint64_t` | Fresh from the hardware RNG, as in v0. |
-| 8  | `capabilities` | `uint16_t` | As in v0 (none defined). |
+| 8  | `capabilities` | `uint16_t` | As in v0 (none defined; bit 1 is reserved for RELAY). |
 | 10 | `nsTag`        | `uint32_t` | First 4 bytes of `SHA-256(nsId)`. The wire bytes are the digest bytes verbatim, so the value is the digest read little-endian (`"home"` → bytes `4E A1 40 58`, value `0x5840A14E`). |
 | 14 | `clientMac`    | `uint8_t[6]` | The MAC the proof and LMK bind to. |
 
@@ -233,6 +252,22 @@ change for it. The session table is still keyed by the sender MAC.
 foreign `nsTag` at once: no handshake state, no reply. This keeps neighbouring
 namespaces from producing auth-failure noise. It is a hint, not a security
 boundary: the proof is, and it binds the full `nsId`.
+
+### Sessions: clientMac and linkMac
+
+The gateway's session table (`espDeviceManager`) keys a session by `clientMac`,
+the identity the proof and LMK bind to, and stores a separate `linkMac`, the
+radio peer that frames are sent to and whose ESP-NOW peer entry carries the key.
+Pending handshakes are keyed by the radio sender (`linkMac`) and remember their
+`clientMac`.
+
+- Every send (replies, errors, MESSAGE delivery) and every peer operation uses
+  `linkMac`.
+- Every lookup from a received frame resolves by the client identity. Today the
+  gateway sets that identity to the radio sender, and a v1 CONNECT whose
+  `clientMac` differs from the sender is ignored, so `clientMac == linkMac`
+  always and behaviour is unchanged.
+- Message reassembly and last-will bookkeeping belong to the client.
 
 ### Version policy
 
@@ -313,12 +348,30 @@ framework owner and the firmware connect callback install their own filters.
 The last will remains session-owned by `EspNowClient` and is restored whenever
 a new session reaches CONNECTED. None of this state rides in CONNECT.
 
+## Future: R1 trusted relay
+
+Not built. The wire and the session table are prepared so it can be added
+without breaking devices that exist now.
+
+- A relay is a member of the namespace and authenticates to the gateway as an
+  ordinary client, advertising `CAPABILITY_RELAY`.
+- Toward its children it acts like a gateway without MQTT: it beacons, answers
+  CONNECT and holds sessions with them.
+- It never holds the namespace key. It forwards a child's CONNECT and AUTH to
+  the gateway inside FORWARD envelopes. The gateway verifies the child and
+  returns the child's session key over the relay's encrypted session.
+- The gateway then relaxes the `clientMac == radio sender` rule only for frames
+  that arrive inside FORWARD from an authenticated relay. It records the relay's
+  MAC as the child's `linkMac`, so replies go back through the relay while the
+  session stays keyed by the child's `clientMac`. Frames outside FORWARD keep the
+  strict rule.
+
 ## Errors
 
 | Code | Name | Sent when |
 |-----:|------|-----------|
 | 1 | AUTH_FAILED | The AUTH proof does not verify (different key). The client backs off 10 s. |
-| 2 | UNSUPPORTED_VERSION | A session peer sent a framing or protocol version the gateway does not run. A sender without a session is never answered. |
+| 2 | UNSUPPORTED_VERSION | A session peer sent a framing or protocol version the gateway does not run, or a reserved frame type (FORWARD). A sender without a session is never answered. |
 | 3 | INVALID_SESSION | The cid does not match the sender's session. |
 | 4 | INVALID_FRAME | A session peer sent a frame that failed validation. |
 | 5 | NOT_CONNECTED | Session traffic arrived before the session was secured. |

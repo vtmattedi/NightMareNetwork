@@ -18,8 +18,8 @@ namespace NightMare
         return "?";
     }
 
-    Device::Device(const MacAddress &address, uint16_t cid, uint64_t nowMs)
-        : mac(address), cid_(cid), sessionStartMs_(nowMs), lastSeenMs(nowMs) {}
+    Device::Device(const MacAddress &clientMac, const MacAddress &linkMac, uint16_t cid, uint64_t nowMs)
+        : clientMac_(clientMac), linkMac_(linkMac), cid_(cid), sessionStartMs_(nowMs), lastSeenMs(nowMs) {}
 
     bool Device::isSubscribedTo(const std::string &topic) const
     {

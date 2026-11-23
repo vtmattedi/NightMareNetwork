@@ -290,7 +290,7 @@ static NightMare::Message buildDebugTelemetry()
 
         char row[160];
         snprintf(row, sizeof(row), "{\"mac\":\"%s\",\"cid\":%u,\"state\":\"%s\",\"subs\":%u,\"lastSeenS\":%llu,\"lastWill\":%s}",
-                 device->address().toString().c_str(), (unsigned)device->cid(),
+                 device->clientMac().toString().c_str(), (unsigned)device->cid(),
                  NightMare::sessionStateName(device->state()), (unsigned)device->subscriptionCount(),
                  (unsigned long long)((nowMs - device->lastSeenAtMs()) / 1000),
                  device->hasLastWill() ? "true" : "false");
@@ -442,7 +442,7 @@ void onMessage(const NightMare::Device *device, NightMare::Message message)
 void espBroker_onMessage(NightMare::Device *device, NightMare::Message message)
 {
     if (isHardwareTopic(message.topic))
-        HW_TRACE("rx espnow from %s: '%s' %u B retained=%d", device->address().toString().c_str(),
+        HW_TRACE("rx espnow from %s: '%s' %u B retained=%d", device->clientMac().toString().c_str(),
                  message.topic.c_str(), (unsigned)message.payload.size(), (int)message.persistent);
 
     if (topicMatchesPattern(message.topic, "+/status"))

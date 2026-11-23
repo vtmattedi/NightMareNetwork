@@ -21,13 +21,15 @@ namespace NightMare
 
     const char *sessionStateName(SessionState state);
 
-    // One ESP-NOW session: the peer MAC, the gateway-assigned cid, and what the
+    // One ESP-NOW session: the client MAC (its identity), the link MAC (the radio
+    // peer its frames go to; equal to the client MAC until relays exist), the gateway-assigned cid, and what the
     // broker keeps for it. Session and broker state go away together.
     class Device
     {
         static constexpr size_t MaxSubscriptions = 32;
 
-        MacAddress mac;
+        MacAddress clientMac_;
+        MacAddress linkMac_;
         uint16_t cid_ = 0;
         SessionState state_ = SessionState::AUTHENTICATED;
         // The session's ESP-NOW key. Kept because a handshake from this MAC
@@ -52,13 +54,16 @@ namespace NightMare
         std::string assumedName_ = "";               // a name for the device, if known (e.g. from its status)
     public:
         Device() = default;
-        Device(const MacAddress &address, uint16_t cid, uint64_t nowMs);
+        Device(const MacAddress &clientMac, const MacAddress &linkMac, uint16_t cid, uint64_t nowMs);
 
         bool isSubscribedTo(const std::string &topic) const;
         bool subscribeTo(const std::string &topic);
         bool unsubscribeFrom(const std::string &topic);
 
-        const MacAddress &address() const { return mac; }
+        // Who the session belongs to: lookups from a received frame resolve by this.
+        const MacAddress &clientMac() const { return clientMac_; }
+        // Where frames are sent and which ESP-NOW peer carries the key.
+        const MacAddress &linkMac() const { return linkMac_; }
         uint16_t cid() const { return cid_; }
         SessionState state() const { return state_; }
         void setState(SessionState state) { state_ = state; }
@@ -104,7 +109,7 @@ namespace NightMare
         // "name (mac)" when the name is known, else just the mac, for log lines.
         std::string label() const
         {
-            return assumedName_.empty() ? mac.toString() : assumedName_ + " (" + mac.toString() + ")";
+            return assumedName_.empty() ? clientMac_.toString() : assumedName_ + " (" + clientMac_.toString() + ")";
         }
         void setAssumedName(const std::string &name);
     };

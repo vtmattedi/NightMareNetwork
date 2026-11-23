@@ -21,8 +21,7 @@ the [ESP-NOW protocol](../modules/espnow-protocol.md) and the
 > **Status: sections 1 and 2 implemented (NS-L2), section 3 implemented (NS-L3).** `Core/TopicNamespace.h` adds the prefix
 > at the two MQTT client boundaries (`NmMqttEsp.cpp`, `espMqtt.cpp`) and strips it on
 > receive; `NightMare::SubscribeGlobal()` / `UnsubscribeGlobal()` / `PublishGlobal()` are
-> the absolute-topic escape. ESP-NOW speaks handshake v1 when a namespace is set. The relay preparation
-> and the backend are later tasks, and with an empty namespace behavior is unchanged. Rules: [topics](../protocols/topics.md#namespace-prefix).
+> the absolute-topic escape. ESP-NOW speaks handshake v1 when a namespace is set. The backend is a later task, and with an empty namespace behavior is unchanged. Rules: [topics](../protocols/topics.md#namespace-prefix).
 > See [identity](../modules/identity.md#namespace-and-topic-root)
 > and [commands](../protocols/commands.md#namespace).
 
@@ -164,6 +163,11 @@ There is **one key per namespace**. This mirrors MQTT, where a namespace role
 
 ## 4. Relay preparation (R1, not built yet)
 
+> **Status: implemented (NS-L4).** Sessions are keyed by `clientMac` with a separate `linkMac`;
+> `FORWARD` (frame type 14) and the `RELAY` capability (bit 1) are reserved. A gateway answers
+> `FORWARD` with `UNSUPPORTED_VERSION` to a sender with a live session and ignores it otherwise.
+> The relay itself is not built.
+
 The target is **R1, a trusted relay**. It is a member of the namespace and
 authenticates to the gateway like a client. Toward its children it acts like a
 small gateway without MQTT. It never holds the namespace key: it forwards a
@@ -180,7 +184,7 @@ devices:
 3. **Reserved protocol space.** A `FORWARD` frame type (an envelope carrying
    `clientMac` and one inner frame) and a `RELAY` capability bit are reserved
    and documented. The 10-byte `FrameHeader` does not change. A gateway answers
-   `FORWARD` with `UNSUPPORTED_VERSION` until R1 exists.
+   `FORWARD` with `UNSUPPORTED_VERSION` (live session only) until R1 exists.
 4. **Topics stay relative below the gateway** (section 1). Each hop keeps 63
    bytes.
 

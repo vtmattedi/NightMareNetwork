@@ -33,7 +33,7 @@ public:
     struct PendingHandshake
     {
         bool active = false;
-        MacAddress mac;       // radio sender: where frames go
+        MacAddress mac;       // linkMac: the radio sender, where frames go; keys this table
         // The MAC the proof and LMK bind to: CONNECT's clientMac field (protocol 1),
         // the sender (protocol 0). Equal to `mac` until relays relax that rule.
         MacAddress clientMac;
@@ -61,33 +61,40 @@ public:
     explicit espDeviceManager(uint64_t sessionTimeoutMs, uint16_t firstCid = 1);
     void setPeerOps(const PeerOps &ops) { peers = ops; }
 
-    // Which path a validated frame from `mac` takes. Never creates anything.
-    Admission admit(const MacAddress &mac, const NightMare::FrameHeader &header);
+    // Which path a validated frame takes. `linkMac` is the radio sender (it keys
+    // pending handshakes), `clientMac` the identity the frame speaks for (it
+    // keys sessions). The broker passes the same address for both until relays
+    // exist. Never creates anything.
+    Admission admit(const MacAddress &linkMac, const MacAddress &clientMac, const NightMare::FrameHeader &header);
 
-    // CONNECT. Nothing here is proven yet, so an existing session for this MAC
+    // CONNECT, from radio sender `linkMac` for `clientMac`. Nothing here is
+    // proven yet, so an existing session for the client MAC
     // is kept: it is only suspended, because the handshake needs the peer in
     // plaintext. A repeated CONNECT replaces the pending entry. Null when the
     // pending table is full of live entries or the peer could not be turned to
     // plaintext -- and then any existing session is left untouched.
-    PendingHandshake *beginHandshake(const MacAddress &mac, uint64_t clientNonce, uint16_t capabilities,
-                                     uint64_t gatewayNonce, uint64_t nowMs);
-    PendingHandshake *pendingFor(const MacAddress &mac);
+    PendingHandshake *beginHandshake(const MacAddress &linkMac, const MacAddress &clientMac, uint64_t clientNonce,
+                                     uint16_t capabilities, uint64_t gatewayNonce, uint64_t nowMs);
+    PendingHandshake *pendingFor(const MacAddress &linkMac);
     // Failed or expired: forgets the nonces, and puts a suspended session back
     // exactly as it was, encryption included. Without one, forgets the peer.
-    void abandonHandshake(const MacAddress &mac);
+    void abandonHandshake(const MacAddress &linkMac);
     // AUTH verified -- the only thing that may replace a session. Consumes the
     // pending entry (nonces wiped), drops any previous session for this MAC
     // without firing its last will, and creates an AUTHENTICATED session with
     // a fresh non-zero cid. Null (handshake abandoned) when the session table
     // is full; replacing a session never needs room, so a reconnecting device
     // always gets back in.
-    NightMare::Device *completeHandshake(const MacAddress &mac, uint64_t nowMs);
+    NightMare::Device *completeHandshake(const MacAddress &linkMac, uint64_t nowMs);
     // Installs the LMK and moves to SECURING. False (session ended) if the
     // peer could not be encrypted.
     bool secureSession(NightMare::Device &device, const uint8_t *lmk);
-    void endSession(const MacAddress &mac);
+    void endSession(const MacAddress &clientMac);
 
-    NightMare::Device *sessionFor(const MacAddress &mac);
+    // By client identity: what a received frame resolves through.
+    NightMare::Device *sessionFor(const MacAddress &clientMac);
+    // By radio peer: for the send path's bookkeeping.
+    NightMare::Device *sessionByLink(const MacAddress &linkMac);
     NightMare::Device *sessionByCid(uint16_t cid);
 
     // Times out handshakes, sessions stuck before CONNECTED, and CONNECTED
@@ -109,7 +116,7 @@ private:
     uint16_t allocateCid();
     void removePeer(const MacAddress &mac);
     // keepPeer: the caller is about to reuse the peer for a new session.
-    void eraseSession(const MacAddress &mac, bool keepPeer);
+    void eraseSession(const MacAddress &clientMac, bool keepPeer);
 
     std::vector<NightMare::Device> devices;
     PendingHandshake pending[MaxPending];

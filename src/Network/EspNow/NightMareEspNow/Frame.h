@@ -73,6 +73,14 @@ namespace NightMare
 
         ACK = 12,
         ERROR = 13,
+
+        // Reserved for trusted relays (R1), not implemented. Envelope: data =
+        // [clientMac:6][one inner frame: header + data], so it carries at most
+        // MaxFrameDataSize - 6 bytes of inner frame. A node that does not
+        // support it answers a live session with ERROR UNSUPPORTED_VERSION and
+        // everyone else with silence; validateFrame() reports it as
+        // UNSUPPORTED_TYPE and never lets it reach payload handling.
+        FORWARD = 14,
     };
 
     struct FrameHeader // 10 bytes
@@ -104,10 +112,12 @@ namespace NightMare
     // --- Handshake payloads -------------------------------------------------
 
     // Capability bits, CONNECT and CONNACK. None is defined for use yet: V2
-    // framing is reserved here and never advertised until it has a runtime.
+    // framing and relaying are reserved here and never advertised until they
+    // have a runtime.
     enum Capability : uint16_t
     {
         CAPABILITY_FRAME_V2 = 1u << 0,
+        CAPABILITY_RELAY = 1u << 1, // reserved: the peer can carry FORWARD frames for others
     };
 
     struct ConnectPayload // NM protocol 0, client -> gateway, cid 0
@@ -171,6 +181,7 @@ namespace NightMare
         UNSUPPORTED_FRAMING,  // ESP-NOW framing version this build does not run
         UNSUPPORTED_PROTOCOL, // NM protocol version other than activeProtocolVersion()
         UNKNOWN_TYPE,
+        UNSUPPORTED_TYPE,     // reserved type with no runtime yet (FORWARD)
         BAD_FRAGMENT,         // totalFrames 0, frameIndex out of range, or fragments on a non-MESSAGE
         BAD_CID,              // cid 0 where a session is required, or the reverse
         BAD_PAYLOAD,          // wrong payload size for a fixed-size type
