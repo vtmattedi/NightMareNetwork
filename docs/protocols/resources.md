@@ -538,12 +538,20 @@ duration, timezone, or UTC meaning.
 
 ### Colour
 
-`ColourType` packs RGBA as `0xRRGGBBAA`; an RGB form implies alpha 255. The
-canonical wire encoding is the raw unsigned 32-bit value in decimal.
+`ColourType` stores RGBA internally as `0xRRGGBBAA`; an RGB form implies alpha 255.
 
-Decoding also accepts `0xRRGGBB`, `#RRGGBB`, `0xRRGGBBAA`, `#RRGGBBAA`,
-`rgb(r,g,b)`, `rgba(r,g,b,a)`, and `hsv(h,s,v)`. Function components use the
-byte range 0–255; HSV hue wraps across the same byte range.
+Encoding (`encodeColour`):
+
+- alpha 255: the decimal 24-bit RGB value (`0xRRGGBB`, the stored value shifted
+  right by 8). Red is `16711680`.
+- any other alpha: uppercase `#RRGGBBAA`. Semi-transparent red is `#FF000080`.
+
+Decoding (`decodeColour`) trims whitespace and accepts `0xRRGGBB`, `#RRGGBB`,
+`0xRRGGBBAA`, `#RRGGBBAA`, `rgb(r,g,b)`, `rgba(r,g,b,a)`, `hsv(h,s,v)`, and a plain
+decimal integer. A plain decimal is a 24-bit RGB value with alpha implied 255;
+values above `0xFFFFFF` (16777215) are rejected, so a plain decimal never carries
+alpha. Function components use the byte range 0–255; HSV hue wraps across the same
+byte range.
 
 Appending `time` and `colour` to `NetValueType` preserves all earlier numeric
 enum values, so the compact manifest encoding version remains unchanged.
