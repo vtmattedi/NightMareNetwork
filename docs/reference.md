@@ -1819,6 +1819,9 @@ NM_ENABLE_SCHEDULER                 1
 NM_ENABLE_JOBS                      1
 NM_ENABLE_TIME_SYNC                 1
 
+NM_NAMESPACE                       ""
+NM_TOPIC_ROOT                      "nm"
+
 NM_TIMEZONE                        "UTC0"
 NM_NTP_SERVER_1                    "pool.ntp.org"
 NM_NTP_SERVER_2                    "time.nist.gov"

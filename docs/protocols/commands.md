@@ -446,6 +446,44 @@ and moves no topic. Quote a label with spaces, or give several words: they are
 joined with single spaces. Every form answers
 `{"label": "...", "address": "..."}`.
 
+## NAMESPACE
+
+```text
+NAMESPACE
+NAMESPACE <id> [<root>]
+NAMESPACE -
+NAMESPACE RESET
+```
+
+Reads or sets the namespace ID and the topic root (see
+[Namespaces](../architecture/namespaces.md); settings only, no topic is prefixed yet).
+
+- `NAMESPACE` prints the state.
+- `NAMESPACE <id>` stores a namespace ID (1-16 characters of `[a-z0-9-]`, starting with a
+  letter). The ID is lowercase; `RESET` is a command word and cannot be an ID. An optional
+  `<root>` also stores the topic root (one topic segment, at most 16 characters, no `/ + #`
+  or control characters).
+- `NAMESPACE -` stores an explicit empty namespace: the legacy unprefixed layout, even when
+  the firmware was built with a non-empty `NM_NAMESPACE`. The stored topic root is kept.
+- `NAMESPACE RESET` removes both stored values, so the compile-time `NM_NAMESPACE` and
+  `NM_TOPIC_ROOT` apply again.
+
+Changes are persisted and take effect after reboot. Every successful form answers JSON:
+
+```json
+{
+  "namespace": "",
+  "topic_root": "nm",
+  "stored_namespace": "home",
+  "stored_topic_root": "nm",
+  "reboot_required": true
+}
+```
+
+`namespace` and `topic_root` are the values active in this boot; empty `namespace` means the
+legacy layout. `stored_*` is what will be active after reboot. A failure answers a usage or
+validation message with a false result.
+
 ## ADOPT
 
 ```text

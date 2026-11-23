@@ -18,3 +18,9 @@
 // Replace with the CA PEM before using Remote MQTT.
 // Empty is only a compile-time placeholder for these local-first examples.
 #define ROOT_CA ""
+
+// Namespace (docs/architecture/namespaces.md). Empty (the default) keeps the legacy unprefixed
+// topic layout. 1-16 characters of [a-z0-9-], starting with a letter.
+// #define NM_NAMESPACE "home"
+// First topic segment that separates NightMare from other users of the broker (default "nm").
+// #define NM_TOPIC_ROOT "nm"

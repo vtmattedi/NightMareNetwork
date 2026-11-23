@@ -154,9 +154,41 @@ Initialization:
 5. validates it,
 6. falls back to the generated default when invalid,
 7. loads and applies the persisted timezone, falling back to `NM_TIMEZONE`,
-8. loads any pending identity-cleanup record.
+8. loads any pending identity-cleanup record,
+9. loads the persisted namespace and topic root, falling back to `NM_NAMESPACE` and `NM_TOPIC_ROOT`.
 
 The getters call `begin()` internally, so explicit initialization is normally handled by the framework lifecycle.
+
+## Namespace and topic root
+
+```cpp
+const std::string &getNamespace();   // active namespace ID; empty = legacy unprefixed layout
+const std::string &getTopicRoot();   // active topic root, "nm" by default
+bool setNamespace(const std::string &id, const std::string &root = std::string()); // "" id = explicit legacy; "" root = leave as is
+bool resetNamespace();                 // drop both stored values: compile-time defaults again
+static bool validNamespace(const std::string &id);
+static bool validTopicRoot(const std::string &root);
+```
+
+and the free functions `NightMare::Namespace()` and `NightMare::TopicRoot()`
+(`Core/DeviceIdentity.h`), which return the same effective values for other
+modules.
+
+Design: [Namespaces](../architecture/namespaces.md). This section is the settings
+part only (NS-L1): nothing in the library prefixes a topic or changes ESP-NOW
+yet, so setting a namespace changes no behavior today.
+
+- **Namespace ID:** 1-16 characters of `[a-z0-9-]`, starting with a letter.
+- **Topic root:** one topic segment, 1-16 characters, no `/`, `+`, `#` or control characters.
+- **Defaults:** compile-time `NM_NAMESPACE` (`""`) and `NM_TOPIC_ROOT` (`"nm"`).
+  See [platform](platform.md#namespace-defaults).
+- **Persistence:** `PersistentSettings` keys `_namespace` and `_topic_root`. A key that
+  is present wins over the compile-time default. `_namespace` present and empty is an
+  explicit legacy choice that overrides a non-empty `NM_NAMESPACE`.
+- **Apply:** the active values are read once in `begin()`. `setNamespace()` and
+  `resetNamespace()` only persist, so a change takes effect after reboot, like an
+  adopted address. Invalid stored values fall back to the compile-time defaults.
+- **Console:** the `NAMESPACE` command, see [commands](../protocols/commands.md#namespace).
 
 ## Default name
 

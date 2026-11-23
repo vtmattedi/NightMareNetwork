@@ -1,5 +1,6 @@
 #include "DeviceIdentity.h"
 #include "PersistentKeys.h"
+#include "NamespaceId.h"
 #include <NightMare/Features.h>
 #if NM_ENABLE_SETTINGS
 #include "StateStore.h"
@@ -107,6 +108,8 @@ bool DeviceIdentity::begin()
     timezone_ = validTimezone(storedTimezone) ? storedTimezone : defaultTimezone;
     if (!applyTimezone(timezone_))
         return false;
+    namespace_ = storedNamespace();
+    topicRoot_ = storedTopicRoot();
     initialized_ = true;
 #if NM_ENABLE_SETTINGS
     if (settingsReady &&
@@ -418,4 +421,86 @@ bool DeviceIdentity::markIdentityCleanupComplete(IdentityCleanupFlags flag)
     pendingFlags_ = previousFlags;
     pendingOldName_ = previousName;
     return false;
+}
+
+bool DeviceIdentity::validNamespace(const std::string &id)
+{
+    return NightMare::NamespaceId::validNamespace(id.c_str()) && id.find('\0') == std::string::npos;
+}
+
+bool DeviceIdentity::validTopicRoot(const std::string &root)
+{
+    return NightMare::NamespaceId::validTopicRoot(root.c_str()) && root.find('\0') == std::string::npos;
+}
+
+const std::string &DeviceIdentity::getNamespace()
+{
+    begin();
+    return namespace_;
+}
+
+const std::string &DeviceIdentity::getTopicRoot()
+{
+    begin();
+    return topicRoot_;
+}
+
+// A stored value that no longer validates falls back to the compile-time default, so a
+// corrupt file can never produce an invalid namespace or root.
+std::string DeviceIdentity::storedNamespace()
+{
+    const std::string compiled = NM_NAMESPACE;
+#if NM_ENABLE_SETTINGS
+    if (PersistentSettings.exists(NightMare::PersistentKey::Namespace))
+    {
+        const std::string stored = PersistentSettings.get(NightMare::PersistentKey::Namespace);
+        if (stored.empty() || validNamespace(stored))
+            return stored;
+    }
+#endif
+    return compiled;
+}
+
+std::string DeviceIdentity::storedTopicRoot()
+{
+    const std::string compiled = NM_TOPIC_ROOT;
+#if NM_ENABLE_SETTINGS
+    if (PersistentSettings.exists(NightMare::PersistentKey::TopicRoot))
+    {
+        const std::string stored = PersistentSettings.get(NightMare::PersistentKey::TopicRoot);
+        if (validTopicRoot(stored))
+            return stored;
+    }
+#endif
+    return compiled;
+}
+
+bool DeviceIdentity::setNamespace(const std::string &id, const std::string &root)
+{
+    if (!begin() || (!id.empty() && !validNamespace(id)) || (!root.empty() && !validTopicRoot(root)))
+        return false;
+#if NM_ENABLE_SETTINGS
+    if (root.empty())
+        return PersistentSettings.set(NightMare::PersistentKey::Namespace, id);
+    const std::string keys[2] = {NightMare::PersistentKey::Namespace, NightMare::PersistentKey::TopicRoot};
+    const std::string values[2] = {id, root};
+    return PersistentSettings.setMany(keys, values, 2);
+#else
+    return false; // nothing to persist into
+#endif
+}
+
+bool DeviceIdentity::resetNamespace()
+{
+    if (!begin())
+        return false;
+#if NM_ENABLE_SETTINGS
+    const bool ns = !PersistentSettings.exists(NightMare::PersistentKey::Namespace) ||
+                    PersistentSettings.remove(NightMare::PersistentKey::Namespace);
+    const bool root = !PersistentSettings.exists(NightMare::PersistentKey::TopicRoot) ||
+                      PersistentSettings.remove(NightMare::PersistentKey::TopicRoot);
+    return ns && root;
+#else
+    return false;
+#endif
 }

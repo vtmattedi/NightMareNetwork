@@ -6,6 +6,7 @@
 #include <utility>
 
 RuntimeState smokeState;
+const bool smokeNamespaceApi = DeviceIdentity::validNamespace(NightMare::Namespace()) || NightMare::TopicRoot().length() > 0;
 Config<uint32_t> smokeConfig("smoke_config", 7);
 
 namespace
@@ -32,6 +33,25 @@ bool rejectGlobalConfig(const std::string &key, const std::string &)
 }
 }
 
+
+// Namespace ID and topic root validation (NS-L1), checked at compile time.
+namespace NsId = NightMare::NamespaceId;
+static_assert(NsId::validNamespace("home") && NsId::validNamespace("turing") &&
+                  NsId::validNamespace("a") && NsId::validNamespace("plant-bench-2") &&
+                  NsId::validNamespace("abcdefghijklmnop"),
+              "valid namespace IDs");
+static_assert(!NsId::validNamespace("") && !NsId::validNamespace("1home") &&
+                  !NsId::validNamespace("-home") && !NsId::validNamespace("Home") &&
+                  !NsId::validNamespace("ho_me") && !NsId::validNamespace("ho/me") &&
+                  !NsId::validNamespace("home ") && !NsId::validNamespace("abcdefghijklmnopq"),
+              "invalid namespace IDs");
+static_assert(NsId::validTopicRoot("nm") && NsId::validTopicRoot("NightMare") &&
+                  NsId::validTopicRoot("abcdefghijklmnop"),
+              "valid topic roots");
+static_assert(!NsId::validTopicRoot("") && !NsId::validTopicRoot("a/b") &&
+                  !NsId::validTopicRoot("a+") && !NsId::validTopicRoot("#") &&
+                  !NsId::validTopicRoot("a\tb") && !NsId::validTopicRoot("abcdefghijklmnopq"),
+              "invalid topic roots");
 static_assert(NetCodec<TimeType>::Type == NetValueType::TIME,
               "TimeType must have a first-class wire type");
 static_assert(NetCodec<ColourType>::Type == NetValueType::COLOUR,

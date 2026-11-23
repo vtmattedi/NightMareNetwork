@@ -2,6 +2,7 @@
 
 #include <Core/Text.h>
 #include <Core/PlatformClock.h>
+#include <Core/NamespaceId.h>
 
 /// @brief The parts of an old identity's network footprint still to be removed.
 /// Each participant clears its own bit once its cleanup has actually succeeded.
@@ -19,7 +20,8 @@ struct PendingIdentityCleanup
 };
 
 // Owns this device's MQTT address, its display label and persisted identity
-// configuration. Namespaces are not part of the current topic format.
+// configuration, including the namespace ID and topic root settings (NS-L1: stored and
+// reported only; topics are not prefixed yet, see docs/architecture/namespaces.md).
 //
 // The address is the topic root. It is the hardware signature
 // ("Esp32-nm-6ca172e0") unless deliberately moved, which is what replacing a
@@ -76,6 +78,24 @@ public:
     /// Epoch timestamps remain UTC-based; only local-time presentation changes.
     bool setTimezone(const std::string &timezone);
 
+    /// @brief The active namespace ID for this boot; empty is the legacy unprefixed layout.
+    /// Persisted override first, else NM_NAMESPACE. Nothing prefixes topics with it yet (NS-L1).
+    const std::string &getNamespace();
+    /// @brief The active topic root for this boot ("nm" by default).
+    const std::string &getTopicRoot();
+    /// @brief What the next boot will use: the persisted override, else the compile-time default.
+    std::string storedNamespace();
+    std::string storedTopicRoot();
+    /// @brief 1-16 characters of [a-z0-9-], starting with a letter.
+    static bool validNamespace(const std::string &id);
+    /// @brief One topic segment, 1-16 characters, no '/', '+', '#' or control characters.
+    static bool validTopicRoot(const std::string &root);
+    /// @brief Persists the namespace for the next boot (it never changes the running one). An
+    /// empty id stores an explicit legacy choice; an empty root leaves the stored root alone.
+    bool setNamespace(const std::string &id, const std::string &root = std::string());
+    /// @brief Removes both stored values so the compile-time defaults apply at next boot.
+    bool resetNamespace();
+
     /// @brief Persists newName as this device's identity and records the current
     /// one for cleanup. Once the address is locked the running firmware keeps
     /// the current name until reboot; before that the switch is immediate.
@@ -103,6 +123,8 @@ private:
     std::string deviceId_;
     std::string hardwareSignature_;
     std::string timezone_;
+    std::string namespace_;
+    std::string topicRoot_;
     bool initialized_ = false;
     bool addressLocked_ = false;
     std::string pendingOldName_;
@@ -110,3 +132,11 @@ private:
 };
 
 extern DeviceIdentity gDeviceIdentity;
+
+namespace NightMare
+{
+/// @brief The effective namespace ID; empty means the legacy unprefixed layout.
+inline const std::string &Namespace() { return gDeviceIdentity.getNamespace(); }
+/// @brief The effective topic root, "nm" unless configured.
+inline const std::string &TopicRoot() { return gDeviceIdentity.getTopicRoot(); }
+}

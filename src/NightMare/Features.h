@@ -69,6 +69,13 @@
 #ifndef NM_ENABLE_TIME_SYNC
 #define NM_ENABLE_TIME_SYNC 1
 #endif
+#ifndef NM_NAMESPACE
+// Default namespace ID. Empty = the legacy unprefixed layout. See docs/architecture/namespaces.md.
+#define NM_NAMESPACE ""
+#endif
+#ifndef NM_TOPIC_ROOT
+#define NM_TOPIC_ROOT "nm"
+#endif
 #ifndef NM_TIMEZONE
 #define NM_TIMEZONE "UTC0"
 #endif

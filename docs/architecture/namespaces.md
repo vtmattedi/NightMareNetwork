@@ -7,10 +7,18 @@ order: 40
 
 # Namespaces (design)
 
-Status: **planned**, agreed 2026-11-23. Nothing here is implemented yet. Each
+Status: **planned**, agreed 2026-11-23. Only the settings are implemented (below). Each
 phase updates the protocol docs it changes: [topics](../protocols/topics.md),
 the [ESP-NOW protocol](../modules/espnow-protocol.md) and the
 [security review](../security/espnow_security_review.md).
+
+> **Status: settings implemented (NS-L1).** The compile-time defaults `NM_NAMESPACE` (empty,
+> legacy) and `NM_TOPIC_ROOT` (`"nm"`), their persisted runtime override, the `NAMESPACE`
+> console command, the validators (`NightMare::NamespaceId`, `Core/NamespaceId.h`) and the
+> accessors `NightMare::Namespace()` / `NightMare::TopicRoot()` exist. Nothing reads them
+> yet: MQTT prefixing, ESP-NOW and the backend are later tasks, and with an empty
+> namespace behavior is unchanged. See [identity](../modules/identity.md#namespace-and-topic-root)
+> and [commands](../protocols/commands.md#namespace).
 
 ## Goal
 

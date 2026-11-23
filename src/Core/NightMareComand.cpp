@@ -446,6 +446,78 @@ static void refreshIdentityDocuments()
 #endif
 }
 
+
+// The namespace is persisted and applies after reboot (like an adopted address). Nothing
+// reads it yet (NS-L1), so a change has no effect on topics today.
+static std::string namespaceStateJson(bool changed)
+{
+    JsonDocument doc;
+    doc["namespace"] = gDeviceIdentity.getNamespace();
+    doc["topic_root"] = gDeviceIdentity.getTopicRoot();
+    const std::string storedNamespace = gDeviceIdentity.storedNamespace();
+    const std::string storedRoot = gDeviceIdentity.storedTopicRoot();
+    doc["stored_namespace"] = storedNamespace;
+    doc["stored_topic_root"] = storedRoot;
+    doc["reboot_required"] = changed && (storedNamespace != gDeviceIdentity.getNamespace() ||
+                                         storedRoot != gDeviceIdentity.getTopicRoot());
+    std::string json;
+    serializeJson(doc, json);
+    return json;
+}
+
+static NightMareResults executeNamespaceCommand(const NightMareMessage &message, NightmareContext context)
+{
+    NightMareResults result;
+    result.result = false;
+    result.context = context;
+    result.response = "Usage: NAMESPACE | NAMESPACE <id> [<root>] | NAMESPACE - | NAMESPACE RESET";
+    if (message.argc == 0)
+    {
+        result.response = namespaceStateJson(false);
+        result.result = true;
+        return result;
+    }
+    if (message.argc > 2)
+        return result;
+    const std::string &id = message.args[0];
+    if (message.argc == 1 && message.subcommand == "RESET")
+    {
+        if (!gDeviceIdentity.resetNamespace())
+        {
+            result.response = "Could not persist the namespace.";
+            return result;
+        }
+    }
+    else if (message.argc == 1 && id == "-")
+    {
+        if (!gDeviceIdentity.setNamespace(std::string()))
+        {
+            result.response = "Could not persist the namespace.";
+            return result;
+        }
+    }
+    else
+    {
+        if (!DeviceIdentity::validNamespace(id))
+        {
+            result.response = "Invalid namespace: 1-16 characters of a-z, 0-9 and '-', starting with a letter.";
+            return result;
+        }
+        if (message.argc == 2 && !DeviceIdentity::validTopicRoot(message.args[1]))
+        {
+            result.response = "Invalid topic root: one topic segment of 1-16 characters, no '/', '+', '#' or control characters.";
+            return result;
+        }
+        if (!gDeviceIdentity.setNamespace(id, message.argc == 2 ? message.args[1] : std::string()))
+        {
+            result.response = "Could not persist the namespace.";
+            return result;
+        }
+    }
+    result.response = namespaceStateJson(true);
+    result.result = true;
+    return result;
+}
 static NightMareResults executeTimezoneCommand(const std::string &timezone,
                                                NightmareContext context)
 {
@@ -805,6 +877,10 @@ NightMareResults handleNightMareCommand(const std::string &message, NightmareCon
         }
         else
             return executeTimezoneCommand(parsedMsg.args[1], context);
+    }
+    else if (parsedMsg.command == "NAMESPACE")
+    {
+        return executeNamespaceCommand(parsedMsg, context);
     }
     else if (parsedMsg.command == "PING")
     {

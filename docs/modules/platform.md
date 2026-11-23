@@ -117,6 +117,22 @@ NM_NTP_SERVER_3  "time.google.com"
 
 `NM_TIMEZONE` is the default POSIX timezone string. `DeviceIdentity` persists runtime changes under its private settings and applies the active value for local-time formatting. Epoch timestamps remain UTC-based.
 
+## Namespace defaults
+
+```text
+NM_NAMESPACE   ""
+NM_TOPIC_ROOT  "nm"
+```
+
+`NM_NAMESPACE` is the default namespace ID. Empty means the legacy unprefixed topic layout, so
+nothing changes until a project opts in. `NM_TOPIC_ROOT` is the default topic root. Override
+either in `NightMareConfig.h` or `creds.h` before the library headers, as with the other
+`NM_` settings. A non-empty `NM_NAMESPACE` that is not 1-16 characters of `[a-z0-9-]` starting
+with a letter, or an `NM_TOPIC_ROOT` that is not one topic segment of 1-16 characters, fails the
+build (`static_assert`). Runtime changes persist under the `NAMESPACE` command; see
+[Device identity](identity.md#namespace-and-topic-root) and
+[Namespaces](../architecture/namespaces.md).
+
 ## Important configurable intervals
 
 Defaults:
