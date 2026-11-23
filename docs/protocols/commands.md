@@ -402,6 +402,7 @@ a layer that is not compiled in are omitted.
 ```text
 STATUS      VALUE
 name        adler
+address     adler
 firmware    1.4.2
 uptime      0h12m05s
 free heap   182340 bytes
