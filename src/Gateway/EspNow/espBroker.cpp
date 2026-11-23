@@ -16,7 +16,9 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include <Core/Logs.h>
+#include <Core/DeviceIdentity.h>
 #include <string.h>
+#include <string>
 #include <algorithm>
 #include <atomic>
 #include <utility>
@@ -48,6 +50,11 @@ static const uint8_t BROADCAST_MAC[MacAddress::Length] = {0xFF, 0xFF, 0xFF, 0xFF
 // Copied in by espBroker_init(); the caller's buffer may go away after that.
 static uint8_t s_psk[Auth::MaxPskLength];
 static size_t s_pskLength = 0;
+// The gateway's namespace, copied at init (empty = legacy, NM protocol 0). A
+// change needs a reboot, as everywhere else.
+static char s_nsId[Auth::MaxNamespaceLength + 1]; // NUL-terminated for logging
+static size_t s_nsIdLength = 0;
+static uint32_t s_nsTag = 0;
 
 struct RxPacket
 {
@@ -332,7 +339,8 @@ bool espBroker_broadcastMessage(const NightMare::Message &message, const Device 
 static Auth::HandshakeContext handshakeContext(const espDeviceManager::PendingHandshake &pending)
 {
     Auth::HandshakeContext context{};
-    memcpy(context.clientMac, pending.mac.bytes, Auth::MacSize);
+    Auth::setNamespace(context, s_nsId, s_nsIdLength);
+    memcpy(context.clientMac, pending.clientMac.bytes, Auth::MacSize);
     memcpy(context.gatewayMac, s_ownMac.bytes, Auth::MacSize);
     context.clientNonce = pending.clientNonce;
     context.gatewayNonce = pending.gatewayNonce;
@@ -341,14 +349,51 @@ static Auth::HandshakeContext handshakeContext(const espDeviceManager::PendingHa
 
 static void handleConnect(const MacAddress &mac, const Frame &frame)
 {
-    NightMare::ConnectPayload connect;
-    memcpy(&connect, frame.data, sizeof(connect));
+    // validateFrame() already sized the payload for the active protocol.
+    uint64_t clientNonce;
+    uint16_t capabilities;
+    MacAddress clientMac = mac;
+    if (s_nsIdLength > 0)
+    {
+        NightMare::ConnectPayloadV1 connect;
+        memcpy(&connect, frame.data, sizeof(connect));
+        // Another namespace's CONNECT (a neighbour's board, or noise): no
+        // handshake, no CHALLENGE, no ERROR. The tag is a hint, not security.
+        if (connect.nsTag != s_nsTag)
+        {
+            s_ignoredFrames++;
+            gwCount(g_gatewayStats.ignoredFrames);
+            return;
+        }
+        // Relay support will relax this explicitly. Until then the proof and
+        // LMK may only bind the address the radio says sent the frame, so a
+        // claimed clientMac is never trusted. Dropped without a reply: an
+        // answer would need a peer for an address we have not vetted.
+        if (memcmp(connect.clientMac, mac.bytes, MacAddress::Length) != 0)
+        {
+            LOG_WARNING(TAG, "CONNECT from %s claims another clientMac, ignored", mac.toString().c_str());
+            s_ignoredFrames++;
+            gwCount(g_gatewayStats.ignoredFrames);
+            return;
+        }
+        clientNonce = connect.clientNonce;
+        capabilities = connect.capabilities;
+        clientMac = MacAddress(connect.clientMac);
+    }
+    else
+    {
+        NightMare::ConnectPayload connect;
+        memcpy(&connect, frame.data, sizeof(connect));
+        clientNonce = connect.clientNonce;
+        capabilities = connect.capabilities;
+    }
 
     const uint64_t gatewayNonce = Auth::freshNonce();
     espDeviceManager::PendingHandshake *pending =
-        s_devices.beginHandshake(mac, connect.clientNonce, connect.capabilities, gatewayNonce, nowMs());
+        s_devices.beginHandshake(mac, clientNonce, capabilities, gatewayNonce, nowMs());
     if (pending == NULL)
         return;
+    pending->clientMac = clientMac;
 
     // The messageId echo is how the client pairs this with its CONNECT.
     const NightMare::ChallengePayload challenge{gatewayNonce};
@@ -603,6 +648,23 @@ bool espBroker_init(const uint8_t *psk, size_t pskLength)
     memmove(s_psk, psk, pskLength); // psk may be s_psk itself, from espBroker_resume()
     s_pskLength = pskLength;
 
+    // Version policy: a namespaced gateway speaks NM protocol 1 only, a legacy
+    // (empty namespace) one protocol 0 only. Frames of the other are invalid and
+    // dropped without a reply, as every frame from an unknown sender is.
+    const std::string &ns = NightMare::Namespace();
+    if (ns.length() > Auth::MaxNamespaceLength)
+    {
+        LOG_ERROR(TAG, "Namespace '%s' is longer than %u characters", ns.c_str(),
+                 (unsigned)Auth::MaxNamespaceLength);
+        return false;
+    }
+    memset(s_nsId, 0, sizeof(s_nsId));
+    memcpy(s_nsId, ns.data(), ns.length());
+    s_nsIdLength = ns.length();
+    s_nsTag = Auth::namespaceTag(s_nsId, s_nsIdLength);
+    NightMare::setActiveProtocolVersion(s_nsIdLength > 0 ? NightMare::NM_PROTOCOL_VERSION_NS
+                                                        : NightMare::NM_PROTOCOL_VERSION);
+
     // Kept across espBroker_shutdown()/resume(), so only made the first time.
     if (s_snapshotLock == NULL)
         s_snapshotLock = xSemaphoreCreateMutex();
@@ -632,10 +694,12 @@ bool espBroker_init(const uint8_t *psk, size_t pskLength)
         return false;
     }
 
-    // The network's own PMK, not Espressif's default; every node derives the
-    // same one from the PSK. Set before any encrypted peer exists.
+    // The namespace's own PMK, not Espressif's default; every node of the
+    // namespace derives the same one. Radio-global, so set once, here, before
+    // any encrypted peer exists.
     uint8_t pmk[Auth::PmkSize];
-    const bool pmkOk = Auth::networkPmk(s_psk, s_pskLength, pmk) && esp_now_set_pmk(pmk) == ESP_OK;
+    const bool pmkOk = Auth::networkPmk(s_psk, s_pskLength, s_nsId, s_nsIdLength, pmk) &&
+                       esp_now_set_pmk(pmk) == ESP_OK;
     Auth::wipe(pmk, sizeof(pmk));
     if (!pmkOk)
     {
@@ -654,8 +718,8 @@ bool espBroker_init(const uint8_t *psk, size_t pskLength)
     esp_now_add_peer(&broadcastPeer);
 
     esp_wifi_get_mac(WIFI_IF_STA, s_ownMac.bytes);
-    LOG_DEBUG(TAG, "ESP-NOW up on %s (protocol %u, heartbeat %u ms)", s_ownMac.toString().c_str(),
-             (unsigned)NightMare::NM_PROTOCOL_VERSION, (unsigned)HEARTBEAT_MS);
+    LOG_DEBUG(TAG, "ESP-NOW up on %s (protocol %u, namespace '%s', heartbeat %u ms)", s_ownMac.toString().c_str(),
+             (unsigned)NightMare::activeProtocolVersion(), s_nsId, (unsigned)HEARTBEAT_MS);
 
     // Beaconing starts here and runs unconditionally from espBroker_process()
     // from now on -- not gated on any peer being known or subscribed.

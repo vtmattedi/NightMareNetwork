@@ -18,11 +18,11 @@ the [ESP-NOW protocol](../modules/espnow-protocol.md) and the
 > console command, the validators (`NightMare::NamespaceId`, `Core/NamespaceId.h`) and the
 > accessors `NightMare::Namespace()` / `NightMare::TopicRoot()` exist.
 >
-> **Status: sections 1 and 2 implemented (NS-L2).** `Core/TopicNamespace.h` adds the prefix
+> **Status: sections 1 and 2 implemented (NS-L2), section 3 implemented (NS-L3).** `Core/TopicNamespace.h` adds the prefix
 > at the two MQTT client boundaries (`NmMqttEsp.cpp`, `espMqtt.cpp`) and strips it on
 > receive; `NightMare::SubscribeGlobal()` / `UnsubscribeGlobal()` / `PublishGlobal()` are
-> the absolute-topic escape. ESP-NOW, the namespace key and the backend are later tasks,
-> and with an empty namespace behavior is unchanged. Rules: [topics](../protocols/topics.md#namespace-prefix).
+> the absolute-topic escape. ESP-NOW speaks handshake v1 when a namespace is set. The relay preparation
+> and the backend are later tasks, and with an empty namespace behavior is unchanged. Rules: [topics](../protocols/topics.md#namespace-prefix).
 > See [identity](../modules/identity.md#namespace-and-topic-root)
 > and [commands](../protocols/commands.md#namespace).
 
@@ -111,6 +111,15 @@ child that holds a valid key into its own namespace. With one shared ESP-NOW
 key, a board from one home could then join another home's gateway.
 
 ## 3. ESP-NOW namespace key
+
+> **Status: implemented (NS-L3).** NM protocol 1, the namespaced handshake, is in
+> `Network/EspNow/NightMareEspNow/{Auth,Frame}.*`, `EspNowClient.cpp` and the gateway's
+> `espBroker.cpp`: CONNECT carries `nsTag` and `clientMac`, every derivation binds the
+> length-prefixed namespace ID, and the gateway rejects a `clientMac` that is not the radio
+> sender until relays (section 4) relax it. Layout, version policy and test vectors are in the
+> [ESP-NOW protocol](../modules/espnow-protocol.md#namespaced-handshake-nm-protocol-1). Both
+> ends read the namespace once at start. Gateway, devices and the Holmes submodule need a
+> bump to take it, and a namespaced node no longer talks to a legacy one.
 
 ### How it works today
 

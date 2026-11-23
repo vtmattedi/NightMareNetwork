@@ -3,6 +3,8 @@
 #include <ArduinoJson.h>
 #include <Core/TopicNamespace.h>
 
+#include "EspNowVectors.h"
+
 #include <type_traits>
 #include <utility>
 
@@ -470,6 +472,12 @@ void setup()
     const bool firedUnbound = !managedEvent.fire(7) && !managedEvent.fire(7);
     const bool localListener = firedUnbound && localEventCalls == 2 && localEventPayload == 7;
     smokeState.setFlag("event_api", eventKinds && eventUnbound && eventSources && localListener);
+
+    // ESP-NOW handshake known-answer vectors (legacy v0 and namespaced v1).
+    const bool espNowVectors = EspNowVectors::allOk();
+    smokeState.setFlag("espnow_handshake_vectors", espNowVectors);
+    if (!espNowVectors)
+        printf("SMOKE FAIL: ESP-NOW handshake vectors\n");
 }
 
 void loop() {}

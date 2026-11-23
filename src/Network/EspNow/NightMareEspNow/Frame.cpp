@@ -9,6 +9,8 @@ namespace NightMare
 {
     namespace
     {
+        uint8_t s_protocolVersion = NM_PROTOCOL_VERSION;
+
         uint64_t bootGeneration()
         {
             // Stable for every beacon in this boot; gateway application code
@@ -73,7 +75,9 @@ namespace NightMare
         {
             switch (type)
             {
-            case FrameType::CONNECT: return sizeof(ConnectPayload);
+            case FrameType::CONNECT:
+                return s_protocolVersion == NM_PROTOCOL_VERSION_NS ? sizeof(ConnectPayloadV1)
+                                                                   : sizeof(ConnectPayload);
             case FrameType::CHALLENGE: return sizeof(ChallengePayload);
             case FrameType::AUTH: return sizeof(AuthPayload);
             case FrameType::CONNACK: return sizeof(ConnAckPayload);
@@ -86,6 +90,21 @@ namespace NightMare
             default: return -1;
             }
         }
+    }
+
+    bool setActiveProtocolVersion(uint8_t nmVersion)
+    {
+        if (nmVersion != NM_PROTOCOL_VERSION && nmVersion != NM_PROTOCOL_VERSION_NS)
+            return false;
+        s_protocolVersion = nmVersion;
+        return true;
+    }
+
+    uint8_t activeProtocolVersion() { return s_protocolVersion; }
+
+    uint8_t currentFrameVersion()
+    {
+        return makeVersion(static_cast<uint8_t>(EspNowFrameVersion::V1), s_protocolVersion);
     }
 
     const char *frameTypeName(uint8_t type)
@@ -138,7 +157,7 @@ namespace NightMare
         // Only V1 has a runtime; V2 is advertised as a capability at most.
         if (espNowVersion(header.version) != static_cast<uint8_t>(EspNowFrameVersion::V1))
             return FrameCheck::UNSUPPORTED_FRAMING;
-        if (nmProtocolVersion(header.version) != NM_PROTOCOL_VERSION)
+        if (nmProtocolVersion(header.version) != s_protocolVersion)
             return FrameCheck::UNSUPPORTED_PROTOCOL;
         if (length > MaxPacketSizeV1 || header.length != length - FrameHeaderSize)
             return FrameCheck::BAD_LENGTH;
@@ -178,7 +197,7 @@ namespace NightMare
         if (length > MaxFrameDataSize || (data == nullptr && length != 0))
             return false;
         out.header.messageId = messageId;
-        out.header.version = CurrentFrameVersion;
+        out.header.version = currentFrameVersion();
         out.header.type = static_cast<uint8_t>(type);
         out.header.cid = cid;
         out.header.frameIndex = frameIndex;

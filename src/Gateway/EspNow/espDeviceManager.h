@@ -33,7 +33,10 @@ public:
     struct PendingHandshake
     {
         bool active = false;
-        MacAddress mac;
+        MacAddress mac;       // radio sender: where frames go
+        // The MAC the proof and LMK bind to: CONNECT's clientMac field (protocol 1),
+        // the sender (protocol 0). Equal to `mac` until relays relax that rule.
+        MacAddress clientMac;
         uint64_t clientNonce = 0;
         uint64_t gatewayNonce = 0;
         uint16_t capabilities = 0;

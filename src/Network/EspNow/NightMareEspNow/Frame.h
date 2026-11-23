@@ -2,8 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// NightMare ESP-NOW wire contract, pre-v1. This file is shared byte for byte by
-// the gateway and the NightMareNetwork client; the full contract (handshake,
+// NightMare ESP-NOW wire contract. This file is shared byte for byte by the
+// gateway and the NightMareNetwork client (the gateway consumes this very file
+// through its nightmarenetwork submodule); the full contract (handshake,
 // sessions, encryption) is in docs/modules/espnow-protocol.md.
 //
 // Every multi-byte field is little-endian (both ends are ESP32s and the structs
@@ -11,9 +12,14 @@
 
 namespace NightMare
 {
-    // Low nibble of FrameHeader::version. 0 is the current pre-v1 contract and
-    // stays 0 until an explicit v1 freeze.
+    // Low nibble of FrameHeader::version.
+    // 0: the legacy contract, spoken by a node with an EMPTY namespace.
+    // 1: the namespaced handshake (CONNECT carries nsTag + clientMac, and every
+    //    derivation binds the namespace ID), spoken by a node with a namespace.
+    // A node speaks exactly one of them, chosen at init from its namespace with
+    // setActiveProtocolVersion(); frames of the other version are invalid.
     constexpr uint8_t NM_PROTOCOL_VERSION = 0;
+    constexpr uint8_t NM_PROTOCOL_VERSION_NS = 1;
 
     // High nibble of FrameHeader::version: the ESP-NOW payload limit the frame
     // was built for. Not the NM protocol revision.
@@ -38,9 +44,14 @@ namespace NightMare
         return static_cast<uint8_t>(version & 0x0F);
     }
 
-    // What this build puts on the wire.
-    constexpr uint8_t CurrentFrameVersion =
-        makeVersion(static_cast<uint8_t>(EspNowFrameVersion::V1), NM_PROTOCOL_VERSION);
+    // The NM protocol this node speaks (default NM_PROTOCOL_VERSION, legacy). Set
+    // once, before any frame is built or validated: a plain byte, not a lock.
+    // Anything but 0 or 1 is refused (false, unchanged).
+    bool setActiveProtocolVersion(uint8_t nmVersion);
+    uint8_t activeProtocolVersion();
+
+    // What this node puts on the wire.
+    uint8_t currentFrameVersion();
 
     enum class FrameType : uint8_t
     {
@@ -99,11 +110,28 @@ namespace NightMare
         CAPABILITY_FRAME_V2 = 1u << 0,
     };
 
-    struct ConnectPayload // client -> gateway, cid 0
+    struct ConnectPayload // NM protocol 0, client -> gateway, cid 0
     {
         uint64_t clientNonce;
         uint16_t capabilities;
     } __attribute__((packed));
+    static_assert(sizeof(ConnectPayload) == 10, "protocol 0 CONNECT must stay 10 bytes");
+
+    // NM protocol 1: the v0 fields, then the namespace hint and the client MAC.
+    // nsTag is first4(SHA-256(nsId)); its wire bytes are the digest bytes (the
+    // little-endian encoding of the uint32). clientMac is the MAC the proof and
+    // LMK are bound to. Until relays exist the gateway requires it to equal the
+    // radio sender address and ignores the CONNECT otherwise.
+    struct ConnectPayloadV1
+    {
+        uint64_t clientNonce;
+        uint16_t capabilities;
+        uint32_t nsTag;
+        uint8_t clientMac[6];
+    } __attribute__((packed));
+    static_assert(sizeof(ConnectPayloadV1) == 20, "protocol 1 CONNECT must be 20 bytes");
+    static_assert(offsetof(ConnectPayloadV1, nsTag) == 10 && offsetof(ConnectPayloadV1, clientMac) == 14,
+                  "protocol 1 CONNECT layout: nonce 0, caps 8, nsTag 10, clientMac 14");
 
     struct ChallengePayload // gateway -> client, cid 0, messageId echoes the CONNECT
     {
@@ -141,7 +169,7 @@ namespace NightMare
         TOO_SHORT,            // fewer bytes than a header
         BAD_LENGTH,           // header.length disagrees with the bytes received
         UNSUPPORTED_FRAMING,  // ESP-NOW framing version this build does not run
-        UNSUPPORTED_PROTOCOL, // NM protocol version other than NM_PROTOCOL_VERSION
+        UNSUPPORTED_PROTOCOL, // NM protocol version other than activeProtocolVersion()
         UNKNOWN_TYPE,
         BAD_FRAGMENT,         // totalFrames 0, frameIndex out of range, or fragments on a non-MESSAGE
         BAD_CID,              // cid 0 where a session is required, or the reverse
@@ -158,7 +186,7 @@ namespace NightMare
     // unless the result is OK.
     FrameCheck decodeFrame(Frame &out, const uint8_t *data, size_t length);
 
-    // Header for this build's version. Fails (false) if length does not fit a
+    // Header for this node's active protocol version. Fails (false) if length does not fit a
     // V1 frame.
     bool makeFrame(Frame &out, FrameType type, uint16_t messageId, uint16_t cid,
                    const void *data = nullptr, size_t length = 0,

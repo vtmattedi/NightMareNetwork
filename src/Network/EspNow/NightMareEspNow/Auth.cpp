@@ -13,6 +13,7 @@ namespace NightMare::EspNowAuth
         constexpr char LmkLabel[] = "NM-LMK";
         constexpr char PmkLabel[] = "NM-PMK";
         constexpr size_t MaxLabelLength = 8;
+        constexpr size_t MaxNsFieldLength = 1 + MaxNamespaceLength; // length byte + ID
         constexpr size_t Sha256Size = 32;
 
         void putLe64(uint8_t *out, uint64_t value)
@@ -38,20 +39,32 @@ namespace NightMare::EspNowAuth
             return ok;
         }
 
+        // label, then (namespaced only) len(nsId) | nsId. Returns the bytes used.
+        size_t putLabel(uint8_t *out, const char *label, const char *nsId, size_t nsIdLength)
+        {
+            const size_t labelLength = strlen(label);
+            memcpy(out, label, labelLength);
+            size_t used = labelLength;
+            if (nsIdLength > 0)
+            {
+                out[used++] = static_cast<uint8_t>(nsIdLength);
+                memcpy(out + used, nsId, nsIdLength);
+                used += nsIdLength;
+            }
+            return used;
+        }
+
         bool derive(const char *label, const uint8_t *psk, size_t pskLength,
                     const HandshakeContext &context, uint8_t *out, size_t outLength)
         {
-            const size_t labelLength = strlen(label);
-            if (labelLength > MaxLabelLength)
+            if (strlen(label) > MaxLabelLength || context.nsIdLength > MaxNamespaceLength)
             {
                 memset(out, 0, outLength);
                 return false;
             }
 
-            uint8_t message[MaxLabelLength + 2 * MacSize + 2 * 8];
-            size_t used = 0;
-            memcpy(message + used, label, labelLength);
-            used += labelLength;
+            uint8_t message[MaxLabelLength + MaxNsFieldLength + 2 * MacSize + 2 * 8];
+            size_t used = putLabel(message, label, context.nsId, context.nsIdLength);
             memcpy(message + used, context.clientMac, MacSize);
             used += MacSize;
             memcpy(message + used, context.gatewayMac, MacSize);
@@ -79,10 +92,52 @@ namespace NightMare::EspNowAuth
         return derive(LmkLabel, psk, pskLength, context, out, LmkSize);
     }
 
+    bool setNamespace(HandshakeContext &context, const char *nsId, size_t nsIdLength)
+    {
+        context.nsIdLength = 0;
+        memset(context.nsId, 0, sizeof(context.nsId));
+        if (nsId == nullptr || nsIdLength == 0)
+            return true;
+        if (nsIdLength > MaxNamespaceLength)
+            return false;
+        memcpy(context.nsId, nsId, nsIdLength);
+        context.nsIdLength = static_cast<uint8_t>(nsIdLength);
+        return true;
+    }
+
     bool networkPmk(const uint8_t *psk, size_t pskLength, uint8_t out[PmkSize])
     {
-        return hmacTruncated(psk, pskLength, reinterpret_cast<const uint8_t *>(PmkLabel),
-                             strlen(PmkLabel), out, PmkSize);
+        return networkPmk(psk, pskLength, nullptr, 0, out);
+    }
+
+    bool networkPmk(const uint8_t *psk, size_t pskLength, const char *nsId, size_t nsIdLength,
+                    uint8_t out[PmkSize])
+    {
+        if (nsId == nullptr)
+            nsIdLength = 0;
+        if (nsIdLength > MaxNamespaceLength)
+        {
+            memset(out, 0, PmkSize);
+            return false;
+        }
+        uint8_t message[MaxLabelLength + MaxNsFieldLength];
+        const size_t used = putLabel(message, PmkLabel, nsId, nsIdLength);
+        return hmacTruncated(psk, pskLength, message, used, out, PmkSize);
+    }
+
+    uint32_t namespaceTag(const char *nsId, size_t nsIdLength)
+    {
+        if (nsId == nullptr || nsIdLength == 0)
+            return 0;
+        uint8_t digest[Sha256Size];
+        const mbedtls_md_info_t *sha256 = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+        if (sha256 == nullptr ||
+            mbedtls_md(sha256, reinterpret_cast<const uint8_t *>(nsId), nsIdLength, digest) != 0)
+            return 0;
+        uint32_t tag = 0;
+        for (size_t i = 0; i < 4; ++i) // digest[0] is the low byte: wire bytes = digest bytes
+            tag |= static_cast<uint32_t>(digest[i]) << (8 * i);
+        return tag;
     }
 
     bool constantTimeEqual(const uint8_t *a, const uint8_t *b, size_t length)
