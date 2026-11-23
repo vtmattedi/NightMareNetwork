@@ -89,14 +89,25 @@ connections stay usable by the application:
 ```cpp
 NightMare::Subscribe("Control/forecast");               // follows the transport
 NightMare::SubscribeOn(NightMare::ConnectionType::MQTT, // stays on MQTT
-                       "stackport/+/status");
+                       "+/status");
 NightMare::PublishTextOn(NightMare::ConnectionType::MQTT, "pc/cmd", "sleep");
+NightMare::SubscribeGlobal("stackport/+/status");       // outside the namespace
+NightMare::PublishGlobal("stackport/pc/cmd", payload, length);
 ```
+
+Topics given to `Subscribe()`, `SubscribeOn()` and `Publish*` are namespace-relative: the
+MQTT client adds `<root>/<ns>/` (see [topics](../protocols/topics.md#namespace-prefix)).
+The `*Global()` calls take absolute topics and are not prefixed.
 
 - `Subscribe()` keeps the application's transport filter set and installs it
   on every connect and transport change.
 - `SubscribeOn()` keeps a filter set per connection and installs it on every
   session of that connection, whichever connection is the transport.
+- `SubscribeGlobal()`, `UnsubscribeGlobal()` and `PublishGlobal()` use an absolute topic on
+  the MQTT connection, whichever connection is the transport. They return `false` without
+  MQTT (ESP-NOW has no global access). Matching messages reach `OnMessage()` with the
+  absolute topic and `source == MQTT`; see
+  [Global topics](../protocols/topics.md#global-topics-outside-the-namespace).
 - `PublishOn()` publishes on one connection; it fails while that connection is
   not connected. `ConnectionUp()` reports that.
 

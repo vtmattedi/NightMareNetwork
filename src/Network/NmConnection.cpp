@@ -11,6 +11,7 @@
 #include <Core/ResourcesManager.h>
 #include <Core/SystemState.h>
 #include <Core/TopicFilter.h>
+#include <Core/TopicNamespace.h>
 #include <Network/NmMessageRouter.h>
 #include <Network/Connectivity.h>
 #include <Network/GatewayCandidate.h>
@@ -84,6 +85,8 @@ namespace NightMare
         std::vector<std::string> transportFilters;
         std::vector<std::string> mqttFilters;
         std::vector<std::string> espNowFilters;
+        // Absolute filters (SubscribeGlobal): MQTT only, installed on every MQTT connect.
+        std::vector<std::string> globalFilters;
 
         bool ensureFilterMutex()
         {
@@ -776,6 +779,53 @@ namespace NightMare
         return true;
     }
 
+    bool SubscribeGlobal(const char *topicFilter)
+    {
+#if NM_ENABLE_MQTT
+        if (!ValidTopicFilter(topicFilter))
+            return false;
+        const int added = addFilter(globalFilters, topicFilter);
+        if (added < 0)
+            return false;
+        if (added > 0 && connectionConnected(ConnectionType::MQTT))
+            NmMqttConnection::subscribeGlobal(topicFilter);
+        return true;
+#else
+        (void)topicFilter;
+        return false;
+#endif
+    }
+
+    bool UnsubscribeGlobal(const char *topicFilter)
+    {
+#if NM_ENABLE_MQTT
+        if (!ValidTopicFilter(topicFilter))
+            return false;
+        if (removeFilter(globalFilters, topicFilter) && connectionConnected(ConnectionType::MQTT))
+            NmMqttConnection::unsubscribeGlobal(topicFilter);
+        return true;
+#else
+        (void)topicFilter;
+        return false;
+#endif
+    }
+
+    bool PublishGlobal(const char *topic, const uint8_t *payload, size_t length, bool retained)
+    {
+#if NM_ENABLE_MQTT
+        if (topic == nullptr || topic[0] == '\0' || (payload == nullptr && length != 0) ||
+            !connectionConnected(ConnectionType::MQTT))
+            return false;
+        return NmMqttConnection::publishGlobal(topic, payload, length, retained);
+#else
+        (void)topic;
+        (void)payload;
+        (void)length;
+        (void)retained;
+        return false;
+#endif
+    }
+
     void OnConnect(ConnectHandler handler)
     {
         applicationConnectHandler.store(handler);
@@ -976,6 +1026,13 @@ namespace NightMare
         // whichever connection is the transport.
         if (std::vector<std::string> *table = connectionFilters(connection))
             installFilters(connection, copyFilters(*table));
+#if NM_ENABLE_MQTT
+        if (connection == ConnectionType::MQTT)
+            for (const std::string &filter : copyFilters(globalFilters))
+                if (!NmMqttConnection::subscribeGlobal(filter.c_str()))
+                    LOG_WARNING("NET", "Global subscription %s on MQTT was not accepted",
+                                filter.c_str());
+#endif
         reevaluateRouting();
     }
 
@@ -1003,11 +1060,30 @@ namespace NightMare
         // connection gets through. Filters left over from when it was the
         // transport do not.
         const std::vector<std::string> *table = connectionFilters(source);
-        if (table == nullptr || !anyFilterMatches(*table, topic))
+        // An empty namespace strips nothing, so a global filter's messages arrive
+        // here as ordinary MQTT messages; they still belong to the application.
+        if (table == nullptr ||
+            !(anyFilterMatches(*table, topic) ||
+              (source == ConnectionType::MQTT && anyFilterMatches(globalFilters, topic))))
             return;
         const ReceivedMessage message = {topic.c_str(),
                                          reinterpret_cast<const uint8_t *>(payload.c_str()),
                                          payload.length(), retained, source, false};
+        emitMessage(message);
+    }
+
+    void OnGlobalMessageIngress(const std::string &topic, const std::string &payload, bool retained)
+    {
+        if (!anyFilterMatches(globalFilters, topic))
+        {
+            TopicNamespace::noteForeignDropped();
+            return;
+        }
+        const ReceivedMessage message = {topic.c_str(),
+                                         reinterpret_cast<const uint8_t *>(payload.c_str()),
+                                         payload.length(), retained, ConnectionType::MQTT,
+                                         selectedConnection == ConnectionType::MQTT &&
+                                             transportConnected()};
         emitMessage(message);
     }
 

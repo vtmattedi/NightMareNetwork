@@ -4,6 +4,7 @@
 #include "mqtt_client.h"
 #include "mqtt5_client.h"
 #include <Core/Logs.h>
+#include <Core/TopicNamespace.h>
 #include "esp_heap_caps.h"
 #include "esp_wifi.h"
 #include <atomic>
@@ -297,6 +298,8 @@ bool mqtt_wifiDumpOnDisconnect(void) { return s_wifiDumpOnDisconnect.load(); }
 // Reassembly of a multi-event payload. Only ever touched by the esp-mqtt task.
 static NightMare::Message s_partial;
 static bool s_partialActive = false;
+// The message being reassembled is outside the namespace: its fragments are skipped.
+static bool s_partialForeign = false;
 
 static void subscribeToEverything(esp_mqtt_client_handle_t client)
 {
@@ -313,7 +316,10 @@ static void subscribeToEverything(esp_mqtt_client_handle_t client)
         return;
     }
 
-    esp_mqtt_client_subscribe(client, "#", 1);
+    // Everything under this gateway's namespace, children's traffic included. With an
+    // empty namespace the prefix is empty and this is the legacy "#".
+    const std::string filter = NightMare::TopicNamespace::applyFilterPrefix("#");
+    esp_mqtt_client_subscribe(client, filter.c_str(), 1);
 }
 
 // Waits for a free slot in the broker's receive window, then publishes. False
@@ -340,8 +346,18 @@ static int publish_paced_id(esp_mqtt_client_handle_t client, const NightMare::Me
     if (waitedMs > s_paceWaitMaxMs.load())
         s_paceWaitMaxMs.store(waitedMs);
 
+    // Topics inside the library are namespace-relative; the prefix goes on here, for the
+    // gateway's own topics and for its children's alike.
+    const std::string fullTopic = NightMare::TopicNamespace::applyPrefix(message.topic);
+    if (!NightMare::TopicNamespace::fitsMqttLimit(fullTopic.size()))
+    {
+        LOG_WARNING(TAG, "dropped a publish: topic '%s' is %u characters with the namespace prefix",
+                    message.topic.c_str(), (unsigned)fullTopic.size());
+        return -1;
+    }
+
     s_inflight.fetch_add(1); // before publishing: the ack can beat us back here
-    const int msgId = esp_mqtt_client_publish(client, message.topic.c_str(),
+    const int msgId = esp_mqtt_client_publish(client, fullTopic.c_str(),
                                               reinterpret_cast<const char *>(message.payload.data()),
                                               (int)message.payload.size(), 1, message.persistent);
     if (msgId < 0)
@@ -593,7 +609,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         {
             s_partial = NightMare::Message();
             s_partial.direction = NightMare::Direction::REMOTE_TO_LOCAL;
-            s_partial.topic.assign(event->topic, event->topic_len);
+            s_partialForeign = false;
+            // The library works with relative topics: strip <root>/<ns>/ here. A message
+            // outside the namespace is dropped and counted.
+            if (!NightMare::TopicNamespace::stripPrefix(std::string_view(event->topic, event->topic_len),
+                                                        s_partial.topic))
+            {
+                NightMare::TopicNamespace::noteForeignDropped();
+                s_partialForeign = true;
+                s_partialActive = false;
+                s_partial = NightMare::Message();
+                break;
+            }
             s_partial.persistent = event->retain;
             s_partial.payload.reserve(event->total_data_len);
             s_partialActive = true;
@@ -601,6 +628,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 HW_TRACE("mqtt rx start '%s' total=%d B retain=%d (arrives in fragments)", s_partial.topic.c_str(),
                          event->total_data_len, (int)event->retain);
         }
+        if (s_partialForeign)
+            break; // a fragment of a message outside the namespace
         if (!s_partialActive)
         {
             LOG_WARNING(TAG, "dropped %d B of a message joined mid-way (offset %d of %d)", event->data_len,
@@ -735,7 +764,7 @@ void mqtt_init(void)
     s_brokerPort = (uint16_t)config.broker.address.port;
     config.session.protocol_ver = MQTT_PROTOCOL_V_5; // no_local is an MQTT 5 subscription option
     config.session.keepalive = 60;
-    const std::string willTopic = GatewayState::statusTopic();
+    const std::string willTopic = NightMare::TopicNamespace::applyPrefix(GatewayState::statusTopic());
     const std::string willPayload = GatewayState::statusJson(false);
     config.session.last_will.topic = willTopic.c_str();
     config.session.last_will.msg = willPayload.c_str();

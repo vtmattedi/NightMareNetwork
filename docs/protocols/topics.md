@@ -9,13 +9,44 @@ order: 10
 
 NightMare Network uses MQTT topics as a small wire protocol. Topic names are case-sensitive.
 
-The current protocol is device-rooted:
+On the broker every topic sits under a namespace prefix:
 
 ```text
-<device>/...
+<root>/<namespace>/<device>/...     e.g. nm/home/Esp32-nm-c4d2e801/status
 ```
 
-Namespace is not yet encoded into the topic address.
+`<root>` is the topic root (default `nm`) and `<namespace>` the namespace ID; both are
+settings (see [identity](../modules/identity.md#namespace-and-topic-root) and the
+[namespace design](../architecture/namespaces.md)). Everything below the prefix is the
+protocol described on this page, unchanged. **Every topic on this page, and every topic in
+the library and in application code, is namespace-relative** (`<device>/status`,
+`Control/time`, `all/console/in`). The prefix is added only at the MQTT client boundary
+and removed again on receive, so ESP-NOW children never see it and keep the full 63-byte
+topic budget.
+
+### Namespace prefix
+
+The device's MQTT client (`NmMqttEsp.cpp`) and the gateway's MQTT client (`espMqtt.cpp`)
+share one helper, `Core/TopicNamespace.h`:
+
+- **publish, subscribe, unsubscribe, the Last Will and the retained publications**: put
+  `<root>/<ns>/` in front. A filter keeps its wildcards: `+/status` becomes
+  `nm/home/+/status`, `#` becomes `nm/home/#`.
+- **receive**: strip the prefix. A message under it reaches the library as a relative
+  topic. A message outside it is not a NightMare topic: it is delivered only when it
+  matches a global filter (below) and is otherwise dropped and counted
+  (`NightMare::TopicNamespace::foreignDroppedCount()`, plus a debug log line).
+- `Control/request`, `Control/time` and `all/console/in` are relative, therefore namespaced:
+  `nm/home/Control/time`, `nm/home/all/console/in`.
+- The gateway publishes its children's relative topics through its MQTT client, so it adds
+  the prefix on the way up and strips it on the way down. It subscribes to
+  `<root>/<ns>/#` instead of `#`, so it sees only its own namespace.
+- The 192-character limit applies to the **full** topic, prefix included. The prefix costs
+  `len(root) + len(ns) + 2` bytes (at most 34). A publish, subscribe or Last Will whose
+  full topic is longer is refused.
+- **Legacy.** An empty namespace (`NM_NAMESPACE ""`, or `NAMESPACE -`) means no prefix.
+  Every function above is then the identity and the wire is byte-for-byte what it was
+  before namespaces. It exists for migration only.
 
 ## Device-name rules
 
@@ -322,10 +353,37 @@ framework route are delivered to the handler registered with
 every gateway `status` and `gateway/network` document, are delivered there
 too, also when the framework read them.
 
+### Global topics (outside the namespace)
+
+A topic that is not part of NightMare, such as the Stackport bridge or host state, must
+not receive the prefix. Three calls take an **absolute** topic and bypass it:
+
+```cpp
+NightMare::SubscribeGlobal("stackport/+/status");
+NightMare::PublishGlobal("stackport/pc/cmd", payload, length, false);
+NightMare::UnsubscribeGlobal("stackport/+/status");
+```
+
+- They address the MQTT connection directly, whichever connection is the transport.
+  `SubscribeGlobal()` keeps the filter and installs it on every MQTT connect.
+- The broker ACL must allow the topic; the namespace role `nm/<ns>/#` does not cover it.
+- ESP-NOW children have no global access. On a build without MQTT (ESP-NOW only, or a
+  gateway's children) all three return `false`. `PublishGlobal()` also returns `false`
+  while MQTT is not connected.
+- **Receive rule.** For each message the MQTT client receives: if it is under
+  `<root>/<ns>/` it is stripped and handled as a namespaced message; otherwise it is
+  delivered to `OnMessage()` with its absolute topic (`source == MQTT`, never stripped,
+  never offered to the framework routes) if it matches a `SubscribeGlobal()` filter;
+  otherwise it is dropped and counted. A global filter that overlaps the namespace
+  prefix is therefore treated as namespaced for the overlapping topics.
+- With an empty namespace nothing is stripped, so global messages arrive as ordinary MQTT
+  messages and the three calls behave like plain MQTT calls.
+- The gateway (`NM_ENABLE_GATEWAY`) has no application API for global topics.
+
 The connection boundary validates:
 
 ```text
-topic filter length: 192 characters
+topic filter length: 192 characters (the full topic, namespace prefix included, on MQTT)
 ```
 
 NightMare validates MQTT wildcard placement for `+` and `#`.

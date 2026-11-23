@@ -14,6 +14,11 @@ bool publish(const char *topic, const uint8_t *payload, size_t length,
              bool retained = false);
 bool subscribe(const char *topicFilter);
 bool unsubscribe(const char *topicFilter);
+// Absolute topics: not prefixed with <root>/<ns>/ (NightMare::*Global()).
+bool publishGlobal(const char *topic, const uint8_t *payload, size_t length,
+                   bool retained = false);
+bool subscribeGlobal(const char *topicFilter);
+bool unsubscribeGlobal(const char *topicFilter);
 int8_t state();
 bool enabled();
 NightMare::ConnectivityState connectivityState();

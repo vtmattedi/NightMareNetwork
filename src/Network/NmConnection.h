@@ -107,6 +107,21 @@ bool PublishText(const std::string &topic, const std::string &payload, bool reta
 // on the next connect.
 bool Subscribe(const char *topicFilter);
 bool Unsubscribe(const char *topicFilter);
+// Global (absolute) topics: the escape from the namespace prefix, for topics outside
+// NightMare such as a bridge or host-state topic. The topic or filter is used exactly
+// as given (no <root>/<ns>/), is validated at its full length, and the broker ACL must
+// allow it. They address the MQTT connection directly, whichever connection is the
+// transport, so they work only in a build with MQTT and return false otherwise. An
+// ESP-NOW-only device, and the children of a gateway, have no global access.
+// SubscribeGlobal() keeps the filter and installs it on every MQTT connect (it does
+// not follow the transport); it returns false only for an invalid filter, a full table
+// (NM_MAX_APP_SUBSCRIPTIONS) or a build without MQTT. A matching message reaches
+// OnMessage() with its absolute topic, never stripped, and source == MQTT.
+// PublishGlobal() returns false while MQTT is not connected.
+bool SubscribeGlobal(const char *topicFilter);
+bool UnsubscribeGlobal(const char *topicFilter);
+bool PublishGlobal(const char *topic, const uint8_t *payload, size_t length,
+                   bool retained = false);
 // Runs after the framework and the Subscribe() filters are installed, on every
 // connect of the transport and every transport change.
 void OnConnect(ConnectHandler handler);
