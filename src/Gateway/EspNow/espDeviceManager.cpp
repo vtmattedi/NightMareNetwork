@@ -125,6 +125,7 @@ espDeviceManager::PendingHandshake *espDeviceManager::beginHandshake(const MacAd
     }
     slot->active = true;
     slot->mac = mac;
+    slot->clientMac = mac; // the caller overrides it for a protocol 1 CONNECT
     slot->clientNonce = clientNonce;
     slot->gatewayNonce = gatewayNonce;
     slot->capabilities = capabilities;

@@ -7,15 +7,24 @@ order: 46
 
 # ESP-NOW connection protocol
 
-Status: **pre-v1**. NM protocol version `0`. No compatibility with the earlier
-(unversioned-session) ESP-NOW frames: an old device and a new gateway ignore
-each other.
+Status: **pre-freeze**. Two NM protocol versions exist and a node speaks exactly
+one of them:
+
+| NM protocol | Spoken by | Handshake |
+|---:|---|---|
+| `0` | a node with an **empty** namespace (legacy) | the original handshake, unchanged |
+| `1` | a node with a **namespace** | the namespaced handshake ([below](#namespaced-handshake-nm-protocol-1)) |
+
+There is no negotiation and no fallback: a namespace migrates as a whole, its
+gateway and its devices flashed together. No compatibility with the earlier
+(unversioned-session) ESP-NOW frames either.
 
 This is the contract between a NightMareNetwork device (`Network/EspNow/`) and
 the Nightmare Gateway. The wire definitions live in
 `Network/EspNow/NightMareEspNow/Frame.*` and the handshake crypto in
-`NightMareEspNow/Auth.*`. The gateway carries byte-identical copies of those
-four files; change them together.
+`NightMareEspNow/Auth.*`. There is one copy of those four files: the gateway
+(Holmes) consumes them through its `nightmarenetwork` submodule, so a change
+here reaches both ends once the consumers are bumped.
 
 Scope: connection, authentication, session identity and link encryption. What
 travels inside a session (topics, retained flag, last will) is unchanged, and
@@ -41,15 +50,18 @@ travels inside a session (topics, retained flag, last will) is unchanged, and
   payload (240 data bytes per frame). `V2 = 1` is the 1470-byte payload. V2 is
   reserved as a capability only: nothing sends it and it is rejected on
   receipt.
-- NM protocol: `0` is this pre-v1 contract. It is not "v1" and stays `0` until
-  an explicit freeze.
+- NM protocol: `0` is the legacy contract (empty namespace), `1` the namespaced
+  handshake. The version byte of a v0 frame is `0x00`, of a v1 frame `0x01`.
+  A node validates against its own version only (`activeProtocolVersion()`,
+  set once at init from the namespace): a frame of the other version fails
+  `validateFrame()` as `UNSUPPORTED_PROTOCOL`.
 
 ## Frame types
 
 | Value | Type        | Direction | cid | Data | Encrypted |
 |------:|-------------|-----------|-----|------|-----------|
 | 0  | BEACON      | gateway → broadcast | 0 | `[count][EspNowFrameVersion…][idLength][gatewayId][bootGeneration:8]` | no |
-| 1  | CONNECT     | client → broadcast  | 0 | `ConnectPayload` (10) | no |
+| 1  | CONNECT     | client → broadcast  | 0 | v0: `ConnectPayload` (10). v1: `ConnectPayloadV1` (20) | no |
 | 2  | CHALLENGE   | gateway → client    | 0 | `ChallengePayload` (8) | no |
 | 3  | AUTH        | client → gateway    | 0 | `AuthPayload` (16) | no |
 | 4  | CONNACK     | gateway → client    | new cid | `ConnAckPayload` (6) | no |
@@ -70,7 +82,7 @@ echoes AUTH, PONG echoes PING, and ACK/ERROR echo the frame they answer.
 (`validateFrame()`):
 
 - at least a header, and `length` equal to the bytes that follow it;
-- V1 framing and NM protocol `0`;
+- V1 framing and the node's own NM protocol (`0` legacy, `1` namespaced);
 - a known type;
 - `totalFrames ≠ 0`, `frameIndex < totalFrames`, and only MESSAGE may be
   fragmented;
@@ -141,8 +153,8 @@ Then one of two things happens:
 
 No reconnect proof or session resumption guards against the pause before v1.
 
-**Auth proof and session key.** Both are HMAC-SHA256 keyed with the network
-PSK and truncated to 16 bytes. They are computed over:
+**Auth proof and session key (NM protocol 0).** Both are HMAC-SHA256 keyed with
+the network PSK and truncated to 16 bytes. They are computed over:
 
 ```
 label | clientMac(6) | gatewayMac(6) | clientNonce(8, LE) | gatewayNonce(8, LE)
@@ -166,6 +178,78 @@ PMK = first16(HMAC-SHA256(PSK, "NM-PMK"))
 It is the same on every node of the network and is wiped after
 `esp_now_set_pmk()`. The three labels `NM-AUTH`, `NM-LMK` and `NM-PMK` keep the
 proof and the two keys independent of each other.
+
+### Namespaced handshake (NM protocol 1)
+
+Spoken by every node whose namespace is non-empty (`NightMare::Namespace()`,
+see [namespaces](../architecture/namespaces.md)). The frame flow is the v0 flow;
+what changes is CONNECT and every derivation.
+
+**Key.** One ESP-NOW key per namespace. `NM_ESPNOW_PSK` stays the key source,
+with the same format and limits (16 to 64 bytes). The key itself is not
+derived from anything.
+
+**CONNECT payload** (`ConnectPayloadV1`, 20 bytes, packed, little-endian):
+
+| Offset | Field | Type | Meaning |
+|-------:|-------|------|---------|
+| 0  | `clientNonce`  | `uint64_t` | Fresh from the hardware RNG, as in v0. |
+| 8  | `capabilities` | `uint16_t` | As in v0 (none defined). |
+| 10 | `nsTag`        | `uint32_t` | First 4 bytes of `SHA-256(nsId)`. The wire bytes are the digest bytes verbatim, so the value is the digest read little-endian (`"home"` → bytes `4E A1 40 58`, value `0x5840A14E`). |
+| 14 | `clientMac`    | `uint8_t[6]` | The MAC the proof and LMK bind to. |
+
+The v0 CONNECT is the first 10 bytes only. The size is checked per version, so
+a 10-byte CONNECT is `BAD_PAYLOAD` at v1 and the reverse.
+
+**Derivations.** `nsId` is the namespace ID bytes, written **length-prefixed**
+(`1` length byte, then the ID, 1 to 16 bytes of `[a-z0-9-]`) so it cannot run
+into the label or the fields that follow:
+
+```
+PMK   = first16(HMAC-SHA256(key, "NM-PMK"  | len | nsId))
+proof = first16(HMAC-SHA256(key, "NM-AUTH" | len | nsId | clientMac | gatewayMac | clientNonce | gatewayNonce))
+LMK   = first16(HMAC-SHA256(key, "NM-LMK"  | len | nsId | clientMac | gatewayMac | clientNonce | gatewayNonce))
+```
+
+MACs are raw 6 bytes, nonces 8 bytes little-endian. Binding the ID makes a
+proof made in one namespace unverifiable in another, even if two namespaces
+were given the same key. The ESP-NOW PMK is radio-global, so each side computes
+it once at init from its namespace, right after `esp_now_init()`. With an empty
+namespace nothing is inserted at all (no length byte): the v0 inputs, and so the
+v0 proof, LMK and PMK, are byte for byte what they were before namespaces
+existed. Known-answer vectors for both are in `tests/vectors/espnow_vectors.py`
+(reference implementation) and `tests/pio_smoke_core/src/EspNowVectors.h`.
+
+**`clientMac` rule.** The proof and LMK use the `clientMac` **field** of CONNECT,
+not the radio sender address. Until relays exist (see
+[namespaces](../architecture/namespaces.md#4-relay-preparation-r1-not-built-yet))
+the gateway **rejects a CONNECT whose `clientMac` differs from the radio sender
+MAC**: it logs a warning and sends nothing (no CHALLENGE, no ERROR), because it
+would have to add a peer for an address it has not vetted just to answer. Relay
+support will relax this rule explicitly; nothing else in the handshake needs to
+change for it. The session table is still keyed by the sender MAC.
+
+**`nsTag`.** A gateway whose namespace differs ignores a v1 CONNECT with a
+foreign `nsTag` at once: no handshake state, no reply. This keeps neighbouring
+namespaces from producing auth-failure noise. It is a hint, not a security
+boundary: the proof is, and it binds the full `nsId`.
+
+### Version policy
+
+A node speaks one NM protocol, chosen at init from its namespace.
+
+| Gateway \ device | v0 CONNECT (legacy device) | v1 CONNECT (namespaced device) |
+|---|---|---|
+| **legacy gateway** (empty namespace) | normal v0 handshake | dropped as `UNSUPPORTED_PROTOCOL`. Silent unless the sender holds a live session on this gateway, in which case it gets `ERROR UNSUPPORTED_VERSION`. |
+| **namespaced gateway** | dropped, same rule (silent unless the sender holds a live session) | handshake if `nsTag` matches the gateway's namespace and `clientMac` equals the sender; otherwise silently ignored |
+
+Beacons follow the same rule: a node drops a BEACON of the other version. The
+device rate-limits (30 s) one warning for it: `BEACON from <mac> speaks NM
+protocol N but this device speaks M`. The sender of a CONNECT that gets no
+answer sees `no CHALLENGE` on a namespaced device, with the hint that the
+namespace or the protocol differs. That is distinct from `AUTH_FAILED`, which
+the gateway only sends after it chose to answer, so it always means the key
+differs.
 
 **Encryption.** After CONNACK, both ends switch the peer to `encrypt = true`
 with the LMK (`esp_now_mod_peer`). The gateway sends CONNACK first, then
@@ -233,8 +317,8 @@ a new session reaches CONNECTED. None of this state rides in CONNECT.
 
 | Code | Name | Sent when |
 |-----:|------|-----------|
-| 1 | AUTH_FAILED | The AUTH proof does not verify (different PSK). The client backs off 10 s. |
-| 2 | UNSUPPORTED_VERSION | A session peer sent a framing or protocol version the gateway does not run. |
+| 1 | AUTH_FAILED | The AUTH proof does not verify (different key). The client backs off 10 s. |
+| 2 | UNSUPPORTED_VERSION | A session peer sent a framing or protocol version the gateway does not run. A sender without a session is never answered. |
 | 3 | INVALID_SESSION | The cid does not match the sender's session. |
 | 4 | INVALID_FRAME | A session peer sent a frame that failed validation. |
 | 5 | NOT_CONNECTED | Session traffic arrived before the session was secured. |
@@ -244,7 +328,11 @@ Error payloads never carry secret-derived material.
 
 ## Configuration
 
-- **Network key.** 16 to 64 bytes, the same on the gateway and every device.
+- **Namespace.** `NM_NAMESPACE` / the `NAMESPACE` command. Empty runs NM
+  protocol 0, anything else protocol 1. Read once at start; a change needs a
+  reboot. The gateway and every device of an installation must agree.
+- **Network key.** 16 to 64 bytes, the same on the gateway and every device of
+  one namespace (one key per namespace).
   - Device: `NM_ESPNOW_PSK` in the project's `creds.h` (gitignored). A build
     with `NM_NETWORK_ESPNOW` fails without it.
   - Gateway: the application passes the key in
@@ -290,8 +378,18 @@ The radio-level behaviour needs a gateway and a device. Checklist:
    `authenticated as session N, securing` and then `connected ... session N`.
    The gateway shows `Session N (...) secured and connected`.
 2. **Wrong PSK.** Change the device's `NM_ESPNOW_PSK`. The gateway logs
-   `AUTH ... failed`, the device logs `NM_ESPNOW_PSK differs` and backs off, and
-   no session appears in the gateway's device list.
+   `AUTH ... failed`, the device logs `AUTH_FAILED ... NM_ESPNOW_PSK differs`
+   and backs off, and no session appears in the gateway's device list.
+2a. **Wrong namespace.** Give the device another namespace than the gateway.
+   The gateway logs nothing for the CONNECT (it is ignored). The device logs
+   `no CHALLENGE: no answer from the gateway; wrong namespace or it is not
+   running NM protocol 1`, never `AUTH_FAILED`.
+2b. **Legacy against namespaced.** A legacy gateway next to a namespaced device
+   (or the reverse) never completes a handshake: the device logs `BEACON ...
+   speaks NM protocol N but this device speaks M` every 30 s at most.
+2c. **Spoofed clientMac.** A v1 CONNECT whose `clientMac` is not its sender
+   gets `CONNECT from <mac> claims another clientMac, ignored` on the gateway
+   and no reply.
 3. **Reconnect restoration.** After connecting, the gateway logs the last will
    and every subscription restored by `NmConnection` for the new session,
    without any application action.

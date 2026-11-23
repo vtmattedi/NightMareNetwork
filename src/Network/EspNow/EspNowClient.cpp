@@ -5,6 +5,7 @@
 #include "NightMareEspNow/Auth.h"
 #include "NightMareEspNow/Frame.h"
 #include "Core/Logs.h"
+#include "Core/DeviceIdentity.h"
 #include <esp_now.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
@@ -52,6 +53,14 @@ namespace NightMare::EspNowClient
         constexpr uint8_t BroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
         constexpr uint8_t Psk[] = NM_ESPNOW_PSK;
         constexpr size_t PskLength = sizeof(Psk) - 1; // not the terminator
+
+        // This device's namespace, copied in begin() (empty = legacy, NM protocol 0;
+        // otherwise protocol 1). A change takes effect after a restart.
+        char nsId[Auth::MaxNamespaceLength + 1] = {}; // NUL-terminated for logging
+        size_t nsIdLength = 0;
+        uint32_t nsTag = 0;
+        // How long the log stays quiet about a gateway on the other protocol.
+        constexpr uint32_t OtherProtocolLogMs = 30000;
 
         // `lock` (spinlock, tiny critical sections only) guards what the API and
         // the receive callback read: state, gateway, cid, rtt, message ids, callbacks.
@@ -149,6 +158,7 @@ namespace NightMare::EspNowClient
         {
             MessageIgnored, // value: 1 = not our gateway, 0 = not our session
             QueueFull,
+            OtherProtocol, // value: the NM protocol the sender speaks
         };
 
         struct RxEvent
@@ -200,6 +210,20 @@ namespace NightMare::EspNowClient
                 LOG_WARNING(TagRx, "%s #%u from %s dropped: client queue full", type, e.messageId,
                             from.text);
                 break;
+            case RxNote::OtherProtocol:
+            {
+                static uint32_t lastLogMs = 0;
+                const uint32_t nowMs = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                if (lastLogMs != 0 && nowMs - lastLogMs < OtherProtocolLogMs)
+                    break;
+                lastLogMs = nowMs == 0 ? 1 : nowMs;
+                LOG_WARNING(TagRx,
+                            "%s from %s speaks NM protocol %d but this device speaks %u (namespace '%s'): "
+                            "gateway and device must use the same namespace setting",
+                            type, from.text, static_cast<int>(e.value), activeProtocolVersion(),
+                            nsIdLength > 0 ? nsId : "(legacy)");
+                break;
+            }
             }
         }
 
@@ -589,6 +613,16 @@ namespace NightMare::EspNowClient
         {
             hs.clientNonce = Auth::freshNonce();
             hs.connectId = newMessageId();
+            if (nsIdLength > 0)
+            {
+                ConnectPayloadV1 connect{};
+                connect.clientNonce = hs.clientNonce;
+                connect.capabilities = 0;
+                connect.nsTag = nsTag;
+                memcpy(connect.clientMac, hs.selfMac, 6);
+                sendTo(BroadcastMac, FrameType::CONNECT, hs.connectId, 0, &connect, sizeof(connect));
+                return;
+            }
             const ConnectPayload connect{hs.clientNonce, 0};
             sendTo(BroadcastMac, FrameType::CONNECT, hs.connectId, 0, &connect, sizeof(connect));
         }
@@ -648,7 +682,8 @@ namespace NightMare::EspNowClient
         Auth::HandshakeContext handshakeContext(const uint8_t *gateway)
         {
             Auth::HandshakeContext context{};
-            memcpy(context.clientMac, hs.selfMac, 6);
+            Auth::setNamespace(context, nsId, nsIdLength);
+            memcpy(context.clientMac, hs.selfMac, 6); // the CONNECT's clientMac field
             memcpy(context.gatewayMac, gateway, 6);
             context.clientNonce = hs.clientNonce;
             context.gatewayNonce = hs.gatewayNonce;
@@ -767,11 +802,17 @@ namespace NightMare::EspNowClient
             case ErrorCode::AUTH_FAILED:
                 if (now != State::AUTHENTICATING)
                     return;
-                LOG_ERROR(TagLink, "gateway rejected our AUTH: NM_ESPNOW_PSK differs from the gateway's");
+                // The gateway answered, so it is in our namespace (or legacy on both
+                // sides) and the proof is what failed: a different key.
+                LOG_ERROR(TagLink, "gateway rejected our AUTH (AUTH_FAILED): NM_ESPNOW_PSK differs from "
+                                   "the gateway's key for namespace '%s'",
+                          nsIdLength > 0 ? nsId : "(legacy)");
                 enterSearching(RejectedBackoffMs);
                 return;
             case ErrorCode::UNSUPPORTED_VERSION:
-                LOG_ERROR(TagLink, "gateway does not speak NM protocol %u", NM_PROTOCOL_VERSION);
+                LOG_ERROR(TagLink, "gateway does not speak NM protocol %u (namespace '%s'): flash the "
+                                   "gateway and its devices with the same namespace setting",
+                          activeProtocolVersion(), nsIdLength > 0 ? nsId : "(legacy)");
                 enterSearching(RejectedBackoffMs);
                 return;
             case ErrorCode::INVALID_SESSION:
@@ -872,7 +913,12 @@ namespace NightMare::EspNowClient
                 return;
             }
             case State::CONNECTING:
-                handshakeFailed("no CHALLENGE");
+                // No answer at all is not AUTH_FAILED: a gateway of another
+                // namespace or protocol stays silent on purpose.
+                handshakeFailed(nsIdLength > 0
+                                    ? "no CHALLENGE: no answer from the gateway; wrong namespace or it is not "
+                                      "running NM protocol 1"
+                                    : "no CHALLENGE");
                 return;
             case State::AUTHENTICATING:
                 handshakeFailed("no CONNACK");
@@ -969,7 +1015,14 @@ namespace NightMare::EspNowClient
             RxFrame rx;
             const FrameCheck check = decodeFrame(rx.frame, data, static_cast<size_t>(len));
             if (check != FrameCheck::OK)
+            {
+                // A gateway beaconing in the other protocol (legacy vs namespaced) is
+                // the one mismatch worth telling the user about; the rest is noise.
+                if (check == FrameCheck::UNSUPPORTED_PROTOCOL && static_cast<size_t>(len) >= FrameHeaderSize &&
+                    data[3] == static_cast<uint8_t>(FrameType::BEACON))
+                    note(RxNote::OtherProtocol, from, nullptr, rssi, nmProtocolVersion(data[2]));
                 return;
+            }
             const FrameHeader &header = rx.frame.header;
 
             uint8_t gateway[6];
@@ -1085,13 +1138,28 @@ namespace NightMare::EspNowClient
         }
         xQueueReset(controlQueue);
 
+        // Version policy: a namespaced device speaks NM protocol 1 only, a legacy
+        // (empty namespace) one protocol 0 only. Set before the first frame.
+        const std::string &ns = NightMare::Namespace();
+        if (ns.length() > Auth::MaxNamespaceLength)
+        {
+            LOG_ERROR(TagLink, "namespace '%s' is longer than %u characters", ns.c_str(),
+                      static_cast<unsigned>(Auth::MaxNamespaceLength));
+            return false;
+        }
+        memset(nsId, 0, sizeof(nsId));
+        memcpy(nsId, ns.data(), ns.length());
+        nsIdLength = ns.length();
+        nsTag = Auth::namespaceTag(nsId, nsIdLength);
+        setActiveProtocolVersion(nsIdLength > 0 ? NM_PROTOCOL_VERSION_NS : NM_PROTOCOL_VERSION);
+
         hs = Handshake();
         esp_wifi_get_mac(WIFI_IF_STA, hs.selfMac);
         wifi_config_t station = {};
         const bool haveApConfig = esp_wifi_get_config(WIFI_IF_STA, &station) == ESP_OK &&
                                   station.sta.ssid[0] != '\0';
-        LOG(TagLink, "starting on %s, ch %u, protocol %u, lost after %u heartbeats, AP: %s",
-            macText(hs.selfMac).text, currentChannel(), NM_PROTOCOL_VERSION, config.missedBeforeLost,
+        LOG(TagLink, "starting on %s, ch %u, protocol %u, namespace '%s', lost after %u heartbeats, AP: %s",
+            macText(hs.selfMac).text, currentChannel(), activeProtocolVersion(), nsId, config.missedBeforeLost,
             haveApConfig ? reinterpret_cast<const char *>(station.sta.ssid) : "(none)");
 
         if (!ensureRxLog())
@@ -1103,10 +1171,12 @@ namespace NightMare::EspNowClient
             LOG_ERROR(TagLink, "esp_now_init failed: %s", esp_err_to_name(err));
             return false;
         }
-        // The network's PMK, the same one the gateway derives from the PSK, not
-        // Espressif's default. Set before any encrypted peer exists.
+        // The namespace's PMK, the same one the gateway derives from the key and
+        // namespace, not Espressif's default. Radio-global, so set once, here,
+        // before any encrypted peer exists.
         uint8_t pmk[Auth::PmkSize];
-        const bool pmkOk = Auth::networkPmk(Psk, PskLength, pmk) && esp_now_set_pmk(pmk) == ESP_OK;
+        const bool pmkOk = Auth::networkPmk(Psk, PskLength, nsId, nsIdLength, pmk) &&
+                           esp_now_set_pmk(pmk) == ESP_OK;
         Auth::wipe(pmk, sizeof(pmk));
         if (!pmkOk)
         {

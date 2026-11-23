@@ -175,9 +175,46 @@ client nonce
 gateway nonce
 ```
 
+With a namespace (NM protocol 1) the context also contains the namespace ID,
+length-prefixed. See section 1.4a.
+
 Both sides derive the session LMK from the same authenticated context.
 
 The first encrypted PING/PONG exchange confirms that both sides derived and installed the same LMK.
+
+---
+
+## 1.4a Namespace isolation (NM protocol 1)
+
+Added with namespaces ([design](../architecture/namespaces.md), section 3).
+
+- **One key per namespace.** `NM_ESPNOW_PSK` is the key of one namespace. A board
+  of one installation does not hold another's key, so it cannot join that
+  installation's gateway. This closes the shared-key gap: with one key for
+  everything, any board of one home could join any other home's gateway.
+- **The namespace ID is bound into every derivation:** the AUTH proof, the LMK
+  and the radio-global PMK. A proof made in one namespace never verifies in
+  another, even if two keys were accidentally equal or one key were reused.
+- **Wire hint.** CONNECT carries `nsTag`, the first 4 bytes of SHA-256 of the
+  ID. A gateway of another namespace ignores the CONNECT without answering. The
+  tag is public and guessable; it is noise suppression, not a boundary. The
+  proof is the boundary.
+- **Client MAC as a field.** The proof and LMK bind the `clientMac` carried in
+  CONNECT. Until relays exist the gateway rejects a CONNECT whose `clientMac`
+  is not the radio sender address, so a sender cannot have a proof bound to a
+  MAC it does not hold. Relaxing this belongs to the relay design (the relay is
+  a trusted namespace member).
+- **Version split.** Namespaced nodes speak NM protocol 1 only and legacy nodes
+  protocol 0 only; neither answers the other. A downgrade to protocol 0 cannot
+  bypass the namespace binding, because a namespaced gateway drops v0 frames.
+- **Unchanged residual risks:** every holder of the namespace key is trusted
+  inside that namespace, and revoking one board means rotating the namespace
+  key. RF jamming and the unauthenticated-CONNECT pause remain as described
+  below.
+- **Deferred, per-device keys.** Revoking a single board would need
+  `deviceKey = HMAC(nsKey, "NM-DEV" | nsId | clientMac)`, with the gateway
+  deriving it from the CONNECT `clientMac` field. The frames need no change for
+  it. Not built: until then one namespace key serves all its devices.
 
 ---
 
